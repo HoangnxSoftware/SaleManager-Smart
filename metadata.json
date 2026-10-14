@@ -1,0 +1,6 @@
+{
+  "name": "SaleManager-Smart",
+  "description": "Phần mềm quản lý đơn hàng, kho bãi, công nợ và đồng bộ Google Drive / Sheets thông minh đa nền tảng.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
