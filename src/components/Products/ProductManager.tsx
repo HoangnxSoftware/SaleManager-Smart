@@ -153,7 +153,11 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
         conversionRate: Number(r['SL quy đổi'] || 1),
         saleUnit: String(r['ĐVT_Bán'] || 'Cái').trim(),
         category: String(r['Nhóm/loại HH'] || r['Nhóm HH'] || '').trim(),
-        profitMargin: Number(r['Tỷ suất lợi nhuận (%)'] || r['Tỷ suất lợi nhuận'] || 0),
+        profitMargin: (() => {
+          const raw = r['Tỷ suất lợi nhuận (%)'] ?? r['Tỷ suất lợi nhuận'] ?? 0;
+          const clean = typeof raw === 'string' ? parseFloat(raw.replace('%', '').trim()) : Number(raw);
+          return isNaN(clean) ? 0 : clean;
+        })(),
         defaultSalePrice: r['Giá bán mặc định'] || r['Giá bán mặc định (Sau thuế)'] ? Number(r['Giá bán mặc định'] || r['Giá bán mặc định (Sau thuế)']) : undefined,
         priceVariance: r['Biên độ giá'] || r['Biên độ giá (+/-)'] ? Number(r['Biên độ giá'] || r['Biên độ giá (+/-)']) : undefined,
         notes: String(r['Ghi chú'] || ''),
@@ -391,7 +395,11 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                       </td>
                       <td className="p-3 text-center font-medium text-slate-700">{p.saleUnit}</td>
                       <td className="p-3 text-center text-slate-700">{p.vatRate}%</td>
-                      <td className="p-3 text-right bg-indigo-50/40 font-black text-indigo-800">
+                      <td className={`p-3 text-right font-black ${
+                        (p.profitMargin ?? 0) < 0
+                          ? 'bg-rose-50 text-rose-700 font-bold'
+                          : 'bg-indigo-50/40 text-indigo-800'
+                      }`}>
                         {p.profitMargin}%
                       </td>
                       <td className="p-3 text-right bg-blue-50/30 font-bold text-slate-900">

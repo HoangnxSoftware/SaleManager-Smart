@@ -26,7 +26,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   const [conversionRate, setConversionRate] = useState<number>(1);
   const [saleUnit, setSaleUnit] = useState('Thùng');
   const [category, setCategory] = useState('');
-  const [profitMargin, setProfitMargin] = useState<number>(0);
+  const [profitMargin, setProfitMargin] = useState<number | string>(0);
   const [defaultSalePrice, setDefaultSalePrice] = useState<number>(0);
   const [priceVariance, setPriceVariance] = useState<number>(0);
   const [notes, setNotes] = useState('');
@@ -138,6 +138,9 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       return;
     }
 
+    const parsedMargin = typeof profitMargin === 'number' ? profitMargin : parseFloat(String(profitMargin));
+    const finalProfitMargin = isNaN(parsedMargin) ? 0 : parsedMargin;
+
     const prod: Product = {
       id: targetProductId || `prod-${Date.now()}`,
       code: trimmedCode,
@@ -147,7 +150,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       conversionRate: conversionRate > 0 ? conversionRate : 1,
       saleUnit: saleUnit.trim() || purchaseUnit.trim() || 'Cái',
       category: category.trim(),
-      profitMargin,
+      profitMargin: finalProfitMargin,
       defaultSalePrice: defaultSalePrice > 0 ? defaultSalePrice : undefined,
       priceVariance: priceVariance > 0 ? priceVariance : undefined,
       notes: notes.trim(),
@@ -313,18 +316,36 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Tỷ suất lợi nhuận (%)
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-700">
+                  Tỷ suất lợi nhuận (%)
+                </label>
+                {Number(profitMargin) < 0 && (
+                  <span className="text-[11px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
+                    Lợi nhuận âm (bán lỗ)
+                  </span>
+                )}
+              </div>
               <input
-                type="number"
-                min="0"
-                step="any"
+                type="text"
+                inputMode="decimal"
                 value={profitMargin}
-                onChange={(e) => setProfitMargin(parseFloat(e.target.value) || 0)}
-                placeholder="0"
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-bold text-indigo-700"
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === '' || val === '-' || /^-?\d*\.?\d*$/.test(val)) {
+                    setProfitMargin(val);
+                  }
+                }}
+                placeholder="VD: 15 hoặc -5"
+                className={`w-full px-3 py-2 border rounded-xl text-sm font-bold transition-colors ${
+                  Number(profitMargin) < 0
+                    ? 'border-rose-400 bg-rose-50/40 text-rose-700 focus:ring-2 focus:ring-rose-500'
+                    : 'border-slate-300 text-indigo-700 focus:ring-2 focus:ring-indigo-500'
+                }`}
               />
+              <span className="text-[11px] text-slate-500 mt-0.5 block">
+                Cho phép ghi số âm (VD: -5, -10% khi xả kho hoặc bán lỗ)
+              </span>
             </div>
           </div>
 

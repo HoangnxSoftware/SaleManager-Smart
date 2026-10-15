@@ -307,7 +307,7 @@ export function calculateSuggestedPrices(
     excludeOrderId
   );
 
-  const profitMargin = product.profitMargin || 0;
+  const profitMargin = product.profitMargin ?? 0;
   const vatRate = product.vatRate || 10;
 
   // Công thức: Đơn giá bán (Theo ĐVT_Bán) theo tỷ suất lợi nhuận (Đã bao gồm thuế GTGT)

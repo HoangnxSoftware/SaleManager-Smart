@@ -137,7 +137,7 @@ export const PurchaseFormModal: React.FC<PurchaseFormModalProps> = ({
   const [newProdPurchaseUnit, setNewProdPurchaseUnit] = useState('Cái');
   const [newProdSaleUnit, setNewProdSaleUnit] = useState('Cái');
   const [newProdVat, setNewProdVat] = useState(10);
-  const [newProdMargin, setNewProdMargin] = useState(0);
+  const [newProdMargin, setNewProdMargin] = useState<number | string>(0);
 
   // Payment
   const [paidAmount, setPaidAmount] = useState<number>(0);
@@ -327,7 +327,7 @@ export const PurchaseFormModal: React.FC<PurchaseFormModalProps> = ({
       vatRate: newProdVat,
       conversionRate: 1,
       category: '',
-      profitMargin: newProdMargin,
+      profitMargin: typeof newProdMargin === 'number' ? newProdMargin : (parseFloat(String(newProdMargin)) || 0),
     };
 
     onAddNewProduct(newProd);
@@ -892,10 +892,17 @@ export const PurchaseFormModal: React.FC<PurchaseFormModalProps> = ({
                 <div>
                   <label className="block font-semibold mb-1">Tỷ suất LN (%)</label>
                   <input
-                    type="number"
+                    type="text"
+                    inputMode="decimal"
                     value={newProdMargin}
-                    onChange={(e) => setNewProdMargin(parseFloat(e.target.value) || 0)}
-                    className="w-full px-3 py-1.5 border rounded-lg"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '' || val === '-' || /^-?\d*\.?\d*$/.test(val)) {
+                        setNewProdMargin(val);
+                      }
+                    }}
+                    placeholder="VD: 15 hoặc -5"
+                    className="w-full px-3 py-1.5 border rounded-lg font-bold"
                   />
                 </div>
               </div>
