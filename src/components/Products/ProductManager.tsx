@@ -382,8 +382,8 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                         </button>
                       </td>
                       <td className="p-3 text-center text-slate-400">{idx + 1}</td>
-                      <td className="p-3 font-mono font-bold text-indigo-700">{p.code}</td>
-                      <td className="p-3 font-semibold text-slate-900">{p.name}</td>
+                      <td className={`p-3 font-mono font-bold ${stock < 0 ? 'text-red-600' : 'text-indigo-700'}`}>{p.code}</td>
+                      <td className={`p-3 font-semibold ${stock < 0 ? 'text-red-600' : 'text-slate-900'}`}>{p.name}</td>
                       <td className="p-3 text-slate-600">{p.category}</td>
                       <td className="p-3 text-center text-slate-700">{p.purchaseUnit}</td>
                       <td className="p-3 text-center font-bold text-slate-800">
@@ -400,7 +400,11 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                       <td className="p-3 text-right bg-blue-50/30 font-semibold text-indigo-700">
                         {p.priceVariance ? '±' + formatNumber(p.priceVariance) + ' ₫' : '—'}
                       </td>
-                      <td className="p-3 text-right bg-emerald-50/40 font-black text-emerald-700">
+                      <td className={`p-3 text-right font-black ${
+                        stock < 0
+                          ? 'text-red-600 bg-red-50/80 border border-red-200 rounded'
+                          : 'text-emerald-700 bg-emerald-50/40'
+                      }`}>
                         {formatNumber(stock)} {p.saleUnit}
                       </td>
                       <td className="p-3 text-center">

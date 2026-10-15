@@ -24,8 +24,10 @@ import {
   Search,
   BookOpen,
   Edit,
-  Edit3
+  Edit3,
+  Users
 } from 'lucide-react';
+import { CustomerSalesReport } from './CustomerSalesReport';
 
 interface ReportsManagerProps {
   data: AppData;
@@ -40,7 +42,9 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
   settings,
   onSaveOrder,
 }) => {
-  const [activeReport, setActiveReport] = useState<'inventory' | 'profit' | 'costDetails'>('inventory');
+  const [activeReport, setActiveReport] = useState<
+    'inventory' | 'profit' | 'costDetails' | 'customerSales'
+  >('inventory');
 
   // Edit Order modal state from Xuat Nhap Kho report
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
@@ -275,7 +279,7 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
             </h1>
           </div>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Báo cáo Xuất nhập kho, Báo cáo Lợi nhuận gộp & Báo cáo Chi tiết giá vốn theo phương pháp FIFO
+            Báo cáo Xuất nhập kho, Báo cáo Lợi nhuận gộp & Chi tiết giá vốn (FIFO), Báo cáo Số lượng hàng bán cho từng khách hàng
           </p>
         </div>
 
@@ -338,28 +342,42 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
             <BookOpen className="w-4 h-4" />
             <span>Báo cáo Chi tiết Giá vốn (FIFO)</span>
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveReport('customerSales')}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 whitespace-nowrap transition-all cursor-pointer ${
+              activeReport === 'customerSales'
+                ? 'border-indigo-600 text-indigo-700 bg-indigo-50/50'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Báo cáo SL bán theo khách hàng</span>
+          </button>
         </div>
 
-        <button
-          type="button"
-          onClick={
-            activeReport === 'inventory'
-              ? handleExportInventoryReport
-              : activeReport === 'profit'
-              ? handleExportProfitReport
-              : handleExportCostDetailsReport
-          }
-          className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer self-start lg:self-auto mb-2 lg:mb-0"
-        >
-          <Download className="w-3.5 h-3.5" />
-          <span>
-            {activeReport === 'inventory'
-              ? 'Xuất Excel Xuất nhập kho'
-              : activeReport === 'profit'
-              ? 'Xuất Excel Lợi nhuận'
-              : 'Xuất Excel Chi tiết giá vốn'}
-          </span>
-        </button>
+        {activeReport !== 'customerSales' && (
+          <button
+            type="button"
+            onClick={
+              activeReport === 'inventory'
+                ? handleExportInventoryReport
+                : activeReport === 'profit'
+                ? handleExportProfitReport
+                : handleExportCostDetailsReport
+            }
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer self-start lg:self-auto mb-2 lg:mb-0"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>
+              {activeReport === 'inventory'
+                ? 'Xuất Excel Xuất nhập kho'
+                : activeReport === 'profit'
+                ? 'Xuất Excel Lợi nhuận'
+                : 'Xuất Excel Chi tiết giá vốn'}
+            </span>
+          </button>
+        )}
       </div>
 
       {/* 1. BÁO CÁO XUẤT NHẬP KHO */}
@@ -442,10 +460,14 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
                         <td className="p-3 text-center text-slate-400 border-r border-slate-100 sticky left-0 bg-white z-10">
                           {idx + 1}
                         </td>
-                        <td className="p-3 font-mono font-bold text-indigo-700 sticky left-10 bg-white border-r border-slate-100 z-10">
+                        <td className={`p-3 font-mono font-bold sticky left-10 bg-white border-r border-slate-100 z-10 ${
+                          row.endingQty < 0 ? 'text-red-600' : 'text-indigo-700'
+                        }`}>
                           {row.productCode}
                         </td>
-                        <td className="p-3 font-semibold text-slate-900 sticky left-32 bg-white border-r border-slate-100 z-10">
+                        <td className={`p-3 font-semibold sticky left-32 bg-white border-r border-slate-100 z-10 ${
+                          row.endingQty < 0 ? 'text-red-600' : 'text-slate-900'
+                        }`}>
                           {row.productName}
                         </td>
                         <td className="p-3 text-center text-slate-600 border-r border-slate-100">
@@ -457,7 +479,11 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
                         <td className="p-3 text-right bg-indigo-50/40 font-bold text-indigo-800 border-r border-slate-100">
                           {formatNumber(row.periodImportQty)}
                         </td>
-                        <td className="p-3 text-right bg-emerald-50/40 font-black text-emerald-800 border-r border-slate-100">
+                        <td className={`p-3 text-right border-r border-slate-100 font-black ${
+                          row.endingQty < 0
+                            ? 'text-red-600 bg-red-50/80 border border-red-200'
+                            : 'text-emerald-800 bg-emerald-50/40'
+                        }`}>
                           {formatNumber(row.endingQty)}
                         </td>
                         <td className="p-3 text-right bg-amber-50/30 font-bold text-amber-800 border-r border-slate-100">
@@ -880,6 +906,15 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* 4. BÁO CÁO SỐ LƯỢNG HÀNG BÁN CHO TỪNG KHÁCH HÀNG */}
+      {activeReport === 'customerSales' && (
+        <CustomerSalesReport
+          data={data}
+          startDate={startDate}
+          endDate={endDate}
+        />
       )}
 
       {/* Order Edit Modal triggered from Xuat Nhap Kho report */}

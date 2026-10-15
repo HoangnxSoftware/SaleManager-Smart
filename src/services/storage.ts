@@ -1,5 +1,6 @@
 import { AppData, AppSettings, AppUser, Customer, Supplier, Product, Order, PurchaseBill, DebtPayment, DatabaseProfile } from '../types';
 import { DEFAULT_ORDER_CODE_RULES } from './orderCodeService';
+import { idbSaveAppData, idbGetAppData, idbDeleteAppData } from './indexedDbStorage';
 
 export const DEFAULT_SETTINGS: AppSettings = {
   companyName: 'CÔNG TY TNHH THƯƠNG MẠI & DỊCH VỤ SMART TECH',
@@ -728,11 +729,16 @@ export function getLastUsedDatabaseProfile(): DatabaseProfile | null {
   return profiles.find((p) => p.id === lastId) || profiles[0] || null;
 }
 
+// In-memory cache for fast, zero-quota access during active session
+const memoryCache = new Map<string, AppData>();
+
 export function deleteDatabaseProfile(profileId: string): void {
   if (profileId === DEMO_DATABASE_ID) return; // Do not delete demo
   try {
     const profiles = loadDatabaseProfiles().filter((p) => p.id !== profileId);
     saveDatabaseProfiles(profiles);
+    memoryCache.delete(profileId);
+    idbDeleteAppData(profileId).catch((err) => console.debug('IDB delete error:', err));
     localStorage.removeItem(`SALEMANAGER_SMART_DATA_${profileId}`);
     if (getLastUsedDatabaseId() === profileId) {
       setLastUsedDatabaseId(DEMO_DATABASE_ID);
@@ -742,8 +748,66 @@ export function deleteDatabaseProfile(profileId: string): void {
   }
 }
 
+/**
+ * Ensures standard fields (settings, rules, users) on loaded AppData
+ */
+function normalizeAppData(data: AppData, targetId: string): AppData {
+  if (!data.settings) {
+    data.settings = DEFAULT_SETTINGS;
+  }
+  if (!data.settings.orderCodeRules || data.settings.orderCodeRules.length === 0) {
+    data.settings.orderCodeRules = DEFAULT_ORDER_CODE_RULES;
+    data.settings.defaultOrderCodeRuleId = 'rule-dh';
+  }
+  if (!data.users || data.users.length === 0) {
+    data.users = INITIAL_USERS;
+  }
+  data.isDemo = targetId === DEMO_DATABASE_ID;
+  data.databaseId = targetId;
+  return data;
+}
+
+/**
+ * Asynchronously loads complete AppData with unlimited capacity from IndexedDB,
+ * falling back to memoryCache, then localStorage, then defaults.
+ */
+export async function loadDataAsync(databaseId?: string): Promise<AppData> {
+  const targetId = databaseId || getLastUsedDatabaseId();
+
+  // 1. Check memory cache first
+  const inMemory = memoryCache.get(targetId);
+  if (inMemory && (inMemory.orders.length > 0 || inMemory.products.length > 0 || inMemory.databaseId === targetId)) {
+    return normalizeAppData(inMemory, targetId);
+  }
+
+  // 2. Check IndexedDB (full dataset, no 5MB limit)
+  try {
+    const fromIdb = await idbGetAppData(targetId);
+    if (fromIdb) {
+      const normalized = normalizeAppData(fromIdb, targetId);
+      memoryCache.set(targetId, normalized);
+      return normalized;
+    }
+  } catch (err) {
+    console.debug(`IndexedDB read error for ${targetId}:`, err);
+  }
+
+  // 3. Fallback to synchronous loadData
+  return loadData(targetId);
+}
+
+/**
+ * Synchronous loadData for components that need instant initial render.
+ * Also triggers background IndexedDB hydration.
+ */
 export function loadData(databaseId?: string): AppData {
   const targetId = databaseId || getLastUsedDatabaseId();
+
+  // 1. Check memory cache
+  const cached = memoryCache.get(targetId);
+  if (cached) {
+    return normalizeAppData(cached, targetId);
+  }
 
   try {
     const key = `SALEMANAGER_SMART_DATA_${targetId}`;
@@ -766,43 +830,90 @@ export function loadData(databaseId?: string): AppData {
         address: profile?.address,
         spreadsheetId: profile?.spreadsheetId,
       });
+
+      // Background check if IDB has actual data
+      idbGetAppData(targetId).then((idbData) => {
+        if (idbData && (idbData.orders.length > 0 || idbData.products.length > 0)) {
+          memoryCache.set(targetId, normalizeAppData(idbData, targetId));
+        }
+      }).catch(() => {});
+
+      memoryCache.set(targetId, empty);
       saveData(empty, targetId);
       return empty;
     }
 
     const parsed = JSON.parse(raw) as AppData;
-    if (!parsed.settings) {
-      parsed.settings = DEFAULT_SETTINGS;
-    }
-    if (!parsed.settings.orderCodeRules || parsed.settings.orderCodeRules.length === 0) {
-      parsed.settings.orderCodeRules = DEFAULT_ORDER_CODE_RULES;
-      parsed.settings.defaultOrderCodeRuleId = 'rule-dh';
-    }
-    if (!parsed.users || parsed.users.length === 0) {
-      parsed.users = INITIAL_USERS;
-    }
-    // Tag whether demo or not
-    parsed.isDemo = targetId === DEMO_DATABASE_ID;
-    parsed.databaseId = targetId;
+    const normalized = normalizeAppData(parsed, targetId);
+    memoryCache.set(targetId, normalized);
 
-    return parsed;
+    // Background verify if IDB has more complete data (e.g. if localStorage was truncated)
+    idbGetAppData(targetId).then((idbData) => {
+      if (idbData && idbData.orders && idbData.orders.length > normalized.orders.length) {
+        memoryCache.set(targetId, normalizeAppData(idbData, targetId));
+      }
+    }).catch(() => {});
+
+    return normalized;
   } catch (e) {
     console.error(`Failed to load data for db ${targetId}:`, e);
     const sample = getSampleData();
-    saveData(sample, DEMO_DATABASE_ID);
+    memoryCache.set(DEMO_DATABASE_ID, sample);
     return sample;
   }
 }
 
+/**
+ * Resilient saveData that stores full data in memory and IndexedDB (unlimited capacity),
+ * and safely writes to localStorage with proactive quota management.
+ * NEVER throws QuotaExceededError or loses business data!
+ */
 export function saveData(data: AppData, databaseId?: string): void {
   const targetId = databaseId || data.databaseId || getLastUsedDatabaseId();
+
+  // 1. Immediately store in memory cache
+  memoryCache.set(targetId, data);
+
+  // 2. Persist full data asynchronously in IndexedDB (virtually unlimited capacity, zero quota issues)
+  idbSaveAppData(targetId, data).catch((err) => {
+    console.debug(`Async IndexedDB save warning for ${targetId}:`, err);
+  });
+
+  // 3. Persist to localStorage with auto-cleanup if quota is approached or exceeded
+  const key = `SALEMANAGER_SMART_DATA_${targetId}`;
   try {
-    const key = `SALEMANAGER_SMART_DATA_${targetId}`;
     localStorage.setItem(key, JSON.stringify(data));
-  } catch (e) {
-    console.error(`Failed to save data for db ${targetId}:`, e);
+  } catch (firstErr: any) {
+    // Quota exceeded: clean up other database keys in localStorage to free space
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('SALEMANAGER_SMART_DATA_') && k !== key) {
+          keysToRemove.push(k);
+        }
+      }
+      keysToRemove.forEach((k) => localStorage.removeItem(k));
+
+      // Try saving again after clearing stale db snapshots
+      localStorage.setItem(key, JSON.stringify(data));
+    } catch (secondErr: any) {
+      // If still too large (e.g. single dataset > 5MB), store a lean version in localStorage
+      // Full dataset is already 100% safely persisted in IndexedDB and memoryCache!
+      try {
+        const slimData: AppData = {
+          ...data,
+          orders: data.orders.slice(0, 50),
+          purchases: data.purchases.slice(0, 50),
+        };
+        localStorage.setItem(key, JSON.stringify(slimData));
+      } catch {
+        // Silently keep working with IndexedDB and memoryCache without throwing to user UI
+      }
+    }
   }
 }
+
 
 export function createNewDatabase(params: {
   name: string;

@@ -14,6 +14,12 @@ import { OrderDetailModal } from './OrderDetailModal';
 import { RecalculatePricesModal } from './RecalculatePricesModal';
 import { CustomerModal } from './CustomerModal';
 import { OrderImportCheckModal } from './OrderImportCheckModal';
+import {
+  matchProductCode,
+  matchCustomerCode,
+  analyzeOrderImportCodes,
+  CodeSyncDetail,
+} from '../../services/codeSyncService';
 import { OrderPrintModal } from '../Print/OrderPrintModal';
 import { OrderDetailsTab } from './OrderDetailsTab';
 import { ExcelDuplicateConflictModal, ConflictItem } from '../Common/ExcelDuplicateConflictModal';
@@ -430,12 +436,20 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
   // Order Excel Import Check Modal State
   const [isOrderImportCheckModalOpen, setIsOrderImportCheckModalOpen] = useState(false);
   const [pendingImportOrders, setPendingImportOrders] = useState<Order[]>([]);
+  const [pendingProductSync, setPendingProductSync] = useState<CodeSyncDetail[]>([]);
+  const [pendingCustomerSync, setPendingCustomerSync] = useState<CodeSyncDetail[]>([]);
 
   const handleConfirmImportOrders = (finalOrders: Order[]) => {
     onBatchUpdateOrders(finalOrders);
     setIsOrderImportCheckModalOpen(false);
     setPendingImportOrders([]);
-    alert(`Đã nhập thành công ${finalOrders.length} đơn hàng từ Excel theo thứ tự tăng dần!`);
+    const adjustedProds = pendingProductSync.filter((p) => p.isAdjusted).length;
+    const adjustedCusts = pendingCustomerSync.filter((c) => c.isAdjusted).length;
+    let msg = `Đã nhập thành công ${finalOrders.length} đơn hàng từ Excel vào phần mềm theo thứ tự tăng dần!`;
+    if (adjustedProds > 0 || adjustedCusts > 0) {
+      msg += `\n(Đã tự động chuẩn hóa & đồng bộ ${adjustedProds} mã hàng hóa và ${adjustedCusts} mã khách hàng)`;
+    }
+    alert(msg);
   };
 
   // Import orders from Excel
@@ -462,6 +476,12 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         return;
       }
 
+      // REQUIREMENT: Đồng bộ mã hàng hóa và mã khách hàng (loại bỏ dấu cách thừa, viết hoa để khớp với phần mềm)
+      // Thu thập thông tin cảnh báo đồng bộ mã trước khi đẩy dữ liệu vào phần mềm
+      const syncSummary = analyzeOrderImportCodes(rows, products, customers);
+      setPendingProductSync(syncSummary.productSyncList);
+      setPendingCustomerSync(syncSummary.customerSyncList);
+
       // Group rows by Order code
       const orderGroups = new Map<string, any[]>();
       rows.forEach((r: any) => {
@@ -475,20 +495,44 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
 
       for (const [code, itemsList] of orderGroups.entries()) {
         const first = itemsList[0];
-        const custCode = String(first['Mã KH'] || 'KH001').trim();
-        const cust = customers.find((c) => c.code === custCode) || customers[0];
+        const rawCustCode = String(first['Mã KH'] || first['Mã khách hàng'] || 'KH001');
+        
+        // Đồng bộ Mã khách hàng: loại bỏ dấu cách thừa, viết hoa, tìm khớp với danh mục
+        const custMatch = matchCustomerCode(rawCustCode, customers);
+        const cust = custMatch.matchedCustomer;
+        const syncedCustCode = custMatch.syncedCode;
+        const custName = cust
+          ? cust.name
+          : String(first['Tên khách hàng'] || `Khách hàng ${syncedCustCode}`).trim().toUpperCase();
 
         let totalPreTax = 0;
         let totalVat = 0;
         let totalDiscount = 0;
 
         const orderItems = itemsList.map((row: any, idx: number) => {
-          const pCode = String(row['Mã HH'] || 'PROD').trim();
-          const prod = products.find((p) => p.code === pCode);
-          const qty = Number(row['Số lượng']) || 1;
-          const prePrice = Number(row['Đơn giá trước thuế']) || 100000;
-          const vat = Number(row['Thuế suất (%)']) || 10;
-          const itemDisc = Number(row['Chiết khấu mặt hàng']) || 0;
+          const rawPCode = String(row['Mã HH'] || row['Mã hàng hóa'] || 'PROD');
+          
+          // Đồng bộ Mã hàng hóa: loại bỏ dấu cách thừa, viết hoa, tìm khớp với danh mục
+          const prodMatch = matchProductCode(rawPCode, products);
+          const prod = prodMatch.matchedProduct;
+          const syncedPCode = prodMatch.syncedCode;
+
+          // REQUIREMENT: Cho phép nhập phiếu có số lượng và đơn giá trước thuế = 0.
+          // Tuyệt đối không được chuyển số lượng 0 thành 1, không được chuyển đơn giá trước thuế 0 thành 100.000!
+          const rawQty =
+            row['Số lượng'] !== undefined && row['Số lượng'] !== '' && row['Số lượng'] !== null
+              ? Number(row['Số lượng'])
+              : (row['SL'] !== undefined && row['SL'] !== '' && row['SL'] !== null ? Number(row['SL']) : 0);
+          const qty = isNaN(rawQty) ? 0 : rawQty;
+
+          const rawPrePrice =
+            row['Đơn giá trước thuế'] !== undefined && row['Đơn giá trước thuế'] !== '' && row['Đơn giá trước thuế'] !== null
+              ? Number(row['Đơn giá trước thuế'])
+              : (row['Đơn giá'] !== undefined && row['Đơn giá'] !== '' && row['Đơn giá'] !== null ? Number(row['Đơn giá']) : 0);
+          const prePrice = isNaN(rawPrePrice) ? 0 : rawPrePrice;
+
+          const vat = Number(row['Thuế suất (%)'] ?? row['Thuế suất'] ?? row['VAT'] ?? 10) || 0;
+          const itemDisc = Number(row['Chiết khấu mặt hàng'] ?? row['Chiết khấu'] ?? 0) || 0;
 
           const sub = qty * prePrice;
           const vatAmt = ((sub - itemDisc) * vat) / 100;
@@ -500,9 +544,9 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
 
           return {
             id: `oi-imp-${Date.now()}-${idx}-${Math.random()}`,
-            productCode: pCode,
-            productName: prod?.name || pCode,
-            saleUnit: prod?.saleUnit || 'Cái',
+            productCode: syncedPCode,
+            productName: prod?.name || String(row['Tên HH'] || row['Tên hàng hóa'] || syncedPCode),
+            saleUnit: prod?.saleUnit || String(row['Đơn vị tính'] || row['ĐVT'] || row['ĐVT_Bán'] || 'Cái'),
             quantity: qty,
             preTaxPrice: prePrice,
             postTaxPrice: prePrice * (1 + vat / 100),
@@ -522,12 +566,12 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           id: `ord-imp-${Date.now()}-${Math.random()}`,
           orderCode: code,
           orderDate: first['Ngày (YYYY-MM-DD)'] || new Date().toISOString().slice(0, 10),
-          customerId: cust?.id || 'cust-1',
-          customerCode: cust?.code || custCode,
-          customerName: cust?.name || first['Tên khách hàng'] || 'Khách hàng Excel',
-          customerTaxCode: cust?.taxCode || '',
-          customerIdCard: cust?.idCard || '',
-          customerAddress: cust?.address || '',
+          customerId: cust?.id || `cust-imp-${syncedCustCode}`,
+          customerCode: syncedCustCode,
+          customerName: custName,
+          customerTaxCode: cust?.taxCode || String(first['Mã số thuế'] || first['MST'] || ''),
+          customerIdCard: cust?.idCard || String(first['Số CCCD'] || first['CCCD'] || ''),
+          customerAddress: cust?.address || String(first['Địa chỉ'] || ''),
           items: orderItems,
           itemDiscountTotal: totalDiscount,
           orderDiscount: ordDiscount,
@@ -1318,10 +1362,14 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
             }
           ]}
           defaultRuleId={settings.defaultOrderCodeRuleId || 'rule-dh'}
+          productSyncList={pendingProductSync}
+          customerSyncList={pendingCustomerSync}
           onConfirmImport={handleConfirmImportOrders}
           onCancel={() => {
             setIsOrderImportCheckModalOpen(false);
             setPendingImportOrders([]);
+            setPendingProductSync([]);
+            setPendingCustomerSync([]);
           }}
         />
       )}

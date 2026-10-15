@@ -8,6 +8,7 @@ import {
   createNewDatabase,
   deleteDatabaseProfile,
   DEMO_DATABASE_ID,
+  saveData,
 } from '../services/storage';
 import {
   googleSignIn,
@@ -180,7 +181,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   };
 
   // Connect spreadsheet file found from drive
-  const handleConnectDriveFile = (file: { id: string; name: string }) => {
+  const handleConnectDriveFile = async (file: { id: string; name: string }) => {
     const existing = profiles.find((p) => p.spreadsheetId === file.id);
     if (existing) {
       handleDbChange(existing.id);
@@ -197,6 +198,21 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       spreadsheetId: file.id,
       spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${file.id}/edit`,
     });
+
+    // Automatically load data from this Google Sheet right away
+    try {
+      const token = await getAccessToken();
+      if (token) {
+        const loadedFromSheet = await loadDataFromGoogleSheets(token, file.id);
+        if (loadedFromSheet) {
+          loadedFromSheet.databaseId = profile.id;
+          loadedFromSheet.databaseName = profile.name;
+          saveData(loadedFromSheet, profile.id);
+        }
+      }
+    } catch (e) {
+      console.debug('Error pre-loading connected spreadsheet data:', e);
+    }
 
     setProfiles(loadDatabaseProfiles());
     handleDbChange(profile.id);
@@ -239,6 +255,21 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         spreadsheetId: extractedId,
         spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${extractedId}/edit`,
       });
+
+      // Automatically load data from this Google Sheet right away
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          const loadedFromSheet = await loadDataFromGoogleSheets(token, extractedId);
+          if (loadedFromSheet) {
+            loadedFromSheet.databaseId = profile.id;
+            loadedFromSheet.databaseName = profile.name;
+            saveData(loadedFromSheet, profile.id);
+          }
+        }
+      } catch (e) {
+        console.debug('Error pre-loading linked spreadsheet data:', e);
+      }
 
       setProfiles(loadDatabaseProfiles());
       handleDbChange(profile.id);

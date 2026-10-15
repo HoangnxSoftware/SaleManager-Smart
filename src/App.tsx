@@ -13,7 +13,9 @@ import {
 } from './types';
 import {
   loadData,
+  loadDataAsync,
   saveData,
+  loadDatabaseProfiles,
   getLastUsedDatabaseId,
   setLastUsedDatabaseId,
   getEmptyData,
@@ -82,10 +84,34 @@ export default function App() {
     };
   }, []);
 
-  // Auto save to local storage on data changes
+  // Auto save to persistent storage on data changes
   useEffect(() => {
-    saveData(data, selectedDbId);
+    if (!data.databaseId || data.databaseId === selectedDbId) {
+      saveData(data, selectedDbId);
+    }
   }, [data, selectedDbId]);
+
+  // Hydrate full dataset from IndexedDB on startup or database switch
+  useEffect(() => {
+    let isMounted = true;
+    loadDataAsync(selectedDbId).then((fullData) => {
+      if (isMounted && fullData) {
+        setData((current) => {
+          if (
+            fullData.orders.length > current.orders.length ||
+            fullData.products.length > current.products.length ||
+            fullData.customers.length > current.customers.length
+          ) {
+            return fullData;
+          }
+          return current;
+        });
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedDbId]);
 
   // Hide sales person from restricted tabs
   useEffect(() => {
@@ -102,28 +128,70 @@ export default function App() {
   }, [currentUser, currentTab]);
 
   // Database switch handler
-  const handleSelectDatabase = (dbId: string) => {
+  const handleSelectDatabase = async (dbId: string) => {
     setSelectedDbId(dbId);
     setLastUsedDatabaseId(dbId);
-    const loaded = loadData(dbId);
+    const loaded = await loadDataAsync(dbId);
     setData(loaded);
+
+    // Profile might have spreadsheetId even if loaded data didn't have it
+    const profiles = loadDatabaseProfiles();
+    const profile = profiles.find((p) => p.id === dbId);
+    const targetSpreadsheetId = loaded.spreadsheetId || profile?.spreadsheetId;
+
+    // If connected to Google Sheets, automatically sync/pull in background
+    if (targetSpreadsheetId && !loaded.isDemo) {
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          const freshData = await loadDataFromGoogleSheets(token, targetSpreadsheetId);
+          if (freshData && (freshData.orders.length > 0 || freshData.products.length > 0)) {
+            setData(freshData);
+            saveData(freshData, dbId);
+          }
+        }
+      } catch (err) {
+        console.debug('Database switch background sheet sync:', err);
+      }
+    }
   };
 
   // Login success handler
-  const handleLoginSuccess = (user: AppUser, dbId: string) => {
+  const handleLoginSuccess = async (user: AppUser, dbId: string) => {
     setSelectedDbId(dbId);
     setLastUsedDatabaseId(dbId);
-    const loaded = loadData(dbId);
+    const loaded = await loadDataAsync(dbId);
     setData(loaded);
     setCurrentUser(user);
     setIsLoginModalOpen(false);
+
+    // Profile might have spreadsheetId even if loaded data didn't have it
+    const profiles = loadDatabaseProfiles();
+    const profile = profiles.find((p) => p.id === dbId);
+    const targetSpreadsheetId = loaded.spreadsheetId || profile?.spreadsheetId;
+
+    // If connected to Google Sheets, automatically sync/pull to ensure fresh data
+    if (targetSpreadsheetId && !loaded.isDemo) {
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          const freshData = await loadDataFromGoogleSheets(token, targetSpreadsheetId);
+          if (freshData && (freshData.orders.length > 0 || freshData.products.length > 0)) {
+            setData(freshData);
+            saveData(freshData, dbId);
+          }
+        }
+      } catch (err) {
+        console.debug('Login background sheet sync:', err);
+      }
+    }
   };
 
   // Database created handler
-  const handleDatabaseCreated = (profile: DatabaseProfile) => {
+  const handleDatabaseCreated = async (profile: DatabaseProfile) => {
     setSelectedDbId(profile.id);
     setLastUsedDatabaseId(profile.id);
-    const loaded = loadData(profile.id);
+    const loaded = await loadDataAsync(profile.id);
     setData(loaded);
   };
 
