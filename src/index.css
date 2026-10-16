@@ -30,3 +30,71 @@ th.text-right {
 th.text-left {
   text-align: left !important;
 }
+
+/* Print Styles */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm 10mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide app navigation, sidebar, main headers, buttons */
+  nav,
+  aside,
+  header,
+  footer,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Prevent fixed overlays from trapping or blacking out print */
+  .order-print-overlay {
+    position: static !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    max-height: none !important;
+    display: block !important;
+  }
+
+  .order-print-container {
+    box-shadow: none !important;
+    border: none !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    border-radius: 0 !important;
+  }
+
+  .order-print-scroll {
+    overflow: visible !important;
+    max-height: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .order-sheet {
+    page-break-after: always !important;
+    break-after: page !important;
+    border: none !important;
+    padding: 0 !important;
+    margin-bottom: 20px !important;
+  }
+
+  .order-sheet:last-child {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+}

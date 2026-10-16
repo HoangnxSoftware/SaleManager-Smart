@@ -5,7 +5,7 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    base: '/SaleManager-Smart/',
+    base: process.env.NODE_ENV === 'production' ? '/SaleManager-Smart/' : '/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
