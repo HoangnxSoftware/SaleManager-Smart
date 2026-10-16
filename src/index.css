@@ -19,5 +19,14 @@ optgroup {
 }
 
 th {
+  text-align: left;
+}
+th.text-center {
+  text-align: center !important;
+}
+th.text-right {
+  text-align: right !important;
+}
+th.text-left {
   text-align: left !important;
 }

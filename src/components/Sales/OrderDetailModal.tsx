@@ -26,7 +26,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/80 backdrop-blur-xs overflow-y-auto">
-      <div className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-4 max-h-[92vh] flex flex-col">
+      <div className="relative w-full max-w-5xl xl:max-w-6xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-4 max-h-[92vh] flex flex-col">
         {/* Header */}
         <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 p-4 sm:p-5 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
@@ -138,39 +138,39 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             </h4>
             <div className="overflow-x-auto border border-slate-200 rounded-xl">
               <table className="w-full text-xs text-left border-collapse">
-                <thead className="bg-slate-100 text-slate-700 uppercase font-semibold">
+                <thead className="bg-slate-100 text-slate-700 text-[11px] uppercase font-semibold border-b border-slate-200">
                   <tr>
-                    <th className="p-2.5 text-left w-10">STT</th>
-                    <th className="p-2.5 text-left">Mã HH</th>
-                    <th className="p-2.5 text-left">Tên HH</th>
-                    <th className="p-2.5 text-left">ĐVT_Bán</th>
-                    <th className="p-2.5 text-left">Số lượng</th>
-                    <th className="p-2.5 text-left">Đơn giá trước thuế</th>
-                    <th className="p-2.5 text-left">Đơn giá sau thuế</th>
-                    <th className="p-2.5 text-left">Thành tiền</th>
-                    <th className="p-2.5 text-left">Chiết khấu</th>
-                    <th className="p-2.5 text-left">Thuế %</th>
-                    <th className="p-2.5 text-left">Thuế GTGT</th>
-                    <th className="p-2.5 text-left">Tổng TT</th>
+                    <th className="p-2.5 text-center w-10 whitespace-nowrap">STT</th>
+                    <th className="p-2.5 text-left whitespace-nowrap">Mã HH</th>
+                    <th className="p-2.5 text-left min-w-[160px]">Tên HH</th>
+                    <th className="p-2.5 text-center whitespace-nowrap">ĐVT_Bán</th>
+                    <th className="p-2.5 text-right whitespace-nowrap">Số lượng</th>
+                    <th className="p-2.5 text-right whitespace-nowrap">Đơn giá bán (Sau thuế)</th>
+                    <th className="p-2.5 text-right whitespace-nowrap">Đơn giá trước thuế</th>
+                    <th className="p-2.5 text-right whitespace-nowrap">Thành tiền</th>
+                    <th className="p-2.5 text-center whitespace-nowrap">thuế %</th>
+                    <th className="p-2.5 text-right whitespace-nowrap">Thuế GTGT</th>
+                    <th className="p-2.5 text-right whitespace-nowrap">Chiết Khấu</th>
+                    <th className="p-2.5 text-right whitespace-nowrap">Tổng tiền thanh toán</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {order.items.map((item, idx) => (
                     <tr key={item.id} className="hover:bg-slate-50/70">
-                      <td className="p-2.5 text-center text-slate-400">{idx + 1}</td>
-                      <td className="p-2.5 font-mono font-medium text-slate-700">{item.productCode}</td>
+                      <td className="p-2.5 text-center text-slate-500 font-medium whitespace-nowrap">{idx + 1}</td>
+                      <td className="p-2.5 font-mono font-medium text-slate-700 whitespace-nowrap">{item.productCode}</td>
                       <td className="p-2.5 font-semibold text-slate-900">{item.productName}</td>
-                      <td className="p-2.5 text-center text-slate-600">{item.saleUnit}</td>
-                      <td className="p-2.5 text-right font-bold text-slate-900">{formatNumber(item.quantity)}</td>
-                      <td className="p-2.5 text-right text-slate-700">{formatCurrency(item.preTaxPrice)}</td>
-                      <td className="p-2.5 text-right font-medium text-blue-700">{formatCurrency(item.postTaxPrice)}</td>
-                      <td className="p-2.5 text-right text-slate-800">{formatCurrency(item.subtotal)}</td>
-                      <td className="p-2.5 text-right text-slate-600">
+                      <td className="p-2.5 text-center text-slate-600 whitespace-nowrap">{item.saleUnit}</td>
+                      <td className="p-2.5 text-right font-bold text-slate-900 whitespace-nowrap">{formatNumber(item.quantity)}</td>
+                      <td className="p-2.5 text-right font-semibold text-blue-700 whitespace-nowrap">{formatCurrency(item.postTaxPrice)}</td>
+                      <td className="p-2.5 text-right text-slate-700 whitespace-nowrap">{formatCurrency(item.preTaxPrice)}</td>
+                      <td className="p-2.5 text-right font-medium text-slate-800 whitespace-nowrap">{formatCurrency(item.subtotal)}</td>
+                      <td className="p-2.5 text-center text-slate-700 whitespace-nowrap">{item.vatRate}%</td>
+                      <td className="p-2.5 text-right text-slate-700 whitespace-nowrap">{formatCurrency(item.vatAmount)}</td>
+                      <td className="p-2.5 text-right text-slate-600 whitespace-nowrap">
                         {item.itemDiscount > 0 ? formatCurrency(item.itemDiscount) : '0'}
                       </td>
-                      <td className="p-2.5 text-center text-slate-700">{item.vatRate}%</td>
-                      <td className="p-2.5 text-right text-slate-700">{formatCurrency(item.vatAmount)}</td>
-                      <td className="p-2.5 text-right font-bold text-slate-900">{formatCurrency(item.totalAmount)}</td>
+                      <td className="p-2.5 text-right font-bold text-slate-900 whitespace-nowrap">{formatCurrency(item.totalAmount)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -181,8 +181,9 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           {/* Totals Summary */}
           <div className="flex flex-col sm:flex-row justify-end">
             <div className="w-full sm:w-96 bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2 text-xs sm:text-sm">
+              {/* 1. Tổng tiền hàng (Trước thuế): */}
               <div className="flex justify-between text-slate-600">
-                <span>Tổng tiền hàng (trước thuế):</span>
+                <span>Tổng tiền hàng (Trước thuế):</span>
                 <span className="font-semibold text-slate-800">{formatCurrency(order.totalPreTax)}</span>
               </div>
               {(() => {
@@ -204,18 +205,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   </div>
                 );
               })()}
-              {order.itemDiscountTotal > 0 && (
-                <div className="flex justify-between text-emerald-700">
-                  <span>Chiết khấu mặt hàng:</span>
-                  <span>-{formatCurrency(order.itemDiscountTotal)}</span>
-                </div>
-              )}
-              {order.orderDiscount > 0 && (
-                <div className="flex justify-between text-emerald-700">
-                  <span>Chiết khấu tổng đơn:</span>
-                  <span>-{formatCurrency(order.orderDiscount)}</span>
-                </div>
-              )}
+
+              {/* 2. Tổng thuế GTGT: */}
               <div className="flex justify-between text-slate-600">
                 <span>Tổng thuế GTGT:</span>
                 <span className="font-semibold text-slate-800">{formatCurrency(order.totalVat)}</span>
@@ -239,14 +230,43 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                   </div>
                 );
               })()}
+
+              {/* 3. Chiết khấu mặt hàng: */}
+              {(() => {
+                const itemDiscountTotal = (order.itemDiscountTotal !== undefined && order.itemDiscountTotal !== null)
+                  ? order.itemDiscountTotal
+                  : (order.items || []).reduce((sum, it) => sum + (it.itemDiscount || 0), 0);
+                return (
+                  <div className="flex justify-between text-slate-600">
+                    <span>Chiết khấu mặt hàng:</span>
+                    <span className={itemDiscountTotal > 0 ? 'text-emerald-700 font-semibold' : 'text-slate-700'}>
+                      {itemDiscountTotal > 0 ? `-${formatCurrency(itemDiscountTotal)}` : '0 ₫'}
+                    </span>
+                  </div>
+                );
+              })()}
+
+              {/* 4. Chiết khấu tổng đơn: */}
+              <div className="flex justify-between text-slate-600">
+                <span>Chiết khấu tổng đơn:</span>
+                <span className={order.orderDiscount > 0 ? 'text-emerald-700 font-semibold' : 'text-slate-700'}>
+                  {order.orderDiscount > 0 ? `-${formatCurrency(order.orderDiscount)}` : '0 ₫'}
+                </span>
+              </div>
+
+              {/* 5. Tổng tiền thanh toán: */}
               <div className="flex justify-between text-base font-black text-blue-900 border-t border-slate-300 pt-2">
                 <span>Tổng tiền thanh toán:</span>
                 <span className="text-blue-700 text-lg">{formatCurrency(order.totalAmount)}</span>
               </div>
+
+              {/* 6. Đã Thanh toán: */}
               <div className="flex justify-between text-emerald-600 font-semibold pt-1">
-                <span>Đã thanh toán:</span>
+                <span>Đã Thanh toán:</span>
                 <span>{formatCurrency(order.paidAmount)}</span>
               </div>
+
+              {/* 7. Công nợ còn lại: */}
               <div className="flex justify-between text-rose-600 font-bold border-t border-slate-200 pt-1">
                 <span>Công nợ còn lại:</span>
                 <span>{formatCurrency(order.debtAmount)}</span>

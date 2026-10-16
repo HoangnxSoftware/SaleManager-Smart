@@ -25,6 +25,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { DEFAULT_ORDER_CODE_RULES, generateNextOrderCode, matchOrderToRule } from '../../services/orderCodeService';
+import { ChangeProductModal } from './ChangeProductModal';
 
 interface OrderFormModalProps {
   isOpen: boolean;
@@ -64,6 +65,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [editingCustomerForModal, setEditingCustomerForModal] = useState<Customer | null>(null);
+  const [changingItemIndex, setChangingItemIndex] = useState<number | null>(null);
 
   // Available order code rules
   const rulesList = useMemo(() => {
@@ -364,6 +366,69 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
     setItems([...items, newItem]);
     setProductSearchTerm('');
     setIsProductDropdownOpen(false);
+  };
+
+  const handleSwapItemProduct = (
+    index: number,
+    newProd: Product,
+    options: { keepQuantity: boolean; keepPrice: boolean; customPrice?: number }
+  ) => {
+    const updated = [...items];
+    const oldItem = updated[index];
+    if (!oldItem) return;
+
+    const qty = options.keepQuantity ? (oldItem.quantity > 0 ? oldItem.quantity : 1) : 1;
+    let postTax = options.customPrice;
+
+    if (postTax === undefined || postTax <= 0) {
+      if (options.keepPrice && oldItem.postTaxPrice > 0) {
+        postTax = oldItem.postTaxPrice;
+      } else {
+        const sp = calculateSuggestedPrices(
+          newProd,
+          orderDate,
+          products,
+          purchases,
+          allOrders,
+          settings.postTaxSalePriceDecimals ?? -2,
+          settings.salePriceDecimals ?? 2,
+          initialOrder?.id
+        );
+        if (sp.priceByMargin > 0) {
+          postTax = sp.priceByMargin;
+        } else if (sp.defaultPrice > 0) {
+          postTax = sp.defaultPrice;
+        } else {
+          postTax = oldItem.postTaxPrice > 0 ? oldItem.postTaxPrice : 100000;
+        }
+      }
+    }
+
+    const vat = newProd.vatRate !== undefined ? newProd.vatRate : 10;
+    const rate = 1 + vat / 100;
+    const itemDiscount = oldItem.itemDiscount || 0;
+    const rawTotal = qty * postTax - itemDiscount;
+    const totalAmount = Math.round(Math.max(0, rawTotal));
+    const subtotal = rate > 0 ? Math.round(totalAmount / rate) : totalAmount;
+    const vatAmount = totalAmount - subtotal;
+    const preTax = qty > 0 ? Number((subtotal / qty).toFixed(salePriceDecimals)) : 0;
+
+    updated[index] = {
+      ...oldItem,
+      productCode: newProd.code,
+      productName: newProd.name,
+      saleUnit: newProd.saleUnit,
+      quantity: qty,
+      preTaxPrice: preTax,
+      postTaxPrice: postTax,
+      vatRate: vat,
+      vatAmount,
+      subtotal,
+      totalAmount,
+    };
+
+    setItems(updated);
+    setChangingItemIndex(null);
   };
 
   const handleUpdateItem = (
@@ -903,207 +968,485 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                 Chưa có mặt hàng nào trong đơn. Tìm kiếm sản phẩm ở trên hoặc bấm vào danh mục để thêm.
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs text-left border-collapse">
-                  <thead className="bg-slate-50 text-slate-700 uppercase font-semibold border-b border-slate-200">
-                    <tr>
-                      <th className="p-2 text-left w-8">#</th>
-                      <th className="p-2 text-left min-w-36">Tên mặt hàng</th>
-                      <th className="p-2 text-left w-16">ĐVT</th>
-                      <th className="p-2 text-left w-20">Số lượng</th>
-                      <th className="p-2 text-left min-w-28">Đơn giá trước thuế</th>
-                      <th className="p-2 text-left min-w-28">Đơn giá sau thuế</th>
-                      <th className="p-2 text-left min-w-24">Chiết khấu</th>
-                      <th className="p-2 text-left w-16">Thuế %</th>
-                      <th className="p-2 text-left min-w-28">Tổng tiền trước thuế</th>
-                      <th className="p-2 text-left min-w-24">Thuế GTGT</th>
-                      <th className="p-2 text-left min-w-28">Tổng tiền</th>
-                      <th className="p-2 text-left w-10">Xóa</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {items.map((item, idx) => (
-                      <tr key={item.id} className="hover:bg-slate-50/70">
-                        <td className="p-2 text-center text-slate-400">{idx + 1}</td>
-                        <td className="p-2">
-                          <div className="font-semibold text-slate-800">{item.productName}</div>
-                          <div className="font-mono text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5">
-                            <span>{item.productCode}</span>
+              <>
+                {/* Desktop View: Full detailed table with align-top */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-xs text-left border-collapse">
+                    <thead className="bg-slate-50 text-slate-700 uppercase font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="p-2 text-center w-8">#</th>
+                        <th className="p-2 text-left min-w-44">Tên mặt hàng</th>
+                        <th className="p-2 text-center w-16">ĐVT</th>
+                        <th className="p-2 text-center w-20">Số lượng</th>
+                        <th className="p-2 text-left min-w-36 text-blue-900 bg-blue-50/40">Đơn giá sau thuế</th>
+                        <th className="p-2 text-left min-w-28">Đơn giá trước thuế</th>
+                        <th className="p-2 text-left min-w-24">Chiết khấu</th>
+                        <th className="p-2 text-center w-16">Thuế %</th>
+                        <th className="p-2 text-right min-w-28">Tiền trước thuế</th>
+                        <th className="p-2 text-right min-w-24">Thuế GTGT</th>
+                        <th className="p-2 text-right min-w-28">Tổng tiền</th>
+                        <th className="p-2 text-center w-12">Xóa</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {items.map((item, idx) => (
+                        <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
+                          {/* 1. STT - Top aligned */}
+                          <td className="p-2 text-center text-slate-400 align-top pt-2.5 font-semibold">
+                            {idx + 1}
+                          </td>
+
+                          {/* 2. Tên mặt hàng & Đổi hàng - Top aligned */}
+                          <td className="p-2 align-top">
+                            <div className="font-semibold text-slate-800 leading-snug">{item.productName}</div>
+                            <div className="font-mono text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5 flex-wrap">
+                              <span className="font-semibold text-indigo-700 bg-indigo-50/80 px-1 py-0.2 rounded border border-indigo-100">
+                                {item.productCode}
+                              </span>
+                              {(() => {
+                                const stock = inventoryStockMap.get(item.productCode)?.inStock;
+                                if (stock === undefined) return null;
+                                return (
+                                  <span
+                                    className={`text-[10px] px-1 py-0.2 rounded font-semibold ${
+                                      stock > 0
+                                        ? 'text-emerald-700 bg-emerald-50'
+                                        : stock === 0
+                                        ? 'text-slate-600 bg-slate-100'
+                                        : 'text-rose-700 bg-rose-50'
+                                    }`}
+                                    title={`Số lượng tồn kho đến ngày ${formatDate(orderDate)}: ${formatNumber(stock)} ${item.saleUnit}`}
+                                  >
+                                    (Tồn: {formatNumber(stock)} {item.saleUnit})
+                                  </span>
+                                );
+                              })()}
+                            </div>
+                            {/* Nút Đổi mặt hàng đã chọn */}
+                            <div className="mt-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setChangingItemIndex(idx)}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-colors cursor-pointer active:scale-95 shadow-2xs"
+                                title="Đổi mặt hàng này sang hàng khác trong danh mục"
+                              >
+                                <RefreshCw className="w-3 h-3 text-indigo-600" />
+                                <span>Đổi hàng</span>
+                              </button>
+                            </div>
+                          </td>
+
+                          {/* 3. ĐVT - Top aligned */}
+                          <td className="p-2 text-center text-slate-600 align-top pt-2.5 font-medium">
+                            {item.saleUnit}
+                          </td>
+
+                          {/* 4. Số lượng - Top aligned */}
+                          <td className="p-2 align-top">
+                            <input
+                              type="number"
+                              min="1"
+                              step="any"
+                              value={item.quantity}
+                              onChange={(e) => handleUpdateItem(idx, 'quantity', parseFloat(e.target.value) || 0)}
+                              className="w-16 px-2 py-1 text-center font-bold text-slate-900 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500"
+                            />
+                          </td>
+
+                          {/* 5. Đơn giá sau thuế (CHUYỂN LÊN TRƯỚC theo yêu cầu) - Top aligned */}
+                          <td className="p-2 min-w-44 align-top bg-blue-50/20">
+                            <input
+                              type="number"
+                              step="any"
+                              value={item.postTaxPrice}
+                              onChange={(e) => handleUpdateItem(idx, 'postTaxPrice', parseFloat(e.target.value) || 0)}
+                              title="Sửa đơn giá sau thuế sẽ tự động tính lại đơn giá trước thuế"
+                              className="w-full px-2 py-1 text-right font-bold text-blue-900 bg-blue-50/60 border border-blue-300 rounded text-xs focus:ring-1 focus:ring-blue-500"
+                            />
+                            {/* Gợi ý giá nhanh */}
                             {(() => {
-                              const stock = inventoryStockMap.get(item.productCode)?.inStock;
-                              if (stock === undefined) return null;
+                              const prod = products.find((p) => p.code === item.productCode);
+                              if (!prod) return null;
+                              const sp = calculateSuggestedPrices(
+                                prod,
+                                orderDate,
+                                products,
+                                purchases,
+                                allOrders,
+                                settings.postTaxSalePriceDecimals ?? -2,
+                                settings.salePriceDecimals ?? 2,
+                                initialOrder?.id
+                              );
+                              const hasSuggestions =
+                                sp.priceByMargin > 0 ||
+                                sp.defaultPrice > 0 ||
+                                sp.priceMinusVariance > 0 ||
+                                sp.pricePlusVariance > 0;
+                              if (!hasSuggestions) return null;
+
                               return (
-                                <span
-                                  className={`text-[10px] px-1 py-0.2 rounded font-semibold ${
-                                    stock > 0
-                                      ? 'text-emerald-700 bg-emerald-50'
-                                      : stock === 0
-                                      ? 'text-slate-600 bg-slate-100'
-                                      : 'text-rose-700 bg-rose-50'
-                                  }`}
-                                  title={`Số lượng tồn kho đến ngày ${formatDate(orderDate)}: ${formatNumber(stock)} ${item.saleUnit}`}
-                                >
-                                  (Tồn: {formatNumber(stock)} {item.saleUnit})
-                                </span>
+                                <div className="flex flex-wrap items-center gap-1 mt-1">
+                                  {sp.priceByMargin > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateItem(idx, 'postTaxPrice', sp.priceByMargin)}
+                                      className={`px-1.5 py-0.5 text-[10px] font-bold rounded border transition-colors cursor-pointer ${
+                                        Math.abs(item.postTaxPrice - sp.priceByMargin) < 0.01
+                                          ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
+                                          : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200'
+                                      }`}
+                                      title={`Giá theo TSLN ${prod.profitMargin}% (Đơn giá MAX tồn: ${formatNumber(sp.maxCostPerPurchaseUnit)} ₫)`}
+                                    >
+                                      TSLN: {formatNumber(sp.priceByMargin)}
+                                    </button>
+                                  )}
+                                  {sp.priceMinusVariance > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateItem(idx, 'postTaxPrice', sp.priceMinusVariance)}
+                                      className={`px-1.5 py-0.5 text-[10px] font-semibold rounded border transition-colors cursor-pointer ${
+                                        Math.abs(item.postTaxPrice - sp.priceMinusVariance) < 0.01
+                                          ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
+                                          : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border-amber-200'
+                                      }`}
+                                      title="Giá biên độ (-)"
+                                    >
+                                      (-) {formatNumber(sp.priceMinusVariance)}
+                                    </button>
+                                  )}
+                                  {sp.defaultPrice > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateItem(idx, 'postTaxPrice', sp.defaultPrice)}
+                                      className={`px-1.5 py-0.5 text-[10px] font-bold rounded border transition-colors cursor-pointer ${
+                                        Math.abs(item.postTaxPrice - sp.defaultPrice) < 0.01
+                                          ? 'bg-blue-600 text-white border-blue-700 shadow-2xs'
+                                          : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200'
+                                      }`}
+                                      title="Giá bán mặc định"
+                                    >
+                                      MĐ: {formatNumber(sp.defaultPrice)}
+                                    </button>
+                                  )}
+                                  {sp.pricePlusVariance > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateItem(idx, 'postTaxPrice', sp.pricePlusVariance)}
+                                      className={`px-1.5 py-0.5 text-[10px] font-semibold rounded border transition-colors cursor-pointer ${
+                                        Math.abs(item.postTaxPrice - sp.pricePlusVariance) < 0.01
+                                          ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
+                                          : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border-emerald-200'
+                                      }`}
+                                      title="Giá biên độ (+)"
+                                    >
+                                      (+) {formatNumber(sp.pricePlusVariance)}
+                                    </button>
+                                  )}
+                                </div>
                               );
                             })()}
-                          </div>
-                        </td>
-                        <td className="p-2 text-center text-slate-600">{item.saleUnit}</td>
-                        <td className="p-2">
-                          <input
-                            type="number"
-                            min="1"
-                            step="any"
-                            value={item.quantity}
-                            onChange={(e) => handleUpdateItem(idx, 'quantity', parseFloat(e.target.value) || 0)}
-                            className="w-16 px-2 py-1 text-center font-bold text-slate-900 border border-slate-300 rounded"
-                          />
-                        </td>
-                        <td className="p-2">
-                          <input
-                            type="number"
-                            step="any"
-                            value={item.preTaxPrice}
-                            onChange={(e) => handleUpdateItem(idx, 'preTaxPrice', parseFloat(e.target.value) || 0)}
-                            className="w-24 px-2 py-1 text-right text-slate-800 border border-slate-300 rounded"
-                          />
-                        </td>
-                        <td className="p-2 min-w-44">
-                          {/* Sửa đơn giá sau thuế -> Đơn giá trước thuế tự động tính lại! */}
-                          <input
-                            type="number"
-                            step="any"
-                            value={item.postTaxPrice}
-                            onChange={(e) => handleUpdateItem(idx, 'postTaxPrice', parseFloat(e.target.value) || 0)}
-                            title="Sửa đơn giá sau thuế sẽ tự động tính lại đơn giá trước thuế (làm tròn số thập phân cấu hình)"
-                            className="w-full px-2 py-1 text-right font-bold text-blue-800 bg-blue-50/50 border border-blue-200 rounded text-xs"
-                          />
-                          {/* Quick selection chips for suggested prices */}
-                          {(() => {
-                            const prod = products.find((p) => p.code === item.productCode);
-                            if (!prod) return null;
-                            const sp = calculateSuggestedPrices(
-                              prod,
-                              orderDate,
-                              products,
-                              purchases,
-                              allOrders,
-                              settings.postTaxSalePriceDecimals ?? -2,
-                              settings.salePriceDecimals ?? 2,
-                              initialOrder?.id
-                            );
-                            const hasSuggestions =
-                              sp.priceByMargin > 0 ||
-                              sp.defaultPrice > 0 ||
-                              sp.priceMinusVariance > 0 ||
-                              sp.pricePlusVariance > 0;
-                            if (!hasSuggestions) return null;
+                          </td>
 
-                            return (
-                              <div className="flex flex-wrap items-center gap-1 mt-1">
-                                {sp.priceByMargin > 0 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleUpdateItem(idx, 'postTaxPrice', sp.priceByMargin)}
-                                    className={`px-1.5 py-0.5 text-[10px] font-bold rounded border transition-colors cursor-pointer ${
-                                      Math.abs(item.postTaxPrice - sp.priceByMargin) < 0.01
-                                        ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
-                                        : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200'
+                          {/* 6. Đơn giá trước thuế (CHUYỂN RA SAU) - Top aligned */}
+                          <td className="p-2 align-top">
+                            <input
+                              type="number"
+                              step="any"
+                              value={item.preTaxPrice}
+                              onChange={(e) => handleUpdateItem(idx, 'preTaxPrice', parseFloat(e.target.value) || 0)}
+                              className="w-24 px-2 py-1 text-right text-slate-800 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-blue-500"
+                            />
+                          </td>
+
+                          {/* 7. Chiết khấu - Top aligned */}
+                          <td className="p-2 align-top">
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={item.itemDiscount}
+                              onChange={(e) => handleUpdateItem(idx, 'itemDiscount', parseFloat(e.target.value) || 0)}
+                              className="w-20 px-2 py-1 text-right text-slate-700 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-blue-500"
+                            />
+                          </td>
+
+                          {/* 8. Thuế suất % - Top aligned */}
+                          <td className="p-2 text-center align-top">
+                            <input
+                              type="number"
+                              min="0"
+                              value={item.vatRate}
+                              onChange={(e) => handleUpdateItem(idx, 'vatRate', parseFloat(e.target.value) || 0)}
+                              className="w-12 px-1 py-1 text-center text-slate-700 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-blue-500"
+                            />
+                          </td>
+
+                          {/* 9. Tiền trước thuế - Top aligned */}
+                          <td className="p-2 text-right text-slate-700 font-mono align-top pt-2.5">
+                            {formatCurrency(item.subtotal)}
+                          </td>
+
+                          {/* 10. Tiền thuế GTGT - Top aligned */}
+                          <td className="p-2 text-right text-slate-700 font-mono align-top pt-2.5">
+                            {formatCurrency(item.vatAmount)}
+                          </td>
+
+                          {/* 11. Tổng tiền - Top aligned */}
+                          <td className="p-2 text-right font-bold text-slate-900 font-mono align-top pt-2.5">
+                            {formatCurrency(item.totalAmount)}
+                          </td>
+
+                          {/* 12. Nút Xóa - Top aligned */}
+                          <td className="p-2 text-center align-top pt-2">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItem(idx)}
+                              className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
+                              title="Xóa dòng mặt hàng này"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile View: Clean, intuitive, touch-friendly Card Layout for phones */}
+                <div className="block md:hidden space-y-3">
+                  {items.map((item, idx) => {
+                    const prod = products.find((p) => p.code === item.productCode);
+                    const stock = inventoryStockMap.get(item.productCode)?.inStock;
+                    const sp = prod
+                      ? calculateSuggestedPrices(
+                          prod,
+                          orderDate,
+                          products,
+                          purchases,
+                          allOrders,
+                          settings.postTaxSalePriceDecimals ?? -2,
+                          settings.salePriceDecimals ?? 2,
+                          initialOrder?.id
+                        )
+                      : null;
+
+                    return (
+                      <div
+                        key={item.id}
+                        className="bg-white rounded-xl border border-slate-200 p-3 shadow-2xs space-y-2.5"
+                      >
+                        {/* Header card: Index, Name, Code, Stock, Action buttons */}
+                        <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2">
+                          <div className="flex items-start gap-2 min-w-0">
+                            <span className="shrink-0 w-5 h-5 rounded-full bg-slate-100 text-slate-700 text-xs font-bold flex items-center justify-center mt-0.5">
+                              {idx + 1}
+                            </span>
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-900 text-sm leading-snug">
+                                {item.productName}
+                              </div>
+                              <div className="flex items-center gap-1.5 flex-wrap mt-0.5 text-xs">
+                                <span className="font-mono text-[11px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded border border-indigo-100">
+                                  {item.productCode}
+                                </span>
+                                <span className="text-slate-500 text-[11px]">
+                                  ĐVT: <strong className="text-slate-800">{item.saleUnit}</strong>
+                                </span>
+                                {stock !== undefined && (
+                                  <span
+                                    className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
+                                      stock > 0
+                                        ? 'text-emerald-700 bg-emerald-50 border border-emerald-200'
+                                        : stock === 0
+                                        ? 'text-slate-600 bg-slate-100 border border-slate-200'
+                                        : 'text-rose-700 bg-rose-50 border border-rose-200'
                                     }`}
-                                    title={`Giá theo TSLN ${prod.profitMargin}% (Đơn giá MAX tồn: ${formatNumber(sp.maxCostPerPurchaseUnit)} ₫)`}
                                   >
-                                    TSLN: {formatNumber(sp.priceByMargin)}
-                                  </button>
-                                )}
-                                {sp.priceMinusVariance > 0 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleUpdateItem(idx, 'postTaxPrice', sp.priceMinusVariance)}
-                                    className={`px-1.5 py-0.5 text-[10px] font-semibold rounded border transition-colors cursor-pointer ${
-                                      Math.abs(item.postTaxPrice - sp.priceMinusVariance) < 0.01
-                                        ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
-                                        : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border-amber-200'
-                                    }`}
-                                    title="Giá biên độ (-)"
-                                  >
-                                    (-) {formatNumber(sp.priceMinusVariance)}
-                                  </button>
-                                )}
-                                {sp.defaultPrice > 0 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleUpdateItem(idx, 'postTaxPrice', sp.defaultPrice)}
-                                    className={`px-1.5 py-0.5 text-[10px] font-bold rounded border transition-colors cursor-pointer ${
-                                      Math.abs(item.postTaxPrice - sp.defaultPrice) < 0.01
-                                        ? 'bg-blue-600 text-white border-blue-700 shadow-2xs'
-                                        : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200'
-                                    }`}
-                                    title="Giá bán mặc định"
-                                  >
-                                    MĐ: {formatNumber(sp.defaultPrice)}
-                                  </button>
-                                )}
-                                {sp.pricePlusVariance > 0 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleUpdateItem(idx, 'postTaxPrice', sp.pricePlusVariance)}
-                                    className={`px-1.5 py-0.5 text-[10px] font-semibold rounded border transition-colors cursor-pointer ${
-                                      Math.abs(item.postTaxPrice - sp.pricePlusVariance) < 0.01
-                                        ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
-                                        : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border-emerald-200'
-                                    }`}
-                                    title="Giá biên độ (+)"
-                                  >
-                                    (+) {formatNumber(sp.pricePlusVariance)}
-                                  </button>
+                                    Tồn: {formatNumber(stock)} {item.saleUnit}
+                                  </span>
                                 )}
                               </div>
-                            );
-                          })()}
-                        </td>
-                        <td className="p-2">
-                          <input
-                            type="number"
-                            min="0"
-                            step="any"
-                            value={item.itemDiscount}
-                            onChange={(e) => handleUpdateItem(idx, 'itemDiscount', parseFloat(e.target.value) || 0)}
-                            className="w-20 px-2 py-1 text-right text-slate-700 border border-slate-300 rounded"
-                          />
-                        </td>
-                        <td className="p-2 text-center">
-                          <input
-                            type="number"
-                            min="0"
-                            value={item.vatRate}
-                            onChange={(e) => handleUpdateItem(idx, 'vatRate', parseFloat(e.target.value) || 0)}
-                            className="w-12 px-1 py-1 text-center text-slate-700 border border-slate-300 rounded"
-                          />
-                        </td>
-                        <td className="p-2 text-right text-slate-700 font-mono">
-                          {formatCurrency(item.subtotal)}
-                        </td>
-                        <td className="p-2 text-right text-slate-700 font-mono">
-                          {formatCurrency(item.vatAmount)}
-                        </td>
-                        <td className="p-2 text-right font-bold text-slate-900 font-mono">
-                          {formatCurrency(item.totalAmount)}
-                        </td>
-                        <td className="p-2 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveItem(idx)}
-                            className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setChangingItemIndex(idx)}
+                              className="px-2 py-1 text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg flex items-center gap-1 cursor-pointer transition-colors active:scale-95 shadow-2xs"
+                              title="Đổi mặt hàng này sang hàng khác"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />
+                              <span>Đổi hàng</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItem(idx)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"
+                              title="Xóa mặt hàng này"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Input Rows */}
+                        <div className="space-y-2">
+                          {/* Row 1: Số lượng & Đơn giá sau thuế (Có VAT - Placed FIRST) */}
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                                Số lượng ({item.saleUnit}):
+                              </label>
+                              <input
+                                type="number"
+                                min="1"
+                                step="any"
+                                value={item.quantity}
+                                onChange={(e) => handleUpdateItem(idx, 'quantity', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2.5 py-1.5 text-center font-bold text-slate-900 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-blue-900 mb-1 flex items-center justify-between">
+                                <span>ĐG sau thuế:</span>
+                                <span className="text-[10px] text-blue-600 font-semibold bg-blue-100/60 px-1 py-0.2 rounded">Có VAT</span>
+                              </label>
+                              <input
+                                type="number"
+                                step="any"
+                                value={item.postTaxPrice}
+                                onChange={(e) => handleUpdateItem(idx, 'postTaxPrice', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2.5 py-1.5 text-right font-black text-blue-800 bg-blue-50/60 border border-blue-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Quick suggested price chips for mobile */}
+                          {sp && (sp.priceByMargin > 0 || sp.defaultPrice > 0 || sp.priceMinusVariance > 0 || sp.pricePlusVariance > 0) && (
+                            <div className="flex flex-wrap items-center gap-1 text-[11px] bg-slate-50 p-1.5 rounded-lg border border-slate-200/60">
+                              <span className="text-[10px] text-slate-400 font-semibold pl-1">Gợi ý:</span>
+                              {sp.priceByMargin > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateItem(idx, 'postTaxPrice', sp.priceByMargin)}
+                                  className={`px-1.5 py-0.5 text-[10px] font-bold rounded border transition-colors cursor-pointer ${
+                                    Math.abs(item.postTaxPrice - sp.priceByMargin) < 0.01
+                                      ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
+                                      : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200'
+                                  }`}
+                                  title={`Giá theo TSLN ${prod?.profitMargin}%`}
+                                >
+                                  TSLN: {formatNumber(sp.priceByMargin)}
+                                </button>
+                              )}
+                              {sp.defaultPrice > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateItem(idx, 'postTaxPrice', sp.defaultPrice)}
+                                  className={`px-1.5 py-0.5 text-[10px] font-bold rounded border transition-colors cursor-pointer ${
+                                    Math.abs(item.postTaxPrice - sp.defaultPrice) < 0.01
+                                      ? 'bg-blue-600 text-white border-blue-700 shadow-2xs'
+                                      : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200'
+                                  }`}
+                                >
+                                  MĐ: {formatNumber(sp.defaultPrice)}
+                                </button>
+                              )}
+                              {sp.priceMinusVariance > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateItem(idx, 'postTaxPrice', sp.priceMinusVariance)}
+                                  className={`px-1.5 py-0.5 text-[10px] font-semibold rounded border transition-colors cursor-pointer ${
+                                    Math.abs(item.postTaxPrice - sp.priceMinusVariance) < 0.01
+                                      ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
+                                      : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border-amber-200'
+                                  }`}
+                                >
+                                  (-) {formatNumber(sp.priceMinusVariance)}
+                                </button>
+                              )}
+                              {sp.pricePlusVariance > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateItem(idx, 'postTaxPrice', sp.pricePlusVariance)}
+                                  className={`px-1.5 py-0.5 text-[10px] font-semibold rounded border transition-colors cursor-pointer ${
+                                    Math.abs(item.postTaxPrice - sp.pricePlusVariance) < 0.01
+                                      ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
+                                      : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border-emerald-200'
+                                  }`}
+                                >
+                                  (+) {formatNumber(sp.pricePlusVariance)}
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Row 2: Đơn giá trước thuế (Placed AFTER), Chiết khấu, Thuế VAT */}
+                          <div className="grid grid-cols-3 gap-2">
+                            <div>
+                              <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                                ĐG trước thuế:
+                              </label>
+                              <input
+                                type="number"
+                                step="any"
+                                value={item.preTaxPrice}
+                                onChange={(e) => handleUpdateItem(idx, 'preTaxPrice', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2 py-1 text-right text-slate-800 border border-slate-300 rounded-lg text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                                Chiết khấu:
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={item.itemDiscount}
+                                onChange={(e) => handleUpdateItem(idx, 'itemDiscount', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2 py-1 text-right text-slate-700 border border-slate-300 rounded-lg text-xs"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                                Thuế GTGT:
+                              </label>
+                              <div className="relative">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={item.vatRate}
+                                  onChange={(e) => handleUpdateItem(idx, 'vatRate', parseFloat(e.target.value) || 0)}
+                                  className="w-full pl-2 pr-5 py-1 text-center text-slate-700 border border-slate-300 rounded-lg text-xs"
+                                />
+                                <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-bold">%</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Card Summary footer */}
+                        <div className="bg-slate-50 p-2 rounded-lg border border-slate-200/70 flex items-center justify-between text-xs">
+                          <div className="text-[11px] text-slate-600 space-y-0.5">
+                            <div>Trước thuế: <strong className="font-mono text-slate-800">{formatCurrency(item.subtotal)}</strong></div>
+                            <div>Thuế: <strong className="font-mono text-slate-800">{formatCurrency(item.vatAmount)}</strong></div>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-slate-500 font-medium block">Tổng tiền:</span>
+                            <span className="font-black text-sm text-blue-900 font-mono">
+                              {formatCurrency(item.totalAmount)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
             )}
           </div>
 
@@ -1376,6 +1719,27 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
             setCustomerSearchTerm(`${cust.name} (${cust.code})`);
             setIsCustomerModalOpen(false);
             setEditingCustomerForModal(null);
+          }}
+        />
+      )}
+
+      {/* Modal Đổi Mặt Hàng */}
+      {changingItemIndex !== null && items[changingItemIndex] && (
+        <ChangeProductModal
+          isOpen={changingItemIndex !== null}
+          onClose={() => setChangingItemIndex(null)}
+          currentItem={items[changingItemIndex]}
+          itemIndex={changingItemIndex}
+          products={products}
+          inventoryStockMap={inventoryStockMap}
+          orderDate={orderDate}
+          purchases={purchases}
+          allOrders={allOrders}
+          settings={settings}
+          initialOrderId={initialOrder?.id}
+          onSelectProduct={(newProduct, options) => {
+            if (changingItemIndex === null) return;
+            handleSwapItemProduct(changingItemIndex, newProduct, options);
           }}
         />
       )}

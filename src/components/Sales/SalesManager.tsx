@@ -922,7 +922,18 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                             />
                           </td>
                           <td className="p-3 font-mono font-bold text-blue-700">
-                            {order.orderCode}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setViewingOrder(order);
+                                setIsDetailModalOpen(true);
+                              }}
+                              className="inline-flex items-center gap-1.5 hover:text-blue-900 hover:underline cursor-pointer group text-left"
+                              title="Bấm để xem chi tiết đơn hàng"
+                            >
+                              <span>{order.orderCode}</span>
+                              <Eye className="w-3.5 h-3.5 text-blue-400 group-hover:text-blue-700 opacity-60 group-hover:opacity-100 transition-opacity" />
+                            </button>
                           </td>
                           <td className="p-3 text-slate-600">
                             {formatDate(order.orderDate)}
