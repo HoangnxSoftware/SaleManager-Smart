@@ -474,4 +474,197 @@ export async function parseExcelFile(file: File): Promise<any[]> {
   return XLSX.utils.sheet_to_json(worksheet, { defval: '' });
 }
 
+export interface DebtSummaryExportRow {
+  code: string;
+  name: string;
+  taxCode?: string;
+  phone?: string;
+  address?: string;
+  totalSales?: number;
+  totalPurchases?: number;
+  totalPaid: number;
+  currentDebt: number;
+}
+
+/**
+ * Exports summary debt report to Excel (Công nợ tổng hợp)
+ */
+export function exportDebtSummaryToExcel(
+  type: 'customer' | 'supplier',
+  items: DebtSummaryExportRow[],
+  startDate?: string,
+  endDate?: string
+) {
+  const isCustomer = type === 'customer';
+  const docColName = isCustomer ? 'Tổng tiền bán (đ)' : 'Tổng tiền nhập (đ)';
+
+  const rows = items.map((item, idx) => ({
+    'STT': idx + 1,
+    [isCustomer ? 'Mã KH' : 'Mã NCC']: item.code,
+    [isCustomer ? 'Tên Khách hàng' : 'Tên Nhà cung cấp']: item.name,
+    'Mã số thuế': item.taxCode || '',
+    'Số điện thoại': item.phone || '',
+    'Địa chỉ': item.address || '',
+    [docColName]: isCustomer ? (item.totalSales || 0) : (item.totalPurchases || 0),
+    'Đã thanh toán (đ)': item.totalPaid || 0,
+    'Công nợ còn lại (đ)': item.currentDebt || 0,
+    'Trạng thái': item.currentDebt > 0 ? 'Còn nợ' : 'Đã hết nợ',
+  }));
+
+  // Append Total Row
+  if (items.length > 0) {
+    const totalDoc = items.reduce(
+      (sum, it) => sum + (isCustomer ? (it.totalSales || 0) : (it.totalPurchases || 0)),
+      0
+    );
+    const totalPaid = items.reduce((sum, it) => sum + (it.totalPaid || 0), 0);
+    const totalDebt = items.reduce((sum, it) => sum + (it.currentDebt || 0), 0);
+
+    rows.push({
+      'STT': 'TỔNG CỘNG' as any,
+      [isCustomer ? 'Mã KH' : 'Mã NCC']: '',
+      [isCustomer ? 'Tên Khách hàng' : 'Tên Nhà cung cấp']: `${items.length} đối tượng`,
+      'Mã số thuế': '',
+      'Số điện thoại': '',
+      'Địa chỉ': '',
+      [docColName]: totalDoc,
+      'Đã thanh toán (đ)': totalPaid,
+      'Công nợ còn lại (đ)': totalDebt,
+      'Trạng thái': totalDebt > 0 ? 'Còn nợ' : 'Đã hết nợ',
+    });
+  }
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+
+  // Column width configuration
+  ws['!cols'] = [
+    { wch: 8 },  // STT
+    { wch: 15 }, // Mã
+    { wch: 34 }, // Tên
+    { wch: 16 }, // MST
+    { wch: 15 }, // SĐT
+    { wch: 30 }, // Địa chỉ
+    { wch: 22 }, // Tổng tiền bán / nhập
+    { wch: 20 }, // Đã thanh toán
+    { wch: 20 }, // Công nợ còn lại
+    { wch: 14 }, // Trạng thái
+  ];
+
+  const wb = XLSX.utils.book_new();
+  const sheetName = isCustomer ? 'CongNo_TongHop_KH' : 'CongNo_TongHop_NCC';
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+  const dateSuffix = startDate || endDate
+    ? `${startDate || 'dau'}_den_${endDate || 'hien_tai'}`
+    : new Date().toISOString().slice(0, 10);
+  const fileName = `Bao_Cao_Cong_No_Tong_Hop_${isCustomer ? 'Khach_Hang' : 'Nha_Cung_Cap'}_${dateSuffix}.xlsx`;
+
+  downloadWorkbook(wb, fileName);
+}
+
+export interface EntityDebtDetailTimelineItem {
+  type: string;
+  date: string;
+  code: string;
+  description: string;
+  increase: number; // Phát sinh nợ (+)
+  decrease: number; // Đã thanh toán (-)
+  debtDelta?: number;
+  paymentId?: string;
+}
+
+/**
+ * Exports detailed debt report for a specific entity to Excel (Công nợ chi tiết từng đối tượng)
+ */
+export function exportEntityDebtDetailToExcel(
+  type: 'customer' | 'supplier',
+  entity: {
+    code: string;
+    name: string;
+    taxCode?: string;
+    phone?: string;
+    address?: string;
+  },
+  summaryInfo: {
+    totalSales?: number;
+    totalPurchases?: number;
+    totalPaid: number;
+    currentDebt: number;
+  },
+  timeline: EntityDebtDetailTimelineItem[],
+  startDate?: string,
+  endDate?: string
+) {
+  const isCustomer = type === 'customer';
+
+  // Sort timeline chronologically (ascending) for cumulative balance calculation
+  const sortedTimeline = [...timeline].sort((a, b) => a.date.localeCompare(b.date));
+
+  let runningDebt = 0;
+
+  const rows = sortedTimeline.map((item, idx) => {
+    runningDebt += (item.increase - item.decrease);
+    const typeLabel =
+      item.type === 'order'
+        ? 'Đơn hàng bán'
+        : item.type === 'purchase'
+        ? 'Phiếu nhập hàng'
+        : isCustomer
+        ? 'Phiếu thu nợ'
+        : 'Phiếu chi trả nợ';
+
+    return {
+      'STT': idx + 1,
+      'Ngày chứng từ': item.date,
+      'Số chứng từ': item.code,
+      'Loại nghiệp vụ': typeLabel,
+      'Diễn giải': item.description,
+      'Phát sinh nợ (+)': item.increase || 0,
+      'Đã thanh toán (-)': item.decrease || 0,
+      'Dư nợ lũy kế (đ)': runningDebt,
+    };
+  });
+
+  // Summary Row at the bottom
+  const totalIncrease = sortedTimeline.reduce((sum, it) => sum + (it.increase || 0), 0);
+  const totalDecrease = sortedTimeline.reduce((sum, it) => sum + (it.decrease || 0), 0);
+
+  rows.push({
+    'STT': 'TỔNG CỘNG' as any,
+    'Ngày chứng từ': '',
+    'Số chứng từ': `${sortedTimeline.length} chứng từ`,
+    'Loại nghiệp vụ': '',
+    'Diễn giải': '',
+    'Phát sinh nợ (+)': totalIncrease,
+    'Đã thanh toán (-)': totalDecrease,
+    'Dư nợ lũy kế (đ)': summaryInfo.currentDebt,
+  });
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+
+  ws['!cols'] = [
+    { wch: 8 },  // STT
+    { wch: 14 }, // Ngày chứng từ
+    { wch: 18 }, // Số chứng từ
+    { wch: 18 }, // Loại nghiệp vụ
+    { wch: 42 }, // Diễn giải
+    { wch: 20 }, // Phát sinh nợ (+)
+    { wch: 20 }, // Đã thanh toán (-)
+    { wch: 22 }, // Dư nợ lũy kế
+  ];
+
+  const wb = XLSX.utils.book_new();
+  const sheetName = isCustomer ? 'ChiTiet_CongNo_KH' : 'ChiTiet_CongNo_NCC';
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+  const cleanEntityCode = (entity.code || 'DT').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const dateSuffix = startDate || endDate
+    ? `${startDate || 'dau'}_den_${endDate || 'hien_tai'}`
+    : new Date().toISOString().slice(0, 10);
+  const fileName = `So_Chi_Tiet_Cong_No_${isCustomer ? 'KH' : 'NCC'}_${cleanEntityCode}_${dateSuffix}.xlsx`;
+
+  downloadWorkbook(wb, fileName);
+}
+
+
 

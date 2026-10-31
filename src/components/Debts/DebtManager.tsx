@@ -13,6 +13,7 @@ import {
   ArrowUpRight,
   History,
   FileText,
+  FileSpreadsheet,
   Calendar,
   CheckCircle2,
   Trash2,
@@ -30,6 +31,8 @@ import {
   parseExcelFile,
   downloadCustomerDebtTemplate,
   downloadSupplierDebtTemplate,
+  exportDebtSummaryToExcel,
+  exportEntityDebtDetailToExcel,
 } from '../../services/excelService';
 
 interface DebtManagerProps {
@@ -507,6 +510,123 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
     return filteredTimeline.sort((a, b) => b.date.localeCompare(a.date));
   }, [activeTab, selectedEntityId, selectedEntity, orders, purchases, debtPayments, startDate, endDate]);
 
+  // Handle Excel Export for Summary Debts (Công nợ tổng hợp)
+  const handleExportSummaryDebt = () => {
+    if (filteredSummaryList.length === 0) {
+      alert('Không có dữ liệu công nợ phù hợp để xuất Excel.');
+      return;
+    }
+    exportDebtSummaryToExcel(activeTab, filteredSummaryList, startDate, endDate);
+  };
+
+  // Handle Excel Export for Detailed Debt of a specific entity (Công nợ chi tiết từng đối tượng)
+  const handleExportEntityDebt = (entityId: string) => {
+    const isCustomer = activeTab === 'customer';
+    const entity = isCustomer
+      ? customers.find((c) => c.id === entityId)
+      : suppliers.find((s) => s.id === entityId);
+
+    if (!entity) return;
+
+    const summary = isCustomer
+      ? customerDebtsSummary.find((c) => c.id === entityId)
+      : supplierDebtsSummary.find((s) => s.id === entityId);
+
+    if (!summary) return;
+
+    // Build timeline for this specific entity
+    const timeline: any[] = [];
+
+    if (isCustomer) {
+      const custOrders = orders.filter(
+        (o) =>
+          (o.customerId === entityId ||
+            (o.customerCode && o.customerCode.trim().toLowerCase() === entity.code.trim().toLowerCase())) &&
+          o.deliveryStatus !== 'cancelled'
+      );
+      custOrders.forEach((o) => {
+        timeline.push({
+          type: 'order',
+          date: o.orderDate,
+          code: o.orderCode,
+          description: `Đơn hàng bán: ${o.orderCode} (${o.items.length} mặt hàng)`,
+          increase: o.totalAmount,
+          decrease: o.paidAmount,
+          debtDelta: o.debtAmount,
+        });
+      });
+
+      const payments = debtPayments.filter(
+        (dp) =>
+          dp.type === 'customer' &&
+          (dp.entityId === entityId ||
+            (dp.entityCode && dp.entityCode.trim().toLowerCase() === entity.code.trim().toLowerCase()))
+      );
+      payments.forEach((p) => {
+        timeline.push({
+          type: 'payment',
+          date: p.date,
+          code: p.code,
+          description: `Thu nợ: ${p.notes || 'Phiếu thu công nợ'} (${p.paymentMethod})`,
+          increase: 0,
+          decrease: p.amount,
+          debtDelta: -p.amount,
+          paymentId: p.id,
+        });
+      });
+    } else {
+      const supPurchases = purchases.filter(
+        (p) =>
+          (p.supplierCode && p.supplierCode.trim().toLowerCase() === entity.code.trim().toLowerCase()) ||
+          (p.supplierTaxCode && entity.taxCode && p.supplierTaxCode.trim() === entity.taxCode.trim()) ||
+          ((p as any).supplierId === entityId)
+      );
+      supPurchases.forEach((p) => {
+        timeline.push({
+          type: 'purchase',
+          date: p.purchaseDate,
+          code: p.billNo,
+          description: `Phiếu nhập hàng: ${p.billNo} (${p.items.length} mặt hàng)`,
+          increase: p.totalAmount,
+          decrease: p.paidAmount,
+          debtDelta: p.totalAmount - p.paidAmount,
+        });
+      });
+
+      const payments = debtPayments.filter(
+        (dp) =>
+          dp.type === 'supplier' &&
+          (dp.entityId === entityId ||
+            (dp.entityCode && dp.entityCode.trim().toLowerCase() === entity.code.trim().toLowerCase()))
+      );
+      payments.forEach((p) => {
+        timeline.push({
+          type: 'payment',
+          date: p.date,
+          code: p.code,
+          description: `Chi trả nợ NCC: ${p.notes || 'Phiếu chi trả nợ'} (${p.paymentMethod})`,
+          increase: 0,
+          decrease: p.amount,
+          debtDelta: -p.amount,
+          paymentId: p.id,
+        });
+      });
+    }
+
+    const filteredTimeline = timeline.filter(
+      (item) => (!startDate || item.date >= startDate) && (!endDate || item.date <= endDate)
+    );
+
+    exportEntityDebtDetailToExcel(
+      activeTab,
+      entity,
+      summary,
+      filteredTimeline,
+      startDate,
+      endDate
+    );
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Banner */}
@@ -732,6 +852,32 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
             </div>
           )}
 
+          {/* Excel Export Summary Debt */}
+          {viewMode === 'summary' && (
+            <button
+              type="button"
+              onClick={handleExportSummaryDebt}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white shadow-xs cursor-pointer transition-all"
+              title={`Xuất ${filteredSummaryList.length} dòng công nợ tổng hợp ra file Excel`}
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Xuất Excel công nợ tổng hợp</span>
+            </button>
+          )}
+
+          {/* Excel Export Detail for current entity */}
+          {viewMode === 'detail' && selectedEntityId && (
+            <button
+              type="button"
+              onClick={() => handleExportEntityDebt(selectedEntityId)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white shadow-xs cursor-pointer transition-all"
+              title="Xuất chi tiết lịch sử công nợ của đối tượng này ra file Excel"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Xuất Excel chi tiết</span>
+            </button>
+          )}
+
           {/* Excel Import for Debts */}
           <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer">
             <Upload className="w-3.5 h-3.5" />
@@ -856,6 +1002,14 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
                           </button>
                           <button
                             type="button"
+                            onClick={() => handleExportEntityDebt(row.id)}
+                            className="p-1.5 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg cursor-pointer transition-colors"
+                            title={`Xuất sổ công nợ chi tiết của ${row.name} ra Excel`}
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => {
                               setPreSelectedId(row.id);
                               setIsPaymentModalOpen(true);
@@ -976,6 +1130,15 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
               <div className="flex flex-wrap items-center gap-2 self-start md:self-auto shrink-0">
                 <button
                   type="button"
+                  onClick={() => handleExportEntityDebt(selectedEntityId)}
+                  className="px-3.5 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  title="Xuất toàn bộ sổ chi tiết công nợ của đối tượng này ra file Excel"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                  <span>Xuất Excel chi tiết</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
                     setModalSearchTerm('');
                     setModalDebtOnly(false);
@@ -1022,9 +1185,20 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
           ) : (
             <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
               <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap justify-between items-center gap-2">
-                <h3 className="font-bold text-sm text-slate-800">
-                  Lịch sử phát sinh công nợ & thanh toán ({detailHistory.length} giao dịch)
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-sm text-slate-800">
+                    Lịch sử phát sinh công nợ & thanh toán ({detailHistory.length} giao dịch)
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => handleExportEntityDebt(selectedEntityId)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg cursor-pointer transition-colors shadow-2xs"
+                    title="Xuất file Excel sổ chi tiết công nợ này"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Xuất Excel</span>
+                  </button>
+                </div>
                 {selectedEntityDebtInfo && (
                   <div className="flex items-center gap-3 text-xs">
                     <span className="text-slate-600">
