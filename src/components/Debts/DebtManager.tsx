@@ -18,6 +18,12 @@ import {
   Trash2,
   Upload,
   Download,
+  Filter,
+  Check,
+  RotateCcw,
+  ChevronRight,
+  UserCheck,
+  Eye,
   X
 } from 'lucide-react';
 import {
@@ -58,6 +64,14 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
 
   // Selected entity for detailed drilldown
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+
+  // Debt filter mode for summary view: all | has_debt | zero_debt
+  const [debtFilterMode, setDebtFilterMode] = useState<'all' | 'has_debt' | 'zero_debt'>('all');
+
+  // Smart Search Window modal for Detail View
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [modalSearchTerm, setModalSearchTerm] = useState('');
+  const [modalDebtOnly, setModalDebtOnly] = useState(false);
 
   // Modal
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -230,10 +244,10 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
   // Customer debt summaries
   const customerDebtsSummary = useMemo(() => {
     return customers.map((c) => {
-      // Sum order amounts and order paid
+      // Sum order amounts and order paid (match by customerId or customerCode)
       const custOrders = orders.filter(
         (o) =>
-          o.customerId === c.id &&
+          (o.customerId === c.id || (o.customerCode && o.customerCode.trim().toLowerCase() === c.code.trim().toLowerCase())) &&
           o.deliveryStatus !== 'cancelled' &&
           (!startDate || o.orderDate >= startDate) &&
           (!endDate || o.orderDate <= endDate)
@@ -241,12 +255,12 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
       const totalOrderAmount = custOrders.reduce((sum, o) => sum + o.totalAmount, 0);
       const totalOrderPaid = custOrders.reduce((sum, o) => sum + o.paidAmount, 0);
 
-      // Sum debt payments
+      // Sum debt payments (match by entityId or entityCode)
       const directPayments = debtPayments
         .filter(
           (dp) =>
             dp.type === 'customer' &&
-            dp.entityId === c.id &&
+            (dp.entityId === c.id || (dp.entityCode && dp.entityCode.trim().toLowerCase() === c.code.trim().toLowerCase())) &&
             (!startDate || dp.date >= startDate) &&
             (!endDate || dp.date <= endDate)
         )
@@ -261,6 +275,7 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
         name: c.name,
         taxCode: c.taxCode,
         phone: c.phone,
+        address: c.address,
         totalSales: totalOrderAmount,
         totalPaid,
         currentDebt,
@@ -274,7 +289,9 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
     return suppliers.map((s) => {
       const supPurchases = purchases.filter(
         (p) =>
-          p.supplierCode === s.code &&
+          ((p.supplierCode && p.supplierCode.trim().toLowerCase() === s.code.trim().toLowerCase()) ||
+            (p.supplierTaxCode && s.taxCode && p.supplierTaxCode.trim() === s.taxCode.trim()) ||
+            ((p as any).supplierId === s.id)) &&
           (!startDate || p.purchaseDate >= startDate) &&
           (!endDate || p.purchaseDate <= endDate)
       );
@@ -285,7 +302,7 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
         .filter(
           (dp) =>
             dp.type === 'supplier' &&
-            dp.entityId === s.id &&
+            (dp.entityId === s.id || (dp.entityCode && dp.entityCode.trim().toLowerCase() === s.code.trim().toLowerCase())) &&
             (!startDate || dp.date >= startDate) &&
             (!endDate || dp.date <= endDate)
         )
@@ -300,6 +317,7 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
         name: s.name,
         taxCode: s.taxCode,
         phone: s.phone,
+        address: s.address,
         totalPurchases: totalPurchaseAmount,
         totalPaid,
         currentDebt,
@@ -317,15 +335,102 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
     return supplierDebtsSummary.reduce((sum, s) => sum + s.currentDebt, 0);
   }, [supplierDebtsSummary]);
 
+  const customerDebtCounts = useMemo(() => {
+    const total = customerDebtsSummary.length;
+    const hasDebt = customerDebtsSummary.filter((c) => c.currentDebt > 0).length;
+    const zeroDebt = total - hasDebt;
+    return { total, hasDebt, zeroDebt };
+  }, [customerDebtsSummary]);
+
+  const supplierDebtCounts = useMemo(() => {
+    const total = supplierDebtsSummary.length;
+    const hasDebt = supplierDebtsSummary.filter((s) => s.currentDebt > 0).length;
+    const zeroDebt = total - hasDebt;
+    return { total, hasDebt, zeroDebt };
+  }, [supplierDebtsSummary]);
+
+  const currentSummaryList = activeTab === 'customer' ? customerDebtsSummary : supplierDebtsSummary;
+
+  // Filtered Summary List based on searchTerm and debtFilterMode
+  const filteredSummaryList = useMemo(() => {
+    return currentSummaryList.filter((item) => {
+      // Debt filter mode
+      if (debtFilterMode === 'has_debt' && item.currentDebt <= 0) return false;
+      if (debtFilterMode === 'zero_debt' && item.currentDebt > 0) return false;
+
+      // Search term filter
+      if (searchTerm.trim()) {
+        const q = searchTerm.toLowerCase().trim();
+        const matchCode = item.code.toLowerCase().includes(q);
+        const matchName = item.name.toLowerCase().includes(q);
+        const matchTax = item.taxCode ? item.taxCode.toLowerCase().includes(q) : false;
+        const matchPhone = item.phone ? item.phone.toLowerCase().includes(q) : false;
+        if (!matchCode && !matchName && !matchTax && !matchPhone) return false;
+      }
+
+      return true;
+    });
+  }, [currentSummaryList, searchTerm, debtFilterMode]);
+
+  const summaryTotals = useMemo(() => {
+    return filteredSummaryList.reduce(
+      (acc, item) => {
+        const totalDocAmt = activeTab === 'customer' ? (item as any).totalSales : (item as any).totalPurchases;
+        return {
+          totalAmount: acc.totalAmount + (totalDocAmt || 0),
+          totalPaid: acc.totalPaid + (item.totalPaid || 0),
+          totalDebt: acc.totalDebt + (item.currentDebt || 0),
+        };
+      },
+      { totalAmount: 0, totalPaid: 0, totalDebt: 0 }
+    );
+  }, [filteredSummaryList, activeTab]);
+
+  // Selected entity details
+  const selectedEntity = useMemo(() => {
+    if (!selectedEntityId) return null;
+    if (activeTab === 'customer') {
+      return customers.find((c) => c.id === selectedEntityId) || null;
+    }
+    return suppliers.find((s) => s.id === selectedEntityId) || null;
+  }, [selectedEntityId, activeTab, customers, suppliers]);
+
+  const selectedEntityDebtInfo = useMemo(() => {
+    if (!selectedEntityId) return null;
+    if (activeTab === 'customer') {
+      return customerDebtsSummary.find((c) => c.id === selectedEntityId) || null;
+    }
+    return supplierDebtsSummary.find((s) => s.id === selectedEntityId) || null;
+  }, [selectedEntityId, activeTab, customerDebtsSummary, supplierDebtsSummary]);
+
+  // Filtered entities for the smart search modal
+  const modalFilteredEntities = useMemo(() => {
+    const list = activeTab === 'customer' ? customerDebtsSummary : supplierDebtsSummary;
+    return list.filter((item) => {
+      if (modalDebtOnly && item.currentDebt <= 0) return false;
+      if (!modalSearchTerm.trim()) return true;
+      const q = modalSearchTerm.toLowerCase().trim();
+      return (
+        item.code.toLowerCase().includes(q) ||
+        item.name.toLowerCase().includes(q) ||
+        (item.taxCode && item.taxCode.toLowerCase().includes(q)) ||
+        (item.phone && item.phone.toLowerCase().includes(q))
+      );
+    });
+  }, [activeTab, customerDebtsSummary, supplierDebtsSummary, modalDebtOnly, modalSearchTerm]);
+
   // Detail history for selected entity
   const detailHistory = useMemo(() => {
-    if (!selectedEntityId) return [];
+    if (!selectedEntityId || !selectedEntity) return [];
 
     const timeline: any[] = [];
 
     if (activeTab === 'customer') {
       const custOrders = orders.filter(
-        (o) => o.customerId === selectedEntityId && o.deliveryStatus !== 'cancelled'
+        (o) =>
+          (o.customerId === selectedEntityId ||
+            (o.customerCode && o.customerCode.trim().toLowerCase() === selectedEntity.code.trim().toLowerCase())) &&
+          o.deliveryStatus !== 'cancelled'
       );
       custOrders.forEach((o) => {
         timeline.push({
@@ -340,7 +445,10 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
       });
 
       const payments = debtPayments.filter(
-        (dp) => dp.type === 'customer' && dp.entityId === selectedEntityId
+        (dp) =>
+          dp.type === 'customer' &&
+          (dp.entityId === selectedEntityId ||
+            (dp.entityCode && dp.entityCode.trim().toLowerCase() === selectedEntity.code.trim().toLowerCase()))
       );
       payments.forEach((p) => {
         timeline.push({
@@ -355,44 +463,49 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
         });
       });
     } else {
-      const sup = suppliers.find((s) => s.id === selectedEntityId);
-      if (sup) {
-        const supPurchases = purchases.filter((p) => p.supplierCode === sup.code);
-        supPurchases.forEach((p) => {
-          timeline.push({
-            type: 'purchase',
-            date: p.purchaseDate,
-            code: p.billNo,
-            description: `Phiếu nhập hàng: ${p.billNo} (${p.items.length} mặt hàng)`,
-            increase: p.totalAmount,
-            decrease: p.paidAmount,
-            debtDelta: p.totalAmount - p.paidAmount,
-          });
+      const supPurchases = purchases.filter(
+        (p) =>
+          (p.supplierCode && p.supplierCode.trim().toLowerCase() === selectedEntity.code.trim().toLowerCase()) ||
+          (p.supplierTaxCode && selectedEntity.taxCode && p.supplierTaxCode.trim() === selectedEntity.taxCode.trim()) ||
+          ((p as any).supplierId === selectedEntityId)
+      );
+      supPurchases.forEach((p) => {
+        timeline.push({
+          type: 'purchase',
+          date: p.purchaseDate,
+          code: p.billNo,
+          description: `Phiếu nhập hàng: ${p.billNo} (${p.items.length} mặt hàng)`,
+          increase: p.totalAmount,
+          decrease: p.paidAmount,
+          debtDelta: p.totalAmount - p.paidAmount,
         });
+      });
 
-        const payments = debtPayments.filter(
-          (dp) => dp.type === 'supplier' && dp.entityId === selectedEntityId
-        );
-        payments.forEach((p) => {
-          timeline.push({
-            type: 'payment',
-            date: p.date,
-            code: p.code,
-            description: `Chi trả nợ NCC: ${p.notes || 'Phiếu chi trả nợ'} (${p.paymentMethod})`,
-            increase: 0,
-            decrease: p.amount,
-            debtDelta: -p.amount,
-            paymentId: p.id,
-          });
+      const payments = debtPayments.filter(
+        (dp) =>
+          dp.type === 'supplier' &&
+          (dp.entityId === selectedEntityId ||
+            (dp.entityCode && dp.entityCode.trim().toLowerCase() === selectedEntity.code.trim().toLowerCase()))
+      );
+      payments.forEach((p) => {
+        timeline.push({
+          type: 'payment',
+          date: p.date,
+          code: p.code,
+          description: `Chi trả nợ NCC: ${p.notes || 'Phiếu chi trả nợ'} (${p.paymentMethod})`,
+          increase: 0,
+          decrease: p.amount,
+          debtDelta: -p.amount,
+          paymentId: p.id,
         });
-      }
+      });
     }
 
     const filteredTimeline = timeline.filter(
       (item) => (!startDate || item.date >= startDate) && (!endDate || item.date <= endDate)
     );
     return filteredTimeline.sort((a, b) => b.date.localeCompare(a.date));
-  }, [activeTab, selectedEntityId, orders, purchases, debtPayments, suppliers, startDate, endDate]);
+  }, [activeTab, selectedEntityId, selectedEntity, orders, purchases, debtPayments, startDate, endDate]);
 
   return (
     <div className="space-y-6">
@@ -451,9 +564,23 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
                 {formatCurrency(totalCustomerDebt)}
               </div>
             </div>
-            <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-100 text-blue-800">
-              {customerDebtsSummary.filter((c) => c.currentDebt > 0).length} khách còn nợ
-            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveTab('customer');
+                setSelectedEntityId(null);
+                setDebtFilterMode((prev) => (prev === 'has_debt' && activeTab === 'customer' ? 'all' : 'has_debt'));
+              }}
+              className={`text-xs font-bold px-3 py-1.5 rounded-full transition-all cursor-pointer ${
+                activeTab === 'customer' && debtFilterMode === 'has_debt'
+                  ? 'bg-rose-600 text-white shadow-xs ring-2 ring-rose-400'
+                  : 'bg-blue-100 hover:bg-blue-200 text-blue-800'
+              }`}
+              title="Nhấn để lọc nhanh các khách hàng còn dư nợ"
+            >
+              {customerDebtCounts.hasDebt} khách còn nợ
+            </button>
           </div>
         </div>
 
@@ -478,9 +605,23 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
                 {formatCurrency(totalSupplierDebt)}
               </div>
             </div>
-            <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-teal-100 text-teal-800">
-              {supplierDebtsSummary.filter((s) => s.currentDebt > 0).length} NCC còn nợ
-            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveTab('supplier');
+                setSelectedEntityId(null);
+                setDebtFilterMode((prev) => (prev === 'has_debt' && activeTab === 'supplier' ? 'all' : 'has_debt'));
+              }}
+              className={`text-xs font-bold px-3 py-1.5 rounded-full transition-all cursor-pointer ${
+                activeTab === 'supplier' && debtFilterMode === 'has_debt'
+                  ? 'bg-rose-600 text-white shadow-xs ring-2 ring-rose-400'
+                  : 'bg-teal-100 hover:bg-teal-200 text-teal-800'
+              }`}
+              title="Nhấn để lọc nhanh các nhà cung cấp còn dư nợ"
+            >
+              {supplierDebtCounts.hasDebt} NCC còn nợ
+            </button>
           </div>
         </div>
       </div>
@@ -551,6 +692,46 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Debt Filter Pills for Summary View */}
+          {viewMode === 'summary' && (
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setDebtFilterMode('all')}
+                className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                  debtFilterMode === 'all'
+                    ? 'bg-white text-slate-900 shadow-xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Tất cả ({activeTab === 'customer' ? customerDebtCounts.total : supplierDebtCounts.total})
+              </button>
+              <button
+                type="button"
+                onClick={() => setDebtFilterMode('has_debt')}
+                className={`px-3 py-1 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                  debtFilterMode === 'has_debt'
+                    ? 'bg-rose-600 text-white shadow-xs font-bold'
+                    : 'text-rose-700 hover:bg-rose-100/50'
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                Chỉ còn nợ ({activeTab === 'customer' ? customerDebtCounts.hasDebt : supplierDebtCounts.hasDebt})
+              </button>
+              <button
+                type="button"
+                onClick={() => setDebtFilterMode('zero_debt')}
+                className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                  debtFilterMode === 'zero_debt'
+                    ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                    : 'text-emerald-700 hover:bg-emerald-100/50'
+                }`}
+              >
+                Đã hết nợ ({activeTab === 'customer' ? customerDebtCounts.zeroDebt : supplierDebtCounts.zeroDebt})
+              </button>
+            </div>
+          )}
+
           {/* Excel Import for Debts */}
           <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer">
             <Upload className="w-3.5 h-3.5" />
@@ -574,12 +755,21 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
           <div className="relative w-48 sm:w-60">
             <input
               type="text"
-              placeholder="Tìm theo Mã hoặc Tên..."
+              placeholder="Tìm theo Mã, Tên, MST, SĐT..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 border border-slate-300 rounded-xl text-xs"
+              className="w-full pl-8 pr-7 py-1.5 border border-slate-300 rounded-xl text-xs"
             />
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -605,14 +795,35 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {(activeTab === 'customer' ? customerDebtsSummary : supplierDebtsSummary)
-                  .filter((item) =>
-                    !searchTerm.trim() ||
-                    item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                    item.code.toLowerCase().includes(searchTerm.toLowerCase())
-                  )
-                  .map((row, idx) => (
-                    <tr key={row.id} className="hover:bg-slate-50/70">
+                {filteredSummaryList.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="p-10 text-center text-slate-400">
+                      <div className="max-w-md mx-auto space-y-2">
+                        <p className="font-semibold text-slate-600">
+                          Không tìm thấy {activeTab === 'customer' ? 'khách hàng' : 'nhà cung cấp'} nào phù hợp với bộ lọc hiện tại.
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          Thử xóa từ khóa tìm kiếm hoặc đổi sang xem tất cả đối tượng.
+                        </p>
+                        {(searchTerm || debtFilterMode !== 'all') && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSearchTerm('');
+                              setDebtFilterMode('all');
+                            }}
+                            className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Xóa bộ lọc & Đặt lại</span>
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredSummaryList.map((row, idx) => (
+                    <tr key={row.id} className="hover:bg-slate-50/70 transition-colors">
                       <td className="p-3 text-center text-slate-400">{idx + 1}</td>
                       <td className="p-3 font-mono font-bold text-blue-700">{row.code}</td>
                       <td className="p-3 font-semibold text-slate-900">{row.name}</td>
@@ -624,8 +835,12 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
                       <td className="p-3 text-right font-semibold text-emerald-600">
                         {formatCurrency(row.totalPaid)}
                       </td>
-                      <td className="p-3 text-right font-black text-rose-600">
-                        {formatCurrency(row.currentDebt)}
+                      <td className="p-3 text-right font-black">
+                        {row.currentDebt > 0 ? (
+                          <span className="text-rose-600">{formatCurrency(row.currentDebt)}</span>
+                        ) : (
+                          <span className="text-emerald-600 font-medium">0 đ</span>
+                        )}
                       </td>
                       <td className="p-3 text-center">
                         <div className="flex items-center justify-center gap-1.5">
@@ -635,7 +850,7 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
                               setSelectedEntityId(row.id);
                               setViewMode('detail');
                             }}
-                            className="px-2.5 py-1 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg cursor-pointer"
+                            className="px-2.5 py-1 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg cursor-pointer transition-colors"
                           >
                             Xem chi tiết
                           </button>
@@ -645,7 +860,7 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
                               setPreSelectedId(row.id);
                               setIsPaymentModalOpen(true);
                             }}
-                            className={`px-2.5 py-1 text-xs font-bold text-white rounded-lg shadow-xs cursor-pointer ${
+                            className={`px-2.5 py-1 text-xs font-bold text-white rounded-lg shadow-xs cursor-pointer transition-all ${
                               activeTab === 'customer' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-teal-600 hover:bg-teal-700'
                             }`}
                           >
@@ -654,59 +869,175 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  ))
+                )}
               </tbody>
+              {filteredSummaryList.length > 0 && (
+                <tfoot className="bg-slate-100/90 text-slate-800 font-bold border-t-2 border-slate-300">
+                  <tr>
+                    <td colSpan={5} className="p-3 text-right uppercase text-xs tracking-wider font-extrabold text-slate-700">
+                      Tổng cộng ({filteredSummaryList.length} {activeTab === 'customer' ? 'khách hàng' : 'nhà cung cấp'}):
+                    </td>
+                    <td className="p-3 text-right font-black text-slate-900 text-sm">
+                      {formatCurrency(summaryTotals.totalAmount)}
+                    </td>
+                    <td className="p-3 text-right font-black text-emerald-700 text-sm">
+                      {formatCurrency(summaryTotals.totalPaid)}
+                    </td>
+                    <td className="p-3 text-right font-black text-rose-700 text-sm">
+                      {formatCurrency(summaryTotals.totalDebt)}
+                    </td>
+                    <td className="p-3"></td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
         </div>
       ) : (
-        /* Detail View */
+        /* Detail View with Smart Search Window */
         <div className="space-y-4">
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <label className="text-xs font-bold text-slate-700 uppercase">
-                Chọn đối tượng xem chi tiết:
-              </label>
-              <select
-                value={selectedEntityId || ''}
-                onChange={(e) => setSelectedEntityId(e.target.value)}
-                className="px-3 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm bg-white font-medium"
-              >
-                <option value="">-- Chọn {activeTab === 'customer' ? 'Khách hàng' : 'Nhà cung cấp'} --</option>
-                {(activeTab === 'customer' ? customers : suppliers).map((ent) => (
-                  <option key={ent.id} value={ent.id}>
-                    {ent.name} ({ent.code})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {selectedEntityId && (
+          {!selectedEntityId ? (
+            /* Prompt to open Smart Search Window */
+            <div className="bg-white p-5 rounded-2xl border-2 border-dashed border-blue-200 flex flex-col sm:flex-row items-center justify-between gap-4 bg-gradient-to-r from-blue-50/40 to-indigo-50/40 shadow-xs">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-md shadow-blue-500/20 shrink-0">
+                  <Search className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                    Chọn {activeTab === 'customer' ? 'Khách hàng' : 'Nhà cung cấp'} để xem chi tiết công nợ
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Mở cửa sổ tìm kiếm thông minh theo Mã, Tên, Mã số thuế, SĐT với hiển thị số dư nợ trực quan
+                  </p>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => {
-                  setPreSelectedId(selectedEntityId);
-                  setIsPaymentModalOpen(true);
+                  setModalSearchTerm('');
+                  setModalDebtOnly(false);
+                  setIsSearchModalOpen(true);
                 }}
-                className={`px-4 py-2 text-xs font-bold text-white rounded-xl shadow-xs cursor-pointer ${
-                  activeTab === 'customer' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-teal-600 hover:bg-teal-700'
-                }`}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md shadow-blue-500/20 cursor-pointer transition-all shrink-0"
               >
-                + Lập phiếu thu / chi nợ cho đối tượng này
+                <Search className="w-4 h-4" />
+                <span>Mở cửa sổ tìm kiếm thông minh</span>
               </button>
-            )}
-          </div>
+            </div>
+          ) : (
+            /* Selected Entity Card with Smart Change Trigger */
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start sm:items-center gap-3.5">
+                <div
+                  className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black shadow-xs shrink-0 ${
+                    activeTab === 'customer' ? 'bg-blue-100 text-blue-700' : 'bg-teal-100 text-teal-700'
+                  }`}
+                >
+                  {activeTab === 'customer' ? <Users className="w-6 h-6" /> : <Building2 className="w-6 h-6" />}
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded text-xs">
+                      {selectedEntity?.code}
+                    </span>
+                    <h2 className="text-base sm:text-lg font-bold text-slate-900">{selectedEntity?.name}</h2>
+                    {selectedEntityDebtInfo && (
+                      selectedEntityDebtInfo.currentDebt > 0 ? (
+                        <span className="text-xs font-black px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200">
+                          Còn nợ: {formatCurrency(selectedEntityDebtInfo.currentDebt)}
+                        </span>
+                      ) : (
+                        <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                          Đã hết nợ (0 đ)
+                        </span>
+                      )
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
+                    {selectedEntity?.taxCode && (
+                      <span>
+                        MST: <strong className="font-mono text-slate-700">{selectedEntity.taxCode}</strong>
+                      </span>
+                    )}
+                    {selectedEntity?.phone && (
+                      <span>
+                        SĐT: <strong className="font-mono text-slate-700">{selectedEntity.phone}</strong>
+                      </span>
+                    )}
+                    {selectedEntity?.address && (
+                      <span className="text-slate-600 line-clamp-1">Đ/C: {selectedEntity.address}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 self-start md:self-auto shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModalSearchTerm('');
+                    setModalDebtOnly(false);
+                    setIsSearchModalOpen(true);
+                  }}
+                  className="px-3.5 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                  title="Mở cửa sổ tìm kiếm để đổi sang đối tượng khác"
+                >
+                  <Search className="w-3.5 h-3.5" />
+                  <span>Đổi đối tượng</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedEntityId(null)}
+                  className="p-2 text-slate-400 hover:text-rose-600 rounded-xl hover:bg-rose-50 transition-all cursor-pointer"
+                  title="Bỏ chọn đối tượng"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreSelectedId(selectedEntityId);
+                    setIsPaymentModalOpen(true);
+                  }}
+                  className={`px-4 py-2 text-xs font-bold text-white rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'customer'
+                      ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20'
+                      : 'bg-teal-600 hover:bg-teal-700 shadow-teal-500/20'
+                  }`}
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{activeTab === 'customer' ? 'Lập phiếu thu nợ' : 'Lập phiếu trả nợ'}</span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {!selectedEntityId ? (
             <div className="p-12 text-center bg-white rounded-2xl border border-slate-200 text-slate-400">
-              Vui lòng chọn một đối tượng ở trên để xem chi tiết lịch sử mua bán, trả nợ và số dư công nợ lũy kế.
+              <Search className="w-10 h-10 mx-auto mb-3 text-slate-300" />
+              <p className="font-medium">Vui lòng bấm nút mở cửa sổ tìm kiếm ở trên để chọn đối tượng xem chi tiết lịch sử.</p>
             </div>
           ) : (
             <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-              <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+              <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap justify-between items-center gap-2">
                 <h3 className="font-bold text-sm text-slate-800">
                   Lịch sử phát sinh công nợ & thanh toán ({detailHistory.length} giao dịch)
                 </h3>
+                {selectedEntityDebtInfo && (
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className="text-slate-600">
+                      Tổng phát sinh: <strong className="text-slate-900">{formatCurrency('totalSales' in selectedEntityDebtInfo ? selectedEntityDebtInfo.totalSales : selectedEntityDebtInfo.totalPurchases)}</strong>
+                    </span>
+                    <span className="text-slate-600">
+                      Đã thanh toán: <strong className="text-emerald-700">{formatCurrency(selectedEntityDebtInfo.totalPaid)}</strong>
+                    </span>
+                    <span className="text-slate-600">
+                      Dư nợ: <strong className={selectedEntityDebtInfo.currentDebt > 0 ? 'text-rose-700 font-black' : 'text-emerald-700 font-bold'}>{formatCurrency(selectedEntityDebtInfo.currentDebt)}</strong>
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs sm:text-sm text-left border-collapse">
@@ -722,49 +1053,272 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {detailHistory.map((item, idx) => (
-                      <tr key={`${item.code}-${idx}`} className="hover:bg-slate-50/70">
-                        <td className="p-3 text-center text-slate-400">{idx + 1}</td>
-                        <td className="p-3 text-slate-600">{formatDate(item.date)}</td>
-                        <td className="p-3 font-mono font-bold text-blue-700">{item.code}</td>
-                        <td className="p-3 text-slate-800 font-medium">{item.description}</td>
-                        <td className="p-3 text-right font-bold text-slate-900">
-                          {item.increase > 0 ? formatCurrency(item.increase) : '—'}
-                        </td>
-                        <td className="p-3 text-right font-bold text-emerald-600">
-                          {item.decrease > 0 ? formatCurrency(item.decrease) : '—'}
-                        </td>
-                        <td className="p-3 text-center">
-                          {item.paymentId ? (
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                const ok = await confirm({
-                                  title: 'Xác nhận xóa phiếu thanh toán',
-                                  message: 'Bạn có chắc chắn muốn xóa phiếu thanh toán này?',
-                                  confirmText: 'Xóa phiếu',
-                                  type: 'danger',
-                                });
-                                if (ok) {
-                                  onDeleteDebtPayment(item.paymentId);
-                                }
-                              }}
-                              className="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
-                              title="Xóa phiếu thanh toán"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          ) : (
-                            <span className="text-[11px] text-slate-400">—</span>
-                          )}
+                    {detailHistory.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="p-8 text-center text-slate-400">
+                          Chưa có giao dịch phát sinh nào trong khoảng thời gian đã chọn.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      detailHistory.map((item, idx) => (
+                        <tr key={`${item.code}-${idx}`} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="p-3 text-center text-slate-400">{idx + 1}</td>
+                          <td className="p-3 text-slate-600">{formatDate(item.date)}</td>
+                          <td className="p-3 font-mono font-bold text-blue-700">{item.code}</td>
+                          <td className="p-3 text-slate-800 font-medium">{item.description}</td>
+                          <td className="p-3 text-right font-bold text-slate-900">
+                            {item.increase > 0 ? formatCurrency(item.increase) : '—'}
+                          </td>
+                          <td className="p-3 text-right font-bold text-emerald-600">
+                            {item.decrease > 0 ? formatCurrency(item.decrease) : '—'}
+                          </td>
+                          <td className="p-3 text-center">
+                            {item.paymentId ? (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const ok = await confirm({
+                                    title: 'Xác nhận xóa phiếu thanh toán',
+                                    message: 'Bạn có chắc chắn muốn xóa phiếu thanh toán này?',
+                                    confirmText: 'Xóa phiếu',
+                                    type: 'danger',
+                                  });
+                                  if (ok) {
+                                    onDeleteDebtPayment(item.paymentId);
+                                  }
+                                }}
+                                className="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer transition-colors"
+                                title="Xóa phiếu thanh toán"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <span className="text-[11px] text-slate-400">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
+                  {detailHistory.length > 0 && (
+                    <tfoot className="bg-slate-100 font-bold border-t border-slate-200 text-slate-800">
+                      <tr>
+                        <td colSpan={4} className="p-3 text-right uppercase text-xs">
+                          Tổng cộng ({detailHistory.length} giao dịch):
+                        </td>
+                        <td className="p-3 text-right text-slate-900 font-black">
+                          {formatCurrency(detailHistory.reduce((sum, item) => sum + item.increase, 0))}
+                        </td>
+                        <td className="p-3 text-right text-emerald-700 font-black">
+                          {formatCurrency(detailHistory.reduce((sum, item) => sum + item.decrease, 0))}
+                        </td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Smart Search Window Dialog for Entity Selection */}
+      {isSearchModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className={`p-2 rounded-xl text-white ${
+                  activeTab === 'customer' ? 'bg-blue-600' : 'bg-teal-600'
+                }`}>
+                  <Search className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base sm:text-lg text-slate-900">
+                    Tìm kiếm & Chọn {activeTab === 'customer' ? 'Khách hàng' : 'Nhà cung cấp'} thông minh
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Tra cứu nhanh theo Mã, Tên, Mã số thuế, Số điện thoại và xem trực tiếp dư nợ
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSearchModalOpen(false)}
+                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-xl transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Search Bar & Filters */}
+            <div className="p-4 border-b border-slate-200 bg-white space-y-3">
+              <div className="relative">
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder={`Nhập Mã, Tên, MST hoặc SĐT của ${activeTab === 'customer' ? 'khách hàng' : 'nhà cung cấp'}...`}
+                  value={modalSearchTerm}
+                  onChange={(e) => setModalSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-9 py-2.5 border-2 border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl text-sm font-medium transition-all"
+                />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
+                {modalSearchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setModalSearchTerm('')}
+                    className="p-1 text-slate-400 hover:text-slate-600 absolute right-3 top-2.5 rounded-lg cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Quick Filter Chips */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setModalDebtOnly(false)}
+                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                    !modalDebtOnly
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  Tất cả ({activeTab === 'customer' ? customerDebtCounts.total : supplierDebtCounts.total})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalDebtOnly(true)}
+                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                    modalDebtOnly
+                      ? 'bg-rose-600 text-white shadow-xs'
+                      : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                  }`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                  Chỉ đối tượng còn nợ ({activeTab === 'customer' ? customerDebtCounts.hasDebt : supplierDebtCounts.hasDebt})
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Results List */}
+            <div className="overflow-y-auto p-4 flex-1 divide-y divide-slate-100">
+              {modalFilteredEntities.length === 0 ? (
+                <div className="p-8 text-center text-slate-400">
+                  <Search className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                  <p className="font-semibold text-slate-600">Không tìm thấy đối tượng nào</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Không có kết quả khớp với từ khóa "{modalSearchTerm}".
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalSearchTerm('');
+                      setModalDebtOnly(false);
+                    }}
+                    className="mt-3 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
+                  >
+                    Xem tất cả danh sách
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {modalFilteredEntities.map((ent, idx) => {
+                    const isSelected = selectedEntityId === ent.id;
+                    return (
+                      <div
+                        key={ent.id}
+                        onClick={() => {
+                          setSelectedEntityId(ent.id);
+                          setIsSearchModalOpen(false);
+                        }}
+                        className={`p-3 rounded-xl border transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                          isSelected
+                            ? 'bg-blue-50/80 border-blue-400 ring-2 ring-blue-500/20 shadow-xs'
+                            : 'bg-white border-slate-200 hover:border-blue-300 hover:bg-slate-50/70 hover:shadow-xs'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-500 text-xs flex items-center justify-center font-bold shrink-0 mt-0.5">
+                            {idx + 1}
+                          </span>
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono font-bold text-blue-700 text-xs bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                                {ent.code}
+                              </span>
+                              <span className="font-bold text-slate-900 text-sm">{ent.name}</span>
+                              {isSelected && (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-600 text-white">
+                                  Đang chọn
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                              {ent.taxCode && (
+                                <span>
+                                  MST: <strong className="font-mono text-slate-700">{ent.taxCode}</strong>
+                                </span>
+                              )}
+                              {ent.phone && (
+                                <span>
+                                  SĐT: <strong className="font-mono text-slate-700">{ent.phone}</strong>
+                                </span>
+                              )}
+                              {ent.address && (
+                                <span className="line-clamp-1 text-slate-500 max-w-xs">{ent.address}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+                          <div className="text-right">
+                            <div className="text-[11px] text-slate-400 font-medium">Dư nợ hiện tại:</div>
+                            <div className={`text-sm font-black ${
+                              ent.currentDebt > 0 ? 'text-rose-600' : 'text-emerald-600'
+                            }`}>
+                              {formatCurrency(ent.currentDebt)}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedEntityId(ent.id);
+                              setIsSearchModalOpen(false);
+                            }}
+                            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-slate-900 hover:bg-blue-600 text-white shadow-xs'
+                            }`}
+                          >
+                            {isSelected ? 'Đang chọn' : 'Chọn'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-between items-center text-xs text-slate-500">
+              <span>Hiển thị {modalFilteredEntities.length} kết quả</span>
+              <button
+                type="button"
+                onClick={() => setIsSearchModalOpen(false)}
+                className="px-4 py-1.5 bg-white hover:bg-slate-100 text-slate-700 font-bold border border-slate-300 rounded-xl cursor-pointer transition-colors"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

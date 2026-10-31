@@ -25,7 +25,8 @@ import {
   BookOpen,
   Edit,
   Edit3,
-  Users
+  Users,
+  RotateCcw
 } from 'lucide-react';
 import { CustomerSalesReport } from './CustomerSalesReport';
 
@@ -95,14 +96,120 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
     return Array.from(set).sort();
   }, [data.orders, data.users]);
 
+  // Inventory Quantity Filters State (SL Tồn đầu kỳ, SL Nhập trong kỳ, SL Tồn cuối kỳ, Tổng SL xuất)
+  const [invSearchQuery, setInvSearchQuery] = useState<string>('');
+  const [beginningFilterMode, setBeginningFilterMode] = useState<'all' | 'positive' | 'zero' | 'negative' | 'custom'>('all');
+  const [beginningMin, setBeginningMin] = useState<string>('');
+  const [beginningMax, setBeginningMax] = useState<string>('');
+
+  const [importFilterMode, setImportFilterMode] = useState<'all' | 'positive' | 'zero' | 'custom'>('all');
+  const [importMin, setImportMin] = useState<string>('');
+  const [importMax, setImportMax] = useState<string>('');
+
+  const [endingFilterMode, setEndingFilterMode] = useState<'all' | 'positive' | 'zero' | 'negative' | 'custom'>('all');
+  const [endingMin, setEndingMin] = useState<string>('');
+  const [endingMax, setEndingMax] = useState<string>('');
+
+  const [exportFilterMode, setExportFilterMode] = useState<'all' | 'positive' | 'zero' | 'custom'>('all');
+  const [exportMin, setExportMin] = useState<string>('');
+  const [exportMax, setExportMax] = useState<string>('');
+
+  // Helper function to check if a quantity matches filter condition
+  const matchQtyCondition = (val: number, mode: string, minStr: string, maxStr: string): boolean => {
+    if (mode === 'all') return true;
+    if (mode === 'positive') return val > 0;
+    if (mode === 'zero') return val === 0;
+    if (mode === 'negative') return val < 0;
+    if (mode === 'custom') {
+      const min = minStr.trim() !== '' ? Number(minStr) : -Infinity;
+      const max = maxStr.trim() !== '' ? Number(maxStr) : Infinity;
+      return val >= min && val <= max;
+    }
+    return true;
+  };
+
   // Generate Inventory Report with dynamic order columns
   const inventoryReport = useMemo(() => {
     return generateInventoryReport(startDate, endDate, data);
   }, [startDate, endDate, data]);
 
-  // Inventory Totals
+  // Filtered rows for Inventory Report based on quantity conditions and search
+  const filteredInventoryRows = useMemo(() => {
+    return inventoryReport.rows.filter((r) => {
+      // Search query
+      if (invSearchQuery.trim()) {
+        const q = invSearchQuery.toLowerCase();
+        const matchQ =
+          r.productCode.toLowerCase().includes(q) ||
+          r.productName.toLowerCase().includes(q);
+        if (!matchQ) return false;
+      }
+
+      // SL Tồn đầu kỳ
+      if (!matchQtyCondition(r.beginningQty, beginningFilterMode, beginningMin, beginningMax)) {
+        return false;
+      }
+
+      // SL Nhập trong kỳ
+      if (!matchQtyCondition(r.periodImportQty, importFilterMode, importMin, importMax)) {
+        return false;
+      }
+
+      // SL Tồn cuối kỳ
+      if (!matchQtyCondition(r.endingQty, endingFilterMode, endingMin, endingMax)) {
+        return false;
+      }
+
+      // Tổng SL xuất
+      if (!matchQtyCondition(r.periodExportQty, exportFilterMode, exportMin, exportMax)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [
+    inventoryReport.rows,
+    invSearchQuery,
+    beginningFilterMode,
+    beginningMin,
+    beginningMax,
+    importFilterMode,
+    importMin,
+    importMax,
+    endingFilterMode,
+    endingMin,
+    endingMax,
+    exportFilterMode,
+    exportMin,
+    exportMax,
+  ]);
+
+  const hasActiveInventoryFilters =
+    invSearchQuery.trim() !== '' ||
+    beginningFilterMode !== 'all' ||
+    importFilterMode !== 'all' ||
+    endingFilterMode !== 'all' ||
+    exportFilterMode !== 'all';
+
+  const handleResetInventoryFilters = () => {
+    setInvSearchQuery('');
+    setBeginningFilterMode('all');
+    setBeginningMin('');
+    setBeginningMax('');
+    setImportFilterMode('all');
+    setImportMin('');
+    setImportMax('');
+    setEndingFilterMode('all');
+    setEndingMin('');
+    setEndingMax('');
+    setExportFilterMode('all');
+    setExportMin('');
+    setExportMax('');
+  };
+
+  // Inventory Totals computed from filtered rows
   const inventoryTotals = useMemo(() => {
-    return inventoryReport.rows.reduce(
+    return filteredInventoryRows.reduce(
       (acc, r) => ({
         beginning: acc.beginning + r.beginningQty,
         importPeriod: acc.importPeriod + r.periodImportQty,
@@ -111,7 +218,7 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
       }),
       { beginning: 0, importPeriod: 0, exportPeriod: 0, ending: 0 }
     );
-  }, [inventoryReport]);
+  }, [filteredInventoryRows]);
 
   // Generate FIFO Profit Report
   const profitReport = useMemo(() => {
@@ -176,9 +283,9 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
 
   // Export Inventory Report to Excel
   const handleExportInventoryReport = () => {
-    const { rows, orderCodes } = inventoryReport;
+    const { orderCodes } = inventoryReport;
 
-    const excelData = rows.map((r, idx) => {
+    const excelData = filteredInventoryRows.map((r, idx) => {
       const rowObj: Record<string, any> = {
         'STT': idx + 1,
         'Mã HH': r.productCode,
@@ -392,6 +499,191 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
             </span>
           </div>
 
+          {/* BỘ LỌC SỐ LƯỢNG: TỒN ĐẦU KỲ, NHẬP TRONG KỲ, TỒN CUỐI KỲ, TỔNG XUẤT */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4 text-indigo-600" />
+                <span className="font-bold text-xs sm:text-sm text-slate-800">
+                  Bộ lọc số lượng xuất nhập kho
+                </span>
+                {hasActiveInventoryFilters && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-100 text-indigo-800">
+                    Đang lọc: {filteredInventoryRows.length} / {inventoryReport.rows.length} mặt hàng
+                  </span>
+                )}
+              </div>
+
+              {hasActiveInventoryFilters && (
+                <button
+                  type="button"
+                  onClick={handleResetInventoryFilters}
+                  className="inline-flex items-center gap-1 text-xs text-rose-600 hover:text-rose-800 font-semibold cursor-pointer px-2 py-1 rounded hover:bg-rose-50 transition-colors self-start sm:self-auto"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Xóa tất cả bộ lọc</span>
+                </button>
+              )}
+            </div>
+
+            {/* Grid 5 filter inputs */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+              {/* Product search */}
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Tìm Mã hoặc Tên HH..."
+                  value={invSearchQuery}
+                  onChange={(e) => setInvSearchQuery(e.target.value)}
+                  className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-indigo-500"
+                />
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-3" />
+              </div>
+
+              {/* 1. SL Tồn đầu kỳ */}
+              <div className="space-y-1">
+                <select
+                  value={beginningFilterMode}
+                  onChange={(e) => setBeginningFilterMode(e.target.value as any)}
+                  className={`w-full px-2.5 py-2 border rounded-lg text-xs cursor-pointer ${
+                    beginningFilterMode !== 'all' ? 'border-blue-500 bg-blue-50 font-bold text-blue-900' : 'border-slate-300 bg-white text-slate-700'
+                  }`}
+                >
+                  <option value="all">Tồn đầu kỳ: Tất cả</option>
+                  <option value="positive">Tồn đầu kỳ: Có tồn (&gt; 0)</option>
+                  <option value="zero">Tồn đầu kỳ: Bằng 0 (= 0)</option>
+                  <option value="negative">Tồn đầu kỳ: Âm (&lt; 0)</option>
+                  <option value="custom">Tồn đầu kỳ: Tùy chỉnh khoảng...</option>
+                </select>
+                {beginningFilterMode === 'custom' && (
+                  <div className="flex items-center gap-1 pt-0.5">
+                    <input
+                      type="number"
+                      placeholder="SL từ"
+                      value={beginningMin}
+                      onChange={(e) => setBeginningMin(e.target.value)}
+                      className="w-1/2 px-2 py-1 border border-slate-300 rounded text-xs"
+                    />
+                    <span className="text-slate-400">-</span>
+                    <input
+                      type="number"
+                      placeholder="đến"
+                      value={beginningMax}
+                      onChange={(e) => setBeginningMax(e.target.value)}
+                      className="w-1/2 px-2 py-1 border border-slate-300 rounded text-xs"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* 2. SL Nhập trong kỳ */}
+              <div className="space-y-1">
+                <select
+                  value={importFilterMode}
+                  onChange={(e) => setImportFilterMode(e.target.value as any)}
+                  className={`w-full px-2.5 py-2 border rounded-lg text-xs cursor-pointer ${
+                    importFilterMode !== 'all' ? 'border-indigo-500 bg-indigo-50 font-bold text-indigo-950' : 'border-slate-300 bg-white text-slate-700'
+                  }`}
+                >
+                  <option value="all">Nhập trong kỳ: Tất cả</option>
+                  <option value="positive">Nhập trong kỳ: Có nhập (&gt; 0)</option>
+                  <option value="zero">Nhập trong kỳ: Không nhập (= 0)</option>
+                  <option value="custom">Nhập trong kỳ: Tùy chỉnh khoảng...</option>
+                </select>
+                {importFilterMode === 'custom' && (
+                  <div className="flex items-center gap-1 pt-0.5">
+                    <input
+                      type="number"
+                      placeholder="SL từ"
+                      value={importMin}
+                      onChange={(e) => setImportMin(e.target.value)}
+                      className="w-1/2 px-2 py-1 border border-slate-300 rounded text-xs"
+                    />
+                    <span className="text-slate-400">-</span>
+                    <input
+                      type="number"
+                      placeholder="đến"
+                      value={importMax}
+                      onChange={(e) => setImportMax(e.target.value)}
+                      className="w-1/2 px-2 py-1 border border-slate-300 rounded text-xs"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* 3. SL Tồn cuối kỳ */}
+              <div className="space-y-1">
+                <select
+                  value={endingFilterMode}
+                  onChange={(e) => setEndingFilterMode(e.target.value as any)}
+                  className={`w-full px-2.5 py-2 border rounded-lg text-xs cursor-pointer ${
+                    endingFilterMode !== 'all' ? 'border-emerald-500 bg-emerald-50 font-bold text-emerald-950' : 'border-slate-300 bg-white text-slate-700'
+                  }`}
+                >
+                  <option value="all">Tồn cuối kỳ: Tất cả</option>
+                  <option value="positive">Tồn cuối kỳ: Còn hàng (&gt; 0)</option>
+                  <option value="zero">Tồn cuối kỳ: Hết hàng (= 0)</option>
+                  <option value="negative">Tồn cuối kỳ: Âm kho (&lt; 0)</option>
+                  <option value="custom">Tồn cuối kỳ: Tùy chỉnh khoảng...</option>
+                </select>
+                {endingFilterMode === 'custom' && (
+                  <div className="flex items-center gap-1 pt-0.5">
+                    <input
+                      type="number"
+                      placeholder="SL từ"
+                      value={endingMin}
+                      onChange={(e) => setEndingMin(e.target.value)}
+                      className="w-1/2 px-2 py-1 border border-slate-300 rounded text-xs"
+                    />
+                    <span className="text-slate-400">-</span>
+                    <input
+                      type="number"
+                      placeholder="đến"
+                      value={endingMax}
+                      onChange={(e) => setEndingMax(e.target.value)}
+                      className="w-1/2 px-2 py-1 border border-slate-300 rounded text-xs"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* 4. Tổng SL xuất */}
+              <div className="space-y-1">
+                <select
+                  value={exportFilterMode}
+                  onChange={(e) => setExportFilterMode(e.target.value as any)}
+                  className={`w-full px-2.5 py-2 border rounded-lg text-xs cursor-pointer ${
+                    exportFilterMode !== 'all' ? 'border-amber-500 bg-amber-50 font-bold text-amber-950' : 'border-slate-300 bg-white text-slate-700'
+                  }`}
+                >
+                  <option value="all">Tổng SL xuất: Tất cả</option>
+                  <option value="positive">Tổng xuất: Có xuất (&gt; 0)</option>
+                  <option value="zero">Tổng xuất: Không xuất (= 0)</option>
+                  <option value="custom">Tổng xuất: Tùy chỉnh khoảng...</option>
+                </select>
+                {exportFilterMode === 'custom' && (
+                  <div className="flex items-center gap-1 pt-0.5">
+                    <input
+                      type="number"
+                      placeholder="SL từ"
+                      value={exportMin}
+                      onChange={(e) => setExportMin(e.target.value)}
+                      className="w-1/2 px-2 py-1 border border-slate-300 rounded text-xs"
+                    />
+                    <span className="text-slate-400">-</span>
+                    <input
+                      type="number"
+                      placeholder="đến"
+                      value={exportMax}
+                      onChange={(e) => setExportMax(e.target.value)}
+                      className="w-1/2 px-2 py-1 border border-slate-300 rounded text-xs"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
             <div className="overflow-x-auto max-h-[72vh] overflow-y-auto">
               <table className="w-full text-xs text-left border-collapse min-w-[1000px]">
@@ -445,17 +737,31 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {inventoryReport.rows.length === 0 ? (
+                  {filteredInventoryRows.length === 0 ? (
                     <tr>
                       <td
                         colSpan={8 + inventoryReport.orderCodes.length}
                         className="p-12 text-center text-slate-400"
                       >
-                        Chưa có dữ liệu hàng hóa.
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <PackageCheck className="w-8 h-8 text-slate-300" />
+                          <p className="font-semibold text-slate-600">
+                            Không có mặt hàng nào phù hợp với điều kiện lọc số lượng.
+                          </p>
+                          {hasActiveInventoryFilters && (
+                            <button
+                              type="button"
+                              onClick={handleResetInventoryFilters}
+                              className="text-xs text-indigo-600 hover:text-indigo-800 underline font-semibold mt-1 cursor-pointer"
+                            >
+                              Xóa bộ lọc để hiển thị toàn bộ {inventoryReport.rows.length} mặt hàng
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ) : (
-                    inventoryReport.rows.map((row, idx) => (
+                    filteredInventoryRows.map((row, idx) => (
                       <tr key={row.productCode} className="hover:bg-slate-50/80">
                         <td className="p-3 text-center text-slate-400 border-r border-slate-100 sticky left-0 bg-white z-10">
                           {idx + 1}
@@ -512,14 +818,14 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
                     ))
                   )}
                 </tbody>
-                {inventoryReport.rows.length > 0 && (
+                {filteredInventoryRows.length > 0 && (
                   <tfoot className="sticky bottom-0 bg-slate-100 font-bold text-[11px] shadow-sm z-10">
                     <tr className="border-t-2 border-slate-300">
                       <td
                         colSpan={4}
                         className="p-3 text-center uppercase tracking-wider text-slate-700 border-r border-slate-300 sticky left-0 bg-slate-100 z-20"
                       >
-                        Tổng cộng
+                        Tổng cộng ({filteredInventoryRows.length} mặt hàng)
                       </td>
                       <td className="p-3 text-right bg-blue-100/70 border-r border-slate-300 text-blue-900">
                         {formatNumber(inventoryTotals.beginning)}
@@ -534,9 +840,9 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
                         {formatNumber(inventoryTotals.exportPeriod)}
                       </td>
 
-                      {/* Total Exports per Order Column */}
+                      {/* Total Exports per Order Column for filtered items */}
                       {inventoryReport.orderCodes.map((code) => {
-                        const totalForOrder = inventoryReport.rows.reduce(
+                        const totalForOrder = filteredInventoryRows.reduce(
                           (acc, r) => acc + (r.orderExports[code] || 0),
                           0
                         );
