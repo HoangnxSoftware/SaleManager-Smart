@@ -47,6 +47,9 @@ import {
   Layers,
   UserCheck,
   Calendar,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
   X
 } from 'lucide-react';
 
@@ -122,6 +125,9 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
 
   const [customerSearch, setCustomerSearch] = useState('');
+  const [customerFilterDuplicateTax, setCustomerFilterDuplicateTax] = useState(false);
+  const [customerSortField, setCustomerSortField] = useState<'default' | 'code' | 'taxCode' | 'type'>('default');
+  const [customerSortDirection, setCustomerSortDirection] = useState<'asc' | 'desc'>('asc');
 
   // Filtered orders
   const filteredOrders = useMemo(() => {
@@ -143,20 +149,6 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
     }).sort((a, b) => b.orderDate.localeCompare(a.orderDate) || b.createdAt.localeCompare(a.createdAt));
   }, [orders, searchTerm, statusFilter, startDate, endDate, salespersonFilter]);
 
-  // Filtered customers
-  const filteredCustomers = useMemo(() => {
-    if (!customerSearch.trim()) return customers;
-    const q = customerSearch.toLowerCase();
-    return customers.filter(
-      (c) =>
-        c.name.toLowerCase().includes(q) ||
-        c.shortName.toLowerCase().includes(q) ||
-        c.code.toLowerCase().includes(q) ||
-        c.taxCode.toLowerCase().includes(q) ||
-        c.phone.toLowerCase().includes(q)
-    );
-  }, [customers, customerSearch]);
-
   // Duplicate tax codes check for customers (REQUIREMENT: nếu trong danh mục có trùng mã số thuế thì bôi đỏ)
   const duplicateTaxCodes = useMemo(() => {
     const counts = new Map<string, number>();
@@ -172,6 +164,65 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
     });
     return dupes;
   }, [customers]);
+
+  const duplicateCustomerCount = useMemo(() => {
+    return customers.filter((c) => c.taxCode && duplicateTaxCodes.has(c.taxCode.trim())).length;
+  }, [customers, duplicateTaxCodes]);
+
+  // Filtered & sorted customers
+  const filteredCustomers = useMemo(() => {
+    let list = customers;
+    if (customerSearch.trim()) {
+      const q = customerSearch.toLowerCase();
+      list = list.filter(
+        (c) =>
+          c.name.toLowerCase().includes(q) ||
+          c.shortName.toLowerCase().includes(q) ||
+          c.code.toLowerCase().includes(q) ||
+          c.taxCode.toLowerCase().includes(q) ||
+          c.phone.toLowerCase().includes(q)
+      );
+    }
+
+    if (customerFilterDuplicateTax) {
+      list = list.filter((c) => c.taxCode && duplicateTaxCodes.has(c.taxCode.trim()));
+    }
+
+    if (customerSortField !== 'default') {
+      list = [...list].sort((a, b) => {
+        let valA = '';
+        let valB = '';
+        if (customerSortField === 'code') {
+          valA = a.code || '';
+          valB = b.code || '';
+        } else if (customerSortField === 'taxCode') {
+          valA = a.taxCode || '';
+          valB = b.taxCode || '';
+        } else if (customerSortField === 'type') {
+          valA = a.type === 'organization' ? 'Tổ chức' : 'Cá nhân';
+          valB = b.type === 'organization' ? 'Tổ chức' : 'Cá nhân';
+        }
+
+        if (!valA && valB) return 1;
+        if (valA && !valB) return -1;
+        if (!valA && !valB) return 0;
+
+        const cmp = valA.localeCompare(valB, 'vi', { numeric: true, sensitivity: 'base' });
+        return customerSortDirection === 'asc' ? cmp : -cmp;
+      });
+    }
+
+    return list;
+  }, [customers, customerSearch, customerFilterDuplicateTax, duplicateTaxCodes, customerSortField, customerSortDirection]);
+
+  const handleCustomerSort = (field: 'code' | 'taxCode' | 'type') => {
+    if (customerSortField === field) {
+      setCustomerSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setCustomerSortField(field);
+      setCustomerSortDirection('asc');
+    }
+  };
 
   // Customer Excel Import State
   const [customerConflictModalOpen, setCustomerConflictModalOpen] = useState(false);
@@ -1084,16 +1135,71 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
       ) : (
         /* Customers Tab */
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-            <div className="relative w-full sm:w-80">
-              <input
-                type="text"
-                placeholder="Tìm khách hàng (Tên, Mã, MST, SĐT)..."
-                value={customerSearch}
-                onChange={(e) => setCustomerSearch(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500"
-              />
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="relative w-full sm:w-72">
+                <input
+                  type="text"
+                  placeholder="Tìm khách hàng (Tên, Mã, MST, SĐT)..."
+                  value={customerSearch}
+                  onChange={(e) => setCustomerSearch(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500"
+                />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              </div>
+
+              {/* Duplicate Tax Filter Toggle */}
+              <button
+                type="button"
+                onClick={() => setCustomerFilterDuplicateTax(!customerFilterDuplicateTax)}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                  customerFilterDuplicateTax
+                    ? 'bg-rose-100 text-rose-800 border-rose-300 ring-2 ring-rose-400 shadow-xs'
+                    : duplicateTaxCodes.size > 0
+                    ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                }`}
+                title="Lọc danh sách các khách hàng có mã số thuế bị trùng nhau"
+              >
+                <AlertTriangle className={`w-3.5 h-3.5 ${customerFilterDuplicateTax || duplicateTaxCodes.size > 0 ? 'text-rose-600' : 'text-slate-400'}`} />
+                <span>Lọc trùng MST</span>
+                {duplicateTaxCodes.size > 0 && (
+                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+                    customerFilterDuplicateTax ? 'bg-rose-600 text-white' : 'bg-rose-200 text-rose-800'
+                  }`}>
+                    {duplicateCustomerCount} KH
+                  </span>
+                )}
+              </button>
+
+              {/* Sort selector */}
+              <div className="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-700">
+                <span className="text-slate-500 font-medium whitespace-nowrap">Sắp xếp:</span>
+                <select
+                  value={customerSortField}
+                  onChange={(e) => setCustomerSortField(e.target.value as any)}
+                  className="bg-transparent font-semibold text-slate-800 focus:outline-hidden cursor-pointer"
+                >
+                  <option value="default">Mặc định</option>
+                  <option value="code">Mã khách hàng</option>
+                  <option value="taxCode">Mã số thuế</option>
+                  <option value="type">Loại khách hàng</option>
+                </select>
+                {customerSortField !== 'default' && (
+                  <button
+                    type="button"
+                    onClick={() => setCustomerSortDirection(d => d === 'asc' ? 'desc' : 'asc')}
+                    className="p-1 hover:bg-slate-200 rounded text-blue-700 font-bold cursor-pointer transition-colors"
+                    title={customerSortDirection === 'asc' ? 'Đang tăng dần (A-Z). Bấm chuyển giảm dần (Z-A)' : 'Đang giảm dần (Z-A). Bấm chuyển tăng dần (A-Z)'}
+                  >
+                    {customerSortDirection === 'asc' ? (
+                      <span className="inline-flex items-center gap-0.5 text-[11px]">↑ A-Z</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-0.5 text-[11px]">↓ Z-A</span>
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -1148,11 +1254,20 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
 
           {/* DUPLICATE TAX CODE ALERT BANNER */}
           {duplicateTaxCodes.size > 0 && (
-            <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-900 flex items-center gap-2 shadow-2xs">
-              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-              <span>
-                <strong>Cảnh báo trùng mã số thuế:</strong> Phát hiện <strong>{duplicateTaxCodes.size}</strong> mã số thuế bị trùng giữa nhiều khách hàng trong danh mục (các mục được bôi đỏ nổi bật bên dưới).
-              </span>
+            <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-900 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>
+                  <strong>Cảnh báo trùng mã số thuế:</strong> Phát hiện <strong>{duplicateTaxCodes.size}</strong> mã số thuế bị trùng giữa <strong>{duplicateCustomerCount}</strong> khách hàng trong danh mục (các mục được bôi đỏ nổi bật bên dưới).
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCustomerFilterDuplicateTax(!customerFilterDuplicateTax)}
+                className="shrink-0 px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold text-xs shadow-xs transition-colors cursor-pointer self-start sm:self-auto"
+              >
+                {customerFilterDuplicateTax ? 'Xem toàn bộ khách hàng' : 'Lọc chỉ xem KH trùng MST'}
+              </button>
             </div>
           )}
 
@@ -1162,90 +1277,165 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                 <thead className="bg-slate-100 text-slate-700 uppercase font-bold text-[11px] sm:text-xs">
                   <tr>
                     <th className="p-3 w-10 text-left">STT</th>
-                    <th className="p-3 text-left">Mã KH</th>
+                    <th
+                      onClick={() => handleCustomerSort('code')}
+                      className="p-3 text-left cursor-pointer select-none hover:bg-slate-200 transition-colors group"
+                      title="Bấm để sắp xếp theo Mã khách hàng"
+                    >
+                      <div className="inline-flex items-center gap-1">
+                        <span>Mã KH</span>
+                        {customerSortField === 'code' ? (
+                          customerSortDirection === 'asc' ? (
+                            <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
+                          ) : (
+                            <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 group-hover:opacity-100" />
+                        )}
+                      </div>
+                    </th>
                     <th className="p-3 text-left">Tên khách hàng</th>
                     <th className="p-3 text-left">Tên gợi nhớ</th>
-                    <th className="p-3 text-left">Mã số thuế</th>
+                    <th
+                      onClick={() => handleCustomerSort('taxCode')}
+                      className="p-3 text-left cursor-pointer select-none hover:bg-slate-200 transition-colors group"
+                      title="Bấm để sắp xếp theo Mã số thuế"
+                    >
+                      <div className="inline-flex items-center gap-1">
+                        <span>Mã số thuế</span>
+                        {customerSortField === 'taxCode' ? (
+                          customerSortDirection === 'asc' ? (
+                            <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
+                          ) : (
+                            <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 group-hover:opacity-100" />
+                        )}
+                      </div>
+                    </th>
                     <th className="p-3 text-left">Số CCCD</th>
                     <th className="p-3 text-left">Điện thoại</th>
                     <th className="p-3 text-left">Địa chỉ</th>
-                    <th className="p-3 text-left">Loại KH</th>
+                    <th
+                      onClick={() => handleCustomerSort('type')}
+                      className="p-3 text-center cursor-pointer select-none hover:bg-slate-200 transition-colors group"
+                      title="Bấm để sắp xếp theo Loại khách hàng (Tổ chức / Cá nhân)"
+                    >
+                      <div className="inline-flex items-center justify-center gap-1">
+                        <span>Loại KH</span>
+                        {customerSortField === 'type' ? (
+                          customerSortDirection === 'asc' ? (
+                            <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
+                          ) : (
+                            <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 group-hover:opacity-100" />
+                        )}
+                      </div>
+                    </th>
                     <th className="p-3 text-left">Thao tác</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredCustomers.map((cust, idx) => {
-                    const isDupTax = cust.taxCode && duplicateTaxCodes.has(cust.taxCode.trim());
-                    return (
-                      <tr
-                        key={cust.id}
-                        className={`transition-colors ${
-                          isDupTax
-                            ? 'bg-rose-50/70 hover:bg-rose-100/70 border-l-4 border-l-rose-500'
-                            : 'hover:bg-slate-50/70'
-                        }`}
-                      >
-                        <td className="p-3 text-center text-slate-400">{idx + 1}</td>
-                        <td className="p-3 font-mono font-bold text-blue-700">{cust.code}</td>
-                        <td className="p-3 font-semibold text-slate-900">{cust.name}</td>
-                        <td className="p-3 text-slate-600">{cust.shortName}</td>
-                        <td className="p-3">
-                          {isDupTax ? (
-                            <span className="inline-flex items-center gap-1 font-mono font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded border border-rose-300">
-                              <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                              <span>{cust.taxCode}</span>
-                              <span className="text-[10px] text-rose-800 font-semibold">(Trùng MST)</span>
-                            </span>
-                          ) : (
-                            <span className="font-mono text-slate-700">{cust.taxCode || '—'}</span>
+                  {filteredCustomers.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="p-10 text-center text-slate-500">
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <Users className="w-8 h-8 text-slate-300" />
+                          <p className="font-semibold text-slate-600">
+                            {customerFilterDuplicateTax
+                              ? 'Không tìm thấy khách hàng nào trùng mã số thuế.'
+                              : 'Không tìm thấy khách hàng nào phù hợp.'}
+                          </p>
+                          {customerFilterDuplicateTax && (
+                            <button
+                              type="button"
+                              onClick={() => setCustomerFilterDuplicateTax(false)}
+                              className="text-xs text-blue-600 hover:text-blue-800 underline font-semibold mt-1 cursor-pointer"
+                            >
+                              Bỏ lọc trùng MST và hiển thị tất cả khách hàng
+                            </button>
                           )}
-                        </td>
-                        <td className="p-3 font-mono text-slate-700">{cust.idCard || '—'}</td>
-                        <td className="p-3 text-slate-700">{cust.phone || '—'}</td>
-                        <td className="p-3 text-slate-600">{cust.address || '—'}</td>
-                        <td className="p-3 text-center">
-                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                            cust.type === 'organization' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
-                          }`}>
-                            {cust.type === 'organization' ? 'Tổ chức' : 'Cá nhân'}
-                          </span>
-                        </td>
-                        <td className="p-3 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingCustomer(cust);
-                                setIsCustomerModalOpen(true);
-                              }}
-                              className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer"
-                              title="Sửa khách hàng"
-                            >
-                              <Edit className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                const ok = await confirm({
-                                  title: 'Xác nhận xóa khách hàng',
-                                  message: `Bạn có chắc muốn xóa khách hàng "${cust.name}" (Mã: ${cust.code})?`,
-                                  confirmText: 'Xóa khách hàng',
-                                  type: 'danger',
-                                });
-                                if (ok) {
-                                  onDeleteCustomer(cust.id);
-                                }
-                              }}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
-                              title="Xóa khách hàng"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredCustomers.map((cust, idx) => {
+                      const isDupTax = cust.taxCode && duplicateTaxCodes.has(cust.taxCode.trim());
+                      return (
+                        <tr
+                          key={cust.id}
+                          className={`transition-colors ${
+                            isDupTax
+                              ? 'bg-rose-50/70 hover:bg-rose-100/70 border-l-4 border-l-rose-500'
+                              : 'hover:bg-slate-50/70'
+                          }`}
+                        >
+                          <td className="p-3 text-center text-slate-400">{idx + 1}</td>
+                          <td className="p-3 font-mono font-bold text-blue-700">{cust.code}</td>
+                          <td className="p-3 font-semibold text-slate-900">{cust.name}</td>
+                          <td className="p-3 text-slate-600">{cust.shortName}</td>
+                          <td className="p-3">
+                            {isDupTax ? (
+                              <span className="inline-flex items-center gap-1 font-mono font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded border border-rose-300">
+                                <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                <span>{cust.taxCode}</span>
+                                <span className="text-[10px] text-rose-800 font-semibold">(Trùng MST)</span>
+                              </span>
+                            ) : (
+                              <span className="font-mono text-slate-700">{cust.taxCode || '—'}</span>
+                            )}
+                          </td>
+                          <td className="p-3 font-mono text-slate-700">{cust.idCard || '—'}</td>
+                          <td className="p-3 text-slate-700">{cust.phone || '—'}</td>
+                          <td className="p-3 text-slate-600">{cust.address || '—'}</td>
+                          <td className="p-3 text-center">
+                            <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                              cust.type === 'organization' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                            }`}>
+                              {cust.type === 'organization' ? 'Tổ chức' : 'Cá nhân'}
+                            </span>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingCustomer(cust);
+                                  setIsCustomerModalOpen(true);
+                                }}
+                                className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer"
+                                title="Sửa khách hàng"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const ok = await confirm({
+                                    title: 'Xác nhận xóa khách hàng',
+                                    message: `Bạn có chắc muốn xóa khách hàng "${cust.name}" (Mã: ${cust.code})?`,
+                                    confirmText: 'Xóa khách hàng',
+                                    type: 'danger',
+                                  });
+                                  if (ok) {
+                                    onDeleteCustomer(cust.id);
+                                  }
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                                title="Xóa khách hàng"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>

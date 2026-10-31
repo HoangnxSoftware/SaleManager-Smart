@@ -64,7 +64,7 @@ export function calculateCurrentInventory(
   upToDate?: string,
   excludeOrderId?: string
 ) {
-  const stockMap = new Map<string, { totalImport: number; totalExport: number; inStock: number }>();
+  const stockMap = new Map<string, { totalImport: number; totalExport: number; inStock: number; inventoryValue: number }>();
 
   // Helper for safe YYYY-MM-DD comparison
   const toYMD = (d: string | undefined | null) => (d ? d.slice(0, 10) : '');
@@ -74,39 +74,93 @@ export function calculateCurrentInventory(
   const productMap = new Map<string, Product>();
   products.forEach(p => {
     productMap.set(p.code, p);
-    stockMap.set(p.code, { totalImport: 0, totalExport: 0, inStock: 0 });
+    stockMap.set(p.code, { totalImport: 0, totalExport: 0, inStock: 0, inventoryValue: 0 });
   });
 
+  // Track lots for FIFO valuation of remaining stock
+  const lotsByProduct = new Map<string, Array<{ remainingQty: number; unitCost: number; purchaseDate: string }>>();
+
+  // Sort purchases chronologically
+  const sortedPurchases = [...purchases]
+    .filter(b => !targetDate || toYMD(b.purchaseDate) <= targetDate)
+    .sort((a, b) => a.purchaseDate.localeCompare(b.purchaseDate) || (a.createdAt || '').localeCompare(b.createdAt || ''));
+
   // Add purchases (on or before upToDate if provided)
-  for (const bill of purchases) {
-    if (targetDate && toYMD(bill.purchaseDate) > targetDate) {
-      continue;
-    }
+  for (const bill of sortedPurchases) {
     for (const item of bill.items) {
       const prod = productMap.get(item.productCode);
       const conversion = prod ? (prod.conversionRate || 1) : 1;
       const qtyInSaleUnit = item.quantity * conversion;
-      const current = stockMap.get(item.productCode) || { totalImport: 0, totalExport: 0, inStock: 0 };
+      const costPerSaleUnit = item.unitPrice / conversion;
+
+      const current = stockMap.get(item.productCode) || { totalImport: 0, totalExport: 0, inStock: 0, inventoryValue: 0 };
       current.totalImport += qtyInSaleUnit;
       current.inStock += qtyInSaleUnit;
       stockMap.set(item.productCode, current);
+
+      const lots = lotsByProduct.get(item.productCode) || [];
+      lots.push({
+        remainingQty: qtyInSaleUnit,
+        unitCost: costPerSaleUnit,
+        purchaseDate: bill.purchaseDate,
+      });
+      lotsByProduct.set(item.productCode, lots);
     }
   }
 
-  // Deduct all non-cancelled orders (on or before upToDate if provided, excluding excludeOrderId)
-  for (const ord of orders) {
-    if (ord.deliveryStatus === 'cancelled') continue;
-    if (excludeOrderId && ord.id === excludeOrderId) continue;
-    if (targetDate && toYMD(ord.orderDate) > targetDate) {
-      continue;
-    }
+  // Sort orders chronologically to consume FIFO lots
+  const sortedOrders = [...orders]
+    .filter(o => o.deliveryStatus !== 'cancelled' && (!excludeOrderId || o.id !== excludeOrderId) && (!targetDate || toYMD(o.orderDate) <= targetDate))
+    .sort((a, b) => a.orderDate.localeCompare(b.orderDate) || (a.createdAt || '').localeCompare(b.createdAt || ''));
+
+  // Deduct all non-cancelled orders
+  for (const ord of sortedOrders) {
     for (const item of ord.items) {
-      const current = stockMap.get(item.productCode) || { totalImport: 0, totalExport: 0, inStock: 0 };
+      const current = stockMap.get(item.productCode) || { totalImport: 0, totalExport: 0, inStock: 0, inventoryValue: 0 };
       current.totalExport += item.quantity;
       current.inStock -= item.quantity;
       stockMap.set(item.productCode, current);
+
+      // Consume FIFO lots
+      let needed = item.quantity;
+      const lots = lotsByProduct.get(item.productCode);
+      if (lots) {
+        for (const lot of lots) {
+          if (needed <= 0) break;
+          if (lot.remainingQty > 0) {
+            const take = Math.min(needed, lot.remainingQty);
+            lot.remainingQty -= take;
+            needed -= take;
+          }
+        }
+      }
     }
   }
+
+  // Calculate FIFO inventoryValue for each product
+  products.forEach(p => {
+    const current = stockMap.get(p.code);
+    if (!current || current.inStock <= 0) {
+      if (current) current.inventoryValue = 0;
+      return;
+    }
+    const lots = lotsByProduct.get(p.code) || [];
+    let val = 0;
+    let remainingLotsQty = 0;
+    for (const lot of lots) {
+      if (lot.remainingQty > 0) {
+        val += lot.remainingQty * lot.unitCost;
+        remainingLotsQty += lot.remainingQty;
+      }
+    }
+    // If inStock > remainingLotsQty, value remaining with latest lot cost
+    if (current.inStock > remainingLotsQty) {
+      const latestLot = lots[lots.length - 1];
+      const fallbackUnitCost = latestLot ? latestLot.unitCost : 0;
+      val += (current.inStock - remainingLotsQty) * fallbackUnitCost;
+    }
+    current.inventoryValue = Math.max(0, Math.round(val));
+  });
 
   return stockMap;
 }

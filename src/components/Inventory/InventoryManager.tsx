@@ -25,6 +25,8 @@ import {
   Eye,
   Layers,
   ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
   AlertTriangle,
   Info,
   CheckSquare,
@@ -234,19 +236,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
     };
   }, [flattenedPurchaseItems]);
 
-  // Filtered suppliers
-  const filteredSuppliers = useMemo(() => {
-    if (!supplierSearch.trim()) return suppliers;
-    const q = supplierSearch.toLowerCase();
-    return suppliers.filter(
-      (s) =>
-        s.name.toLowerCase().includes(q) ||
-        s.code.toLowerCase().includes(q) ||
-        s.shortName.toLowerCase().includes(q) ||
-        s.taxCode.toLowerCase().includes(q) ||
-        s.phone.toLowerCase().includes(q)
-    );
-  }, [suppliers, supplierSearch]);
+  // Filtered suppliers with duplicate tax filtering & sorting
+  const [supplierFilterDuplicateTax, setSupplierFilterDuplicateTax] = useState(false);
+  const [supplierSortField, setSupplierSortField] = useState<'default' | 'code' | 'taxCode'>('default');
+  const [supplierSortDirection, setSupplierSortDirection] = useState<'asc' | 'desc'>('asc');
 
   // Duplicate tax codes check for suppliers (REQUIREMENT: nếu trong danh mục có trùng mã số thuế thì bôi đỏ)
   const duplicateSupplierTaxCodes = useMemo(() => {
@@ -263,6 +256,61 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
     });
     return dupes;
   }, [suppliers]);
+
+  const duplicateSupplierCount = useMemo(() => {
+    return suppliers.filter((s) => s.taxCode && duplicateSupplierTaxCodes.has(s.taxCode.trim())).length;
+  }, [suppliers, duplicateSupplierTaxCodes]);
+
+  const filteredSuppliers = useMemo(() => {
+    let list = suppliers;
+    if (supplierSearch.trim()) {
+      const q = supplierSearch.toLowerCase();
+      list = list.filter(
+        (s) =>
+          s.name.toLowerCase().includes(q) ||
+          s.code.toLowerCase().includes(q) ||
+          s.shortName.toLowerCase().includes(q) ||
+          s.taxCode.toLowerCase().includes(q) ||
+          s.phone.toLowerCase().includes(q)
+      );
+    }
+
+    if (supplierFilterDuplicateTax) {
+      list = list.filter((s) => s.taxCode && duplicateSupplierTaxCodes.has(s.taxCode.trim()));
+    }
+
+    if (supplierSortField !== 'default') {
+      list = [...list].sort((a, b) => {
+        let valA = '';
+        let valB = '';
+        if (supplierSortField === 'code') {
+          valA = a.code || '';
+          valB = b.code || '';
+        } else if (supplierSortField === 'taxCode') {
+          valA = a.taxCode || '';
+          valB = b.taxCode || '';
+        }
+
+        if (!valA && valB) return 1;
+        if (valA && !valB) return -1;
+        if (!valA && !valB) return 0;
+
+        const cmp = valA.localeCompare(valB, 'vi', { numeric: true, sensitivity: 'base' });
+        return supplierSortDirection === 'asc' ? cmp : -cmp;
+      });
+    }
+
+    return list;
+  }, [suppliers, supplierSearch, supplierFilterDuplicateTax, duplicateSupplierTaxCodes, supplierSortField, supplierSortDirection]);
+
+  const handleSupplierSort = (field: 'code' | 'taxCode') => {
+    if (supplierSortField === field) {
+      setSupplierSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSupplierSortField(field);
+      setSupplierSortDirection('asc');
+    }
+  };
 
   // Supplier Excel Import State
   const [supplierConflictModalOpen, setSupplierConflictModalOpen] = useState(false);
@@ -989,16 +1037,70 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       ) : (
         /* Suppliers Sub Tab */
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-            <div className="relative w-full sm:w-80">
-              <input
-                type="text"
-                placeholder="Tìm NCC (Mã, Tên, MST, SĐT)..."
-                value={supplierSearch}
-                onChange={(e) => setSupplierSearch(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-teal-500"
-              />
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="relative w-full sm:w-72">
+                <input
+                  type="text"
+                  placeholder="Tìm NCC (Mã, Tên, MST, SĐT)..."
+                  value={supplierSearch}
+                  onChange={(e) => setSupplierSearch(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-teal-500"
+                />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              </div>
+
+              {/* Duplicate Tax Filter Toggle */}
+              <button
+                type="button"
+                onClick={() => setSupplierFilterDuplicateTax(!supplierFilterDuplicateTax)}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                  supplierFilterDuplicateTax
+                    ? 'bg-rose-100 text-rose-800 border-rose-300 ring-2 ring-rose-400 shadow-xs'
+                    : duplicateSupplierTaxCodes.size > 0
+                    ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                }`}
+                title="Lọc danh sách các nhà cung cấp có mã số thuế bị trùng nhau"
+              >
+                <AlertTriangle className={`w-3.5 h-3.5 ${supplierFilterDuplicateTax || duplicateSupplierTaxCodes.size > 0 ? 'text-rose-600' : 'text-slate-400'}`} />
+                <span>Lọc trùng MST</span>
+                {duplicateSupplierTaxCodes.size > 0 && (
+                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+                    supplierFilterDuplicateTax ? 'bg-rose-600 text-white' : 'bg-rose-200 text-rose-800'
+                  }`}>
+                    {duplicateSupplierCount} NCC
+                  </span>
+                )}
+              </button>
+
+              {/* Sort selector */}
+              <div className="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-700">
+                <span className="text-slate-500 font-medium whitespace-nowrap">Sắp xếp:</span>
+                <select
+                  value={supplierSortField}
+                  onChange={(e) => setSupplierSortField(e.target.value as any)}
+                  className="bg-transparent font-semibold text-slate-800 focus:outline-hidden cursor-pointer"
+                >
+                  <option value="default">Mặc định</option>
+                  <option value="code">Mã đơn vị CC</option>
+                  <option value="taxCode">Mã số thuế</option>
+                </select>
+                {supplierSortField !== 'default' && (
+                  <button
+                    type="button"
+                    onClick={() => setSupplierSortDirection(d => d === 'asc' ? 'desc' : 'asc')}
+                    className="p-1 hover:bg-slate-200 rounded text-teal-700 font-bold cursor-pointer transition-colors"
+                    title={supplierSortDirection === 'asc' ? 'Đang tăng dần (A-Z). Bấm chuyển giảm dần (Z-A)' : 'Đang giảm dần (Z-A). Bấm chuyển tăng dần (A-Z)'}
+                  >
+                    {supplierSortDirection === 'asc' ? (
+                      <span className="inline-flex items-center gap-0.5 text-[11px]">↑ A-Z</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-0.5 text-[11px]">↓ Z-A</span>
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -1053,11 +1155,20 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
 
           {/* DUPLICATE TAX CODE ALERT BANNER */}
           {duplicateSupplierTaxCodes.size > 0 && (
-            <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-900 flex items-center gap-2 shadow-2xs">
-              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-              <span>
-                <strong>Cảnh báo trùng mã số thuế:</strong> Phát hiện <strong>{duplicateSupplierTaxCodes.size}</strong> mã số thuế bị trùng giữa nhiều nhà cung cấp (các dòng được bôi đỏ nổi bật bên dưới).
-              </span>
+            <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-900 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>
+                  <strong>Cảnh báo trùng mã số thuế:</strong> Phát hiện <strong>{duplicateSupplierTaxCodes.size}</strong> mã số thuế bị trùng giữa <strong>{duplicateSupplierCount}</strong> nhà cung cấp (các dòng được bôi đỏ nổi bật bên dưới).
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSupplierFilterDuplicateTax(!supplierFilterDuplicateTax)}
+                className="shrink-0 px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold text-xs shadow-xs transition-colors cursor-pointer self-start sm:self-auto"
+              >
+                {supplierFilterDuplicateTax ? 'Xem toàn bộ đơn vị CC' : 'Lọc chỉ xem NCC trùng MST'}
+              </button>
             </div>
           )}
 
@@ -1067,10 +1178,44 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 <thead className="bg-slate-100 text-slate-700 uppercase font-bold text-[11px] sm:text-xs">
                   <tr>
                     <th className="p-3 w-10 text-left">STT</th>
-                    <th className="p-3 text-left">Mã đơn vị CC</th>
+                    <th
+                      onClick={() => handleSupplierSort('code')}
+                      className="p-3 text-left cursor-pointer select-none hover:bg-slate-200 transition-colors group"
+                      title="Bấm để sắp xếp theo Mã đơn vị cung cấp"
+                    >
+                      <div className="inline-flex items-center gap-1">
+                        <span>Mã đơn vị CC</span>
+                        {supplierSortField === 'code' ? (
+                          supplierSortDirection === 'asc' ? (
+                            <ArrowUp className="w-3.5 h-3.5 text-teal-600" />
+                          ) : (
+                            <ArrowDown className="w-3.5 h-3.5 text-teal-600" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 group-hover:opacity-100" />
+                        )}
+                      </div>
+                    </th>
                     <th className="p-3 text-left">Tên đơn vị cung cấp</th>
                     <th className="p-3 text-left">Tên gợi nhớ</th>
-                    <th className="p-3 text-left">Mã Số Thuế</th>
+                    <th
+                      onClick={() => handleSupplierSort('taxCode')}
+                      className="p-3 text-left cursor-pointer select-none hover:bg-slate-200 transition-colors group"
+                      title="Bấm để sắp xếp theo Mã số thuế"
+                    >
+                      <div className="inline-flex items-center gap-1">
+                        <span>Mã Số Thuế</span>
+                        {supplierSortField === 'taxCode' ? (
+                          supplierSortDirection === 'asc' ? (
+                            <ArrowUp className="w-3.5 h-3.5 text-teal-600" />
+                          ) : (
+                            <ArrowDown className="w-3.5 h-3.5 text-teal-600" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 group-hover:opacity-100" />
+                        )}
+                      </div>
+                    </th>
                     <th className="p-3 text-left">Số điện thoại</th>
                     <th className="p-3 text-left">Địa chỉ</th>
                     <th className="p-3 text-left">Ghi chú</th>
@@ -1078,71 +1223,95 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredSuppliers.map((sup, idx) => {
-                    const isDupTax = sup.taxCode && duplicateSupplierTaxCodes.has(sup.taxCode.trim());
-                    return (
-                      <tr
-                        key={sup.id}
-                        className={`transition-colors ${
-                          isDupTax
-                            ? 'bg-rose-50/70 hover:bg-rose-100/70 border-l-4 border-l-rose-500'
-                            : 'hover:bg-slate-50/70'
-                        }`}
-                      >
-                        <td className="p-3 text-center text-slate-400">{idx + 1}</td>
-                        <td className="p-3 font-mono font-bold text-teal-800">{sup.code}</td>
-                        <td className="p-3 font-semibold text-slate-900">{sup.name}</td>
-                        <td className="p-3 text-slate-600">{sup.shortName}</td>
-                        <td className="p-3">
-                          {isDupTax ? (
-                            <span className="inline-flex items-center gap-1 font-mono font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded border border-rose-300">
-                              <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                              <span>{sup.taxCode}</span>
-                              <span className="text-[10px] text-rose-800 font-semibold">(Trùng MST)</span>
-                            </span>
-                          ) : (
-                            <span className="font-mono text-slate-700">{sup.taxCode || '—'}</span>
+                  {filteredSuppliers.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="p-10 text-center text-slate-500">
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <Building2 className="w-8 h-8 text-slate-300" />
+                          <p className="font-semibold text-slate-600">
+                            {supplierFilterDuplicateTax
+                              ? 'Không tìm thấy nhà cung cấp nào trùng mã số thuế.'
+                              : 'Không tìm thấy nhà cung cấp nào phù hợp.'}
+                          </p>
+                          {supplierFilterDuplicateTax && (
+                            <button
+                              type="button"
+                              onClick={() => setSupplierFilterDuplicateTax(false)}
+                              className="text-xs text-teal-600 hover:text-teal-800 underline font-semibold mt-1 cursor-pointer"
+                            >
+                              Bỏ lọc trùng MST và hiển thị tất cả nhà cung cấp
+                            </button>
                           )}
-                        </td>
-                        <td className="p-3 text-slate-700">{sup.phone || '—'}</td>
-                        <td className="p-3 text-slate-600">{sup.address || '—'}</td>
-                        <td className="p-3 text-slate-500 text-xs">{sup.notes || '—'}</td>
-                        <td className="p-3 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingSupplier(sup);
-                                setIsSupplierModalOpen(true);
-                              }}
-                              className="p-1.5 text-slate-500 hover:text-teal-600 hover:bg-teal-50 rounded-lg cursor-pointer"
-                              title="Sửa NCC"
-                            >
-                              <Edit className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                const ok = await confirm({
-                                  title: 'Xác nhận xóa nhà cung cấp',
-                                  message: `Bạn có chắc muốn xóa nhà cung cấp "${sup.name}" (Mã: ${sup.code})?`,
-                                  confirmText: 'Xóa NCC',
-                                  type: 'danger',
-                                });
-                                if (ok) {
-                                  onDeleteSupplier(sup.id);
-                                }
-                              }}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
-                              title="Xóa NCC"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredSuppliers.map((sup, idx) => {
+                      const isDupTax = sup.taxCode && duplicateSupplierTaxCodes.has(sup.taxCode.trim());
+                      return (
+                        <tr
+                          key={sup.id}
+                          className={`transition-colors ${
+                            isDupTax
+                              ? 'bg-rose-50/70 hover:bg-rose-100/70 border-l-4 border-l-rose-500'
+                              : 'hover:bg-slate-50/70'
+                          }`}
+                        >
+                          <td className="p-3 text-center text-slate-400">{idx + 1}</td>
+                          <td className="p-3 font-mono font-bold text-teal-800">{sup.code}</td>
+                          <td className="p-3 font-semibold text-slate-900">{sup.name}</td>
+                          <td className="p-3 text-slate-600">{sup.shortName}</td>
+                          <td className="p-3">
+                            {isDupTax ? (
+                              <span className="inline-flex items-center gap-1 font-mono font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded border border-rose-300">
+                                <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                <span>{sup.taxCode}</span>
+                                <span className="text-[10px] text-rose-800 font-semibold">(Trùng MST)</span>
+                              </span>
+                            ) : (
+                              <span className="font-mono text-slate-700">{sup.taxCode || '—'}</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-slate-700">{sup.phone || '—'}</td>
+                          <td className="p-3 text-slate-600">{sup.address || '—'}</td>
+                          <td className="p-3 text-slate-500 text-xs">{sup.notes || '—'}</td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingSupplier(sup);
+                                  setIsSupplierModalOpen(true);
+                                }}
+                                className="p-1.5 text-slate-500 hover:text-teal-600 hover:bg-teal-50 rounded-lg cursor-pointer"
+                                title="Sửa NCC"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const ok = await confirm({
+                                    title: 'Xác nhận xóa nhà cung cấp',
+                                    message: `Bạn có chắc muốn xóa nhà cung cấp "${sup.name}" (Mã: ${sup.code})?`,
+                                    confirmText: 'Xóa NCC',
+                                    type: 'danger',
+                                  });
+                                  if (ok) {
+                                    onDeleteSupplier(sup.id);
+                                  }
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                                title="Xóa NCC"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>

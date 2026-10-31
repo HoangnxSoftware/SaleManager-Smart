@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Product, PurchaseBill, Order } from '../../types';
-import { formatNumber } from '../../utils/formatters';
+import { formatNumber, formatCurrency } from '../../utils/formatters';
 import {
   exportProductsToExcel,
   downloadProductTemplate,
@@ -80,6 +80,20 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
       return matchSearch && matchCat;
     });
   }, [products, searchTerm, categoryFilter]);
+
+  // Overall inventory summary for filtered products
+  const inventoryTotals = useMemo(() => {
+    let totalStock = 0;
+    let totalValue = 0;
+    filteredProducts.forEach((p) => {
+      const info = inventoryStockMap.get(p.code);
+      if (info) {
+        totalStock += info.inStock;
+        totalValue += info.inventoryValue;
+      }
+    });
+    return { totalStock, totalValue };
+  }, [filteredProducts, inventoryStockMap]);
 
   // Batch Selection & Deletion for Products (Requirement 6)
   const handleToggleSelectAllProducts = () => {
@@ -232,21 +246,28 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
             </h1>
           </div>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Mã HH, ĐVT mua/bán, SL quy đổi, tỷ suất lợi nhuận và số lượng tồn kho tức thì
+            Mã HH, ĐVT mua/bán, SL quy đổi, tỷ suất lợi nhuận, số lượng và trị giá tồn kho hiện tại
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            setEditingProduct(null);
-            setIsModalOpen(true);
-          }}
-          className="inline-flex items-center justify-center gap-2.5 px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold text-sm sm:text-base shadow-lg shadow-indigo-500/25 transition-all cursor-pointer"
-        >
-          <Plus className="w-5 h-5" />
-          <span>THÊM HÀNG HÓA MỚI</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="hidden sm:flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-xs shadow-2xs">
+            <span className="text-slate-600 font-medium">Tổng trị giá tồn kho:</span>
+            <span className="font-black text-emerald-800 text-sm">{formatCurrency(inventoryTotals.totalValue)}</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setEditingProduct(null);
+              setIsModalOpen(true);
+            }}
+            className="inline-flex items-center justify-center gap-2.5 px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold text-sm sm:text-base shadow-lg shadow-indigo-500/25 transition-all cursor-pointer"
+          >
+            <Plus className="w-5 h-5" />
+            <span>THÊM HÀNG HÓA MỚI</span>
+          </button>
+        </div>
       </div>
 
       {/* Toolbar */}
@@ -304,7 +325,7 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
 
           <button
             type="button"
-            onClick={() => exportProductsToExcel(filteredProducts)}
+            onClick={() => exportProductsToExcel(filteredProducts, inventoryStockMap)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
           >
             <FileSpreadsheet className="w-3.5 h-3.5" />
@@ -355,20 +376,23 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                 <th className="p-3 text-left bg-indigo-50/70 text-indigo-900">Tỷ suất lợi nhuận (%)</th>
                 <th className="p-3 text-left bg-blue-50/70 text-blue-900">Giá bán mặc định</th>
                 <th className="p-3 text-left bg-blue-50/70 text-blue-900">Biên độ (+/-)</th>
-                <th className="p-3 text-left bg-emerald-50/70 text-emerald-900">Tồn kho hiện tại</th>
-                <th className="p-3 text-left">Thao tác</th>
+                <th className="p-3 text-right bg-emerald-50/70 text-emerald-900 whitespace-nowrap">Tồn kho hiện tại</th>
+                <th className="p-3 text-right bg-emerald-100/70 text-emerald-950 whitespace-nowrap">Trị giá tồn kho hiện tại</th>
+                <th className="p-3 text-center">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="p-12 text-center text-slate-400">
+                  <td colSpan={15} className="p-12 text-center text-slate-400">
                     Không tìm thấy hàng hóa nào phù hợp.
                   </td>
                 </tr>
               ) : (
                 filteredProducts.map((p, idx) => {
-                  const stock = inventoryStockMap.get(p.code)?.inStock ?? 0;
+                  const stockInfo = inventoryStockMap.get(p.code);
+                  const stock = stockInfo?.inStock ?? 0;
+                  const inventoryValue = stockInfo?.inventoryValue ?? 0;
                   return (
                     <tr key={p.id} className="hover:bg-slate-50/70">
                       <td className="p-3 text-center">
@@ -408,12 +432,21 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                       <td className="p-3 text-right bg-blue-50/30 font-semibold text-indigo-700">
                         {p.priceVariance ? '±' + formatNumber(p.priceVariance) + ' ₫' : '—'}
                       </td>
-                      <td className={`p-3 text-right font-black ${
+                      <td className={`p-3 text-right font-black whitespace-nowrap ${
                         stock < 0
                           ? 'text-red-600 bg-red-50/80 border border-red-200 rounded'
                           : 'text-emerald-700 bg-emerald-50/40'
                       }`}>
                         {formatNumber(stock)} {p.saleUnit}
+                      </td>
+                      <td className={`p-3 text-right font-bold tabular-nums whitespace-nowrap ${
+                        stock < 0
+                          ? 'text-red-600 bg-red-50/40'
+                          : inventoryValue > 0
+                          ? 'text-emerald-900 bg-emerald-50/60'
+                          : 'text-slate-400 bg-slate-50/30'
+                      }`}>
+                        {formatCurrency(inventoryValue)}
                       </td>
                       <td className="p-3 text-center">
                         <div className="flex items-center justify-center gap-1">
@@ -453,6 +486,22 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                 })
               )}
             </tbody>
+            {filteredProducts.length > 0 && (
+              <tfoot className="bg-slate-100/90 font-bold text-slate-800 border-t-2 border-slate-300">
+                <tr>
+                  <td colSpan={12} className="p-3 text-right uppercase tracking-wider text-xs font-black text-slate-700">
+                    Tổng cộng ({filteredProducts.length} sản phẩm):
+                  </td>
+                  <td className="p-3 text-right font-black text-emerald-800 whitespace-nowrap bg-emerald-100/40">
+                    {formatNumber(inventoryTotals.totalStock)} (Tổng SL)
+                  </td>
+                  <td className="p-3 text-right font-black text-emerald-900 whitespace-nowrap bg-emerald-100/60 text-sm">
+                    {formatCurrency(inventoryTotals.totalValue)}
+                  </td>
+                  <td className="p-3"></td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       </div>

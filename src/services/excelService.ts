@@ -148,21 +148,29 @@ export function exportPurchasesToExcel(purchases: PurchaseBill[]) {
 /**
  * Exports products to Excel
  */
-export function exportProductsToExcel(products: Product[]) {
-  const rows = products.map((p, idx) => ({
-    'STT': idx + 1,
-    'Mã HH': p.code,
-    'Tên HH': p.name,
-    'ĐVT_Mua': p.purchaseUnit,
-    'Thuế suất (%)': p.vatRate,
-    'SL quy đổi': p.conversionRate,
-    'ĐVT_Bán': p.saleUnit,
-    'Nhóm/loại HH': p.category,
-    'Tỷ suất lợi nhuận (%)': p.profitMargin,
-    'Giá bán mặc định (Sau thuế)': p.defaultSalePrice || '',
-    'Biên độ giá (+/-)': p.priceVariance || '',
-    'Ghi chú': p.notes || '',
-  }));
+export function exportProductsToExcel(
+  products: Product[],
+  stockMap?: Map<string, { inStock: number; inventoryValue?: number; [key: string]: any }>
+) {
+  const rows = products.map((p, idx) => {
+    const stockInfo = stockMap?.get(p.code);
+    return {
+      'STT': idx + 1,
+      'Mã HH': p.code,
+      'Tên HH': p.name,
+      'ĐVT_Mua': p.purchaseUnit,
+      'Thuế suất (%)': p.vatRate,
+      'SL quy đổi': p.conversionRate,
+      'ĐVT_Bán': p.saleUnit,
+      'Nhóm/loại HH': p.category,
+      'Tỷ suất lợi nhuận (%)': p.profitMargin,
+      'Giá bán mặc định (Sau thuế)': p.defaultSalePrice || '',
+      'Biên độ giá (+/-)': p.priceVariance || '',
+      'Tồn kho hiện tại': stockInfo !== undefined ? stockInfo.inStock : '',
+      'Trị giá tồn kho hiện tại': stockInfo?.inventoryValue !== undefined ? stockInfo.inventoryValue : '',
+      'Ghi chú': p.notes || '',
+    };
+  });
 
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
