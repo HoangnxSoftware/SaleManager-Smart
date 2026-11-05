@@ -80,11 +80,93 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
     [products]
   );
 
+  // Fast sets of existing suppliers for checking uncataloged / missing suppliers
+  const existingSupplierMap = useMemo(() => {
+    const codeSet = new Set<string>();
+    const taxSet = new Set<string>();
+    const nameSet = new Set<string>();
+    suppliers.forEach((s) => {
+      if (s.code?.trim()) codeSet.add(s.code.trim().toUpperCase());
+      if (s.taxCode?.trim()) taxSet.add(s.taxCode.trim().toUpperCase());
+      if (s.name?.trim()) nameSet.add(s.name.trim().toLowerCase());
+    });
+    return { codeSet, taxSet, nameSet };
+  }, [suppliers]);
+
+  // Helpers to check missing product code or uncataloged product
+  const isItemMissingProductCode = (item: { productCode?: string }) => {
+    const code = (item.productCode || '').trim();
+    if (!code) return true;
+    return !existingProductCodesMap.has(code.toUpperCase());
+  };
+
+  const isBillMissingProduct = (bill: PurchaseBill) => {
+    if (!bill.items || bill.items.length === 0) return true;
+    return bill.items.some((it) => isItemMissingProductCode(it));
+  };
+
+  // Helper to check missing or uncataloged supplier
+  const isBillMissingSupplier = (bill: PurchaseBill) => {
+    const supCode = (bill.supplierCode || '').trim().toUpperCase();
+    const supTax = (bill.supplierTaxCode || '').trim().toUpperCase();
+    const supName = (bill.supplierName || '').trim().toLowerCase();
+
+    // If completely empty code and name
+    if (!supCode && !supName) return true;
+    if (!supCode || supCode === 'NCC-MOI' || supCode === 'CHUA-CO-NCC') return true;
+
+    const matchCode = existingSupplierMap.codeSet.has(supCode);
+    const matchTax = supTax ? existingSupplierMap.taxSet.has(supTax) : false;
+    const matchName = supName ? existingSupplierMap.nameSet.has(supName) : false;
+
+    return !matchCode && !matchTax && !matchName;
+  };
+
+  // Filter by missing product code or missing supplier (Requirement: lọc phiếu chưa có mã hàng, đơn vị cung cấp)
+  const [missingFilter, setMissingFilter] = useState<'all' | 'missing_product' | 'missing_supplier' | 'missing_both' | 'missing_any'>('all');
+
+  // Real-time bill counts for missing info
+  const missingInfoStats = useMemo(() => {
+    let missingProductBills = 0;
+    let missingSupplierBills = 0;
+    let missingBothBills = 0;
+    let missingAnyBills = 0;
+
+    purchases.forEach((b) => {
+      const missProd = isBillMissingProduct(b);
+      const missSup = isBillMissingSupplier(b);
+      if (missProd) missingProductBills++;
+      if (missSup) missingSupplierBills++;
+      if (missProd && missSup) missingBothBills++;
+      if (missProd || missSup) missingAnyBills++;
+    });
+
+    return {
+      missingProductBills,
+      missingSupplierBills,
+      missingBothBills,
+      missingAnyBills,
+    };
+  }, [purchases, existingProductCodesMap, existingSupplierMap]);
+
   // Search & Date range filter
   const [searchTerm, setSearchTerm] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+
+  const hasActivePurchasesFilter =
+    searchTerm.trim() !== '' ||
+    startDate !== '' ||
+    endDate !== '' ||
+    missingFilter !== 'all';
+
+  const handleResetPurchasesFilter = () => {
+    setSearchTerm('');
+    setStartDate('');
+    setEndDate('');
+    setMissingFilter('all');
+  };
 
   // Selected bills for batch delete (Requirement 6)
   const [selectedBillIds, setSelectedBillIds] = useState<string[]>([]);
@@ -125,7 +207,36 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
     const rows: any[] = [];
 
     for (const bill of displayBills) {
-      if (!bill.items || bill.items.length === 0) continue;
+      if (!bill.items || bill.items.length === 0) {
+        rows.push({
+          billId: bill.id,
+          billNo: bill.billNo,
+          purchaseDate: bill.purchaseDate,
+          supplierCode: bill.supplierCode,
+          supplierTaxCode: bill.supplierTaxCode,
+          supplierName: bill.supplierName,
+          itemId: `empty-${bill.id}`,
+          itemIndex: 0,
+          isFirstRowInBill: true,
+          totalItemsInBill: 0,
+          productCode: '',
+          productName: '(Phiếu chưa có mặt hàng nào)',
+          purchaseUnit: '—',
+          quantity: 0,
+          unitPrice: 0,
+          amount: 0,
+          vatRate: 0,
+          vatAmount: 0,
+          billSubtotal: bill.subtotal || 0,
+          billTotalVat: bill.totalVat || 0,
+          billTotalAmount: bill.totalAmount || 0,
+          billPaidAmount: bill.paidAmount || 0,
+          billPaymentStatus: bill.paymentStatus || 'unpaid',
+          cumulativeQuantity: 0,
+          rawBill: bill,
+        });
+        continue;
+      }
 
       bill.items.forEach((item, itemIdx) => {
         const currentCumulative = itemCumulativeMap.get(`${bill.id}_${item.id}`) ?? item.quantity;
@@ -182,8 +293,21 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
       );
     }
 
+    // Filter by missing product code or missing supplier (Requirement: lọc phiếu chưa có mã hàng, đơn vị cung cấp)
+    if (missingFilter !== 'all') {
+      filtered = filtered.filter((r) => {
+        const missProd = isBillMissingProduct(r.rawBill);
+        const missSup = isBillMissingSupplier(r.rawBill);
+        if (missingFilter === 'missing_product') return missProd;
+        if (missingFilter === 'missing_supplier') return missSup;
+        if (missingFilter === 'missing_both') return missProd && missSup;
+        if (missingFilter === 'missing_any') return missProd || missSup;
+        return true;
+      });
+    }
+
     return filtered;
-  }, [purchases, searchTerm, startDate, endDate]);
+  }, [purchases, searchTerm, startDate, endDate, missingFilter, existingProductCodesMap, existingSupplierMap]);
 
   // Unique bill IDs currently visible in the table
   const uniqueFilteredBillIds = useMemo(() => {
@@ -804,6 +928,81 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                   </button>
                 )}
               </div>
+
+              {/* Lọc phiếu chưa có mã hàng / đơn vị cung cấp */}
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={missingFilter}
+                  onChange={(e) => setMissingFilter(e.target.value as any)}
+                  className={`px-3 py-2 border rounded-xl text-xs sm:text-sm cursor-pointer font-medium transition-all ${
+                    missingFilter !== 'all'
+                      ? 'border-amber-500 bg-amber-50 text-amber-950 font-bold shadow-2xs'
+                      : 'border-slate-300 bg-white text-slate-700'
+                  }`}
+                  title="Lọc phiếu nhập hàng thiếu mã hàng hoặc nhà cung cấp"
+                >
+                  <option value="all">Tất cả phiếu nhập ({purchases.length})</option>
+                  <option value="missing_product">
+                    ⚠️ Chưa có / chưa khớp Mã hàng ({missingInfoStats.missingProductBills})
+                  </option>
+                  <option value="missing_supplier">
+                    🏢 Chưa có / chưa khớp Đơn vị CC ({missingInfoStats.missingSupplierBills})
+                  </option>
+                  <option value="missing_any">
+                    ⚡ Thiếu Mã hàng HOẶC Đơn vị CC ({missingInfoStats.missingAnyBills})
+                  </option>
+                  <option value="missing_both">
+                    ❌ Thiếu CẢ Mã hàng VÀ Đơn vị CC ({missingInfoStats.missingBothBills})
+                  </option>
+                </select>
+
+                {/* Quick Toggle Filter Badges */}
+                <div className="hidden sm:flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setMissingFilter((prev) => (prev === 'missing_product' ? 'all' : 'missing_product'))}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                      missingFilter === 'missing_product'
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : missingInfoStats.missingProductBills > 0
+                        ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    }`}
+                    title="Bấm để lọc các phiếu có mã hàng chưa có trong danh mục sản phẩm"
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>Thiếu mã HH ({missingInfoStats.missingProductBills})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMissingFilter((prev) => (prev === 'missing_supplier' ? 'all' : 'missing_supplier'))}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                      missingFilter === 'missing_supplier'
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : missingInfoStats.missingSupplierBills > 0
+                        ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    }`}
+                    title="Bấm để lọc các phiếu chưa có hoặc nhà cung cấp chưa có trong danh mục"
+                  >
+                    <Building2 className="w-3.5 h-3.5" />
+                    <span>Thiếu ĐVCC ({missingInfoStats.missingSupplierBills})</span>
+                  </button>
+                </div>
+
+                {hasActivePurchasesFilter && (
+                  <button
+                    type="button"
+                    onClick={handleResetPurchasesFilter}
+                    className="inline-flex items-center gap-1 text-xs text-rose-600 hover:text-rose-800 font-semibold cursor-pointer px-2.5 py-1.5 hover:bg-rose-50 rounded-lg transition-colors"
+                    title="Xóa toàn bộ bộ lọc để xem tất cả phiếu nhập"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Đặt lại</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -849,6 +1048,56 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
               </button>
             </div>
           </div>
+
+          {hasActivePurchasesFilter && (
+            <div className="text-xs text-slate-600 bg-amber-50/70 border border-amber-200 px-3 py-2 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="font-bold text-amber-950">Đang lọc danh mục nhập:</span>
+                {missingFilter === 'missing_product' && (
+                  <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white font-bold text-[11px] shadow-2xs">
+                    Phiếu chưa có / chưa khớp Mã hàng ({missingInfoStats.missingProductBills})
+                  </span>
+                )}
+                {missingFilter === 'missing_supplier' && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-600 text-white font-bold text-[11px] shadow-2xs">
+                    Phiếu chưa có / chưa khớp Đơn vị CC ({missingInfoStats.missingSupplierBills})
+                  </span>
+                )}
+                {missingFilter === 'missing_any' && (
+                  <span className="px-2 py-0.5 rounded-full bg-orange-600 text-white font-bold text-[11px] shadow-2xs">
+                    Phiếu thiếu Mã hàng HOẶC Đơn vị CC ({missingInfoStats.missingAnyBills})
+                  </span>
+                )}
+                {missingFilter === 'missing_both' && (
+                  <span className="px-2 py-0.5 rounded-full bg-rose-700 text-white font-bold text-[11px] shadow-2xs">
+                    Phiếu thiếu CẢ Mã hàng VÀ Đơn vị CC ({missingInfoStats.missingBothBills})
+                  </span>
+                )}
+                {searchTerm && (
+                  <span className="text-slate-600">
+                    Từ khóa: &ldquo;<strong>{searchTerm}</strong>&rdquo;
+                  </span>
+                )}
+                {(startDate || endDate) && (
+                  <span className="text-slate-600">
+                    Từ {startDate || '...'} đến {endDate || '...'}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3 font-semibold text-slate-700">
+                <span>
+                  Hiển thị: <strong>{uniqueFilteredBillIds.length}</strong> / <strong>{purchases.length}</strong> phiếu ({flattenedPurchaseItems.length} dòng hàng)
+                </span>
+                <button
+                  type="button"
+                  onClick={handleResetPurchasesFilter}
+                  className="text-xs text-rose-600 hover:text-rose-800 underline font-bold cursor-pointer"
+                >
+                  Bỏ lọc
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Accounting Rule Notice */}
           <div className="p-3 bg-teal-50/70 border border-teal-200 rounded-xl text-xs text-teal-900 flex items-start gap-2">
@@ -903,7 +1152,23 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                   {flattenedPurchaseItems.length === 0 ? (
                     <tr>
                       <td colSpan={20} className="p-12 text-center text-slate-400">
-                        Chưa có dữ liệu nhập hàng. Bấm "LẬP PHIẾU NHẬP HÀNG" để tạo mới.
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <Package className="w-8 h-8 text-slate-300" />
+                          <p className="font-semibold text-slate-600">
+                            {hasActivePurchasesFilter
+                              ? 'Không tìm thấy phiếu nhập nào phù hợp với điều kiện tìm kiếm hoặc bộ lọc mã hàng / đơn vị cung cấp.'
+                              : 'Chưa có dữ liệu nhập hàng. Bấm "LẬP PHIẾU NHẬP HÀNG" để tạo mới.'}
+                          </p>
+                          {hasActivePurchasesFilter && (
+                            <button
+                              type="button"
+                              onClick={handleResetPurchasesFilter}
+                              className="text-xs text-teal-600 hover:text-teal-800 underline font-semibold mt-1 cursor-pointer"
+                            >
+                              Xóa bộ lọc để hiển thị toàn bộ {purchases.length} phiếu nhập kho
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ) : (
@@ -911,8 +1176,15 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                       const isFirstRowOfBill = idx === 0 || row.billId !== flattenedPurchaseItems[idx - 1]?.billId;
                       const isNewBill = idx > 0 && row.billId !== flattenedPurchaseItems[idx - 1]?.billId;
                       const billBorderClass = isNewBill ? 'border-t-2 border-slate-300' : '';
-                      const isUncatalogedProduct = !existingProductCodesMap.has(row.productCode?.trim().toUpperCase());
-                      const billHasUncataloged = row.rawBill.items?.some((it: any) => !existingProductCodesMap.has(it.productCode?.trim().toUpperCase()));
+
+                      // Product check
+                      const isItemEmptyProduct = !row.productCode || row.productCode.trim() === '';
+                      const isUncatalogedProduct = isItemEmptyProduct || !existingProductCodesMap.has(row.productCode.trim().toUpperCase());
+                      const billHasMissingProduct = isBillMissingProduct(row.rawBill);
+
+                      // Supplier check
+                      const billHasMissingSupplier = isBillMissingSupplier(row.rawBill);
+                      const isSupplierUncataloged = billHasMissingSupplier;
 
                       return (
                         <tr
@@ -920,6 +1192,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                           className={`hover:bg-teal-50/30 transition-colors ${billBorderClass} ${
                             isUncatalogedProduct
                               ? 'bg-rose-50/40 hover:bg-rose-50/70'
+                              : isSupplierUncataloged
+                              ? 'bg-amber-50/30 hover:bg-amber-50/60'
                               : isFirstRowOfBill
                               ? 'bg-white'
                               : 'bg-slate-50/20'
@@ -963,13 +1237,22 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                                 >
                                   {row.billNo}
                                 </button>
-                                {billHasUncataloged && (
+                                {billHasMissingProduct && (
                                   <span
                                     className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-black bg-rose-600 text-white shadow-xs animate-pulse"
-                                    title="Phiếu này có mặt hàng chưa có trong Danh mục sản phẩm!"
+                                    title="Phiếu này có mặt hàng chưa có trong Danh mục sản phẩm hoặc bị trống mã hàng!"
                                   >
                                     <AlertTriangle className="w-3 h-3 text-rose-200" />
-                                    Báo đỏ: Mã chưa có trong DM
+                                    Chưa có mã hàng
+                                  </span>
+                                )}
+                                {billHasMissingSupplier && (
+                                  <span
+                                    className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-black bg-amber-600 text-white shadow-xs"
+                                    title="Phiếu này chưa có thông tin nhà cung cấp hoặc nhà cung cấp chưa có trong Danh mục ĐVCC!"
+                                  >
+                                    <Building2 className="w-3 h-3 text-amber-200" />
+                                    Chưa có ĐVCC
                                   </span>
                                 )}
                                 {row.totalItemsInBill > 1 && (
@@ -995,12 +1278,38 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
 
                           {/* 4. Đơn vị CC - chỉ hiện tại dòng đầu tiên của phiếu */}
                           <td className="p-2.5 font-mono font-semibold text-slate-700 whitespace-nowrap">
-                            {isFirstRowOfBill ? (row.supplierCode || '—') : <span className="text-slate-300 select-none">—</span>}
+                            {isFirstRowOfBill ? (
+                              isSupplierUncataloged ? (
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="inline-flex items-center gap-1 font-mono font-bold text-amber-900 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded text-xs w-fit">
+                                    <Building2 className="w-3 h-3 text-amber-600 shrink-0" />
+                                    {row.supplierCode || '(Trống mã ĐVCC)'}
+                                  </span>
+                                  <span className="text-[10px] text-amber-700 font-bold">
+                                    Chưa có trong DM NCC
+                                  </span>
+                                </div>
+                              ) : (
+                                row.supplierCode || '—'
+                              )
+                            ) : (
+                              <span className="text-slate-300 select-none">—</span>
+                            )}
                           </td>
 
                           {/* 5. Tên Đơn vị CC - chỉ hiện tại dòng đầu tiên của phiếu */}
                           <td className="p-2.5 font-medium text-slate-900 min-w-36">
-                            {isFirstRowOfBill ? row.supplierName : <span className="text-slate-300 italic select-none">〃</span>}
+                            {isFirstRowOfBill ? (
+                              isSupplierUncataloged ? (
+                                <span className="font-bold text-amber-950">
+                                  {row.supplierName || '(Chưa có tên ĐVCC)'}
+                                </span>
+                              ) : (
+                                row.supplierName
+                              )
+                            ) : (
+                              <span className="text-slate-300 italic select-none">〃</span>
+                            )}
                           </td>
 
                           {/* 6. Mã HH */}
@@ -1009,10 +1318,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                               <div className="flex flex-col gap-0.5">
                                 <span className="inline-flex items-center gap-1 font-mono font-black text-rose-700 bg-rose-100 border border-rose-300 px-1.5 py-0.5 rounded text-xs w-fit">
                                   <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0" />
-                                  {row.productCode}
+                                  {row.productCode || '(Trống mã HH)'}
                                 </span>
                                 <span className="text-[10px] text-rose-600 font-bold">
-                                  Chưa có trong DM
+                                  {isItemEmptyProduct ? 'Trống mã hàng' : 'Chưa có trong DM'}
                                 </span>
                               </div>
                             ) : (

@@ -25,7 +25,11 @@ import {
   CheckSquare,
   Square,
   Filter,
-  RotateCcw
+  RotateCcw,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  GripVertical
 } from 'lucide-react';
 
 interface ProductManagerProps {
@@ -58,6 +62,14 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
   const [valueMin, setValueMin] = useState<string>('');
   const [valueMax, setValueMax] = useState<string>('');
 
+  // Sorting & Reordering State (Requirement: cho phép sắp xếp theo mã hàng, tên hàng, nhóm/loại hàng hóa, cho phép di chuyển thứ tự mã hàng)
+  const [sortField, setSortField] = useState<'default' | 'code' | 'name' | 'category'>('default');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  // Drag & drop state for moving product order
+  const [draggedProductId, setDraggedProductId] = useState<string | null>(null);
+  const [dragOverProductId, setDragOverProductId] = useState<string | null>(null);
+
   // Selected products for batch delete (Requirement 6)
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
 
@@ -78,9 +90,9 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
     return Array.from(set);
   }, [products]);
 
-  // Filtered products based on search, category, stock, and inventory value
+  // Filtered and sorted products based on search, category, stock, inventory value, and sort field
   const filteredProducts = useMemo(() => {
-    return products.filter((p) => {
+    let list = products.filter((p) => {
       const matchSearch =
         !searchTerm.trim() ||
         p.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -115,6 +127,33 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
 
       return true;
     });
+
+    // Apply sorting if requested
+    if (sortField !== 'default') {
+      list = [...list].sort((a, b) => {
+        let valA = '';
+        let valB = '';
+        if (sortField === 'code') {
+          valA = a.code || '';
+          valB = b.code || '';
+        } else if (sortField === 'name') {
+          valA = a.name || '';
+          valB = b.name || '';
+        } else if (sortField === 'category') {
+          valA = a.category || '';
+          valB = b.category || '';
+        }
+
+        if (!valA && valB) return 1;
+        if (valA && !valB) return -1;
+        if (!valA && !valB) return 0;
+
+        const cmp = valA.localeCompare(valB, 'vi', { numeric: true, sensitivity: 'base' });
+        return sortDirection === 'asc' ? cmp : -cmp;
+      });
+    }
+
+    return list;
   }, [
     products,
     searchTerm,
@@ -126,13 +165,93 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
     valueFilterMode,
     valueMin,
     valueMax,
+    sortField,
+    sortDirection,
   ]);
+
+  // Click handler on column headers
+  const handleHeaderSort = (field: 'code' | 'name' | 'category') => {
+    if (sortField === field) {
+      setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // Reordering handlers (Di chuyển thứ tự mã hàng)
+  const handleMoveProduct = (product: Product, direction: 'up' | 'down') => {
+    // If a sorted view is active, switch to default custom order so movements are visible
+    if (sortField !== 'default') {
+      setSortField('default');
+    }
+
+    const currentProducts = [...products];
+    const currentIndex = currentProducts.findIndex((p) => p.id === product.id);
+    if (currentIndex === -1) return;
+
+    // Find position in filtered list
+    const currentFilteredIndex = filteredProducts.findIndex((p) => p.id === product.id);
+    if (currentFilteredIndex === -1) return;
+
+    const targetFilteredIndex = direction === 'up' ? currentFilteredIndex - 1 : currentFilteredIndex + 1;
+    if (targetFilteredIndex < 0 || targetFilteredIndex >= filteredProducts.length) return;
+
+    const neighborProduct = filteredProducts[targetFilteredIndex];
+    const neighborIndex = currentProducts.findIndex((p) => p.id === neighborProduct.id);
+    if (neighborIndex === -1) return;
+
+    // Swap in main list
+    const temp = currentProducts[currentIndex];
+    currentProducts[currentIndex] = currentProducts[neighborIndex];
+    currentProducts[neighborIndex] = temp;
+
+    onBatchUpdateProducts(currentProducts);
+  };
+
+  // Drag and drop handlers for moving products
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    e.dataTransfer.setData('text/plain', id);
+    setDraggedProductId(id);
+  };
+
+  const handleDragOver = (e: React.DragEvent, id: string) => {
+    e.preventDefault();
+    if (dragOverProductId !== id) {
+      setDragOverProductId(id);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    setDragOverProductId(null);
+    const sourceId = draggedProductId || e.dataTransfer.getData('text/plain');
+    if (!sourceId || sourceId === targetId) return;
+
+    if (sortField !== 'default') {
+      setSortField('default');
+    }
+
+    const currentList = [...products];
+    const sourceIndex = currentList.findIndex((p) => p.id === sourceId);
+    const targetIndex = currentList.findIndex((p) => p.id === targetId);
+
+    if (sourceIndex === -1 || targetIndex === -1) return;
+
+    // Remove source item and insert at target position
+    const [movedItem] = currentList.splice(sourceIndex, 1);
+    currentList.splice(targetIndex, 0, movedItem);
+
+    onBatchUpdateProducts(currentList);
+    setDraggedProductId(null);
+  };
 
   const hasActiveProductFilters =
     searchTerm.trim() !== '' ||
     categoryFilter !== 'all' ||
     stockFilterMode !== 'all' ||
-    valueFilterMode !== 'all';
+    valueFilterMode !== 'all' ||
+    sortField !== 'default';
 
   const handleResetProductFilters = () => {
     setSearchTerm('');
@@ -143,6 +262,8 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
     setValueFilterMode('all');
     setValueMin('');
     setValueMax('');
+    setSortField('default');
+    setSortDirection('asc');
   };
 
   // Overall inventory summary for filtered products
@@ -444,6 +565,36 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
               )}
             </div>
 
+            {/* Sắp xếp danh mục hàng hóa */}
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-700">
+              <span className="text-slate-500 font-medium whitespace-nowrap">Sắp xếp:</span>
+              <select
+                value={sortField}
+                onChange={(e) => setSortField(e.target.value as any)}
+                className="bg-transparent font-semibold text-slate-800 focus:outline-hidden cursor-pointer"
+                title="Chọn tiêu chí sắp xếp hàng hóa"
+              >
+                <option value="default">Thứ tự tùy chỉnh (di chuyển)</option>
+                <option value="code">Mã hàng hóa</option>
+                <option value="name">Tên hàng hóa</option>
+                <option value="category">Nhóm / Loại hàng hóa</option>
+              </select>
+              {sortField !== 'default' && (
+                <button
+                  type="button"
+                  onClick={() => setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'))}
+                  className="px-1.5 py-0.5 hover:bg-slate-200 rounded text-indigo-700 font-bold cursor-pointer transition-colors"
+                  title={sortDirection === 'asc' ? 'Đang tăng dần (A-Z). Bấm chuyển giảm dần (Z-A)' : 'Đang giảm dần (Z-A). Bấm chuyển tăng dần (A-Z)'}
+                >
+                  {sortDirection === 'asc' ? (
+                    <span className="inline-flex items-center gap-0.5 text-[11px]">↑ A-Z</span>
+                  ) : (
+                    <span className="inline-flex items-center gap-0.5 text-[11px]">↓ Z-A</span>
+                  )}
+                </button>
+              )}
+            </div>
+
             {/* Reset Filters button */}
             {hasActiveProductFilters && (
               <button
@@ -538,9 +689,61 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                   </button>
                 </th>
                 <th className="p-3 w-10 text-left">STT</th>
-                <th className="p-3 text-left">Mã HH</th>
-                <th className="p-3 min-w-48 text-left">Tên HH</th>
-                <th className="p-3 text-left">Nhóm / Loại HH</th>
+                <th className="p-3 w-20 text-center whitespace-nowrap">Thứ tự</th>
+                <th
+                  onClick={() => handleHeaderSort('code')}
+                  className="p-3 text-left cursor-pointer hover:bg-slate-200/80 transition-colors select-none"
+                  title="Bấm để sắp xếp theo Mã hàng hóa"
+                >
+                  <div className="inline-flex items-center gap-1">
+                    <span>Mã HH</span>
+                    {sortField === 'code' ? (
+                      sortDirection === 'asc' ? (
+                        <ArrowUp className="w-3.5 h-3.5 text-indigo-600 font-bold" />
+                      ) : (
+                        <ArrowDown className="w-3.5 h-3.5 text-indigo-600 font-bold" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleHeaderSort('name')}
+                  className="p-3 min-w-48 text-left cursor-pointer hover:bg-slate-200/80 transition-colors select-none"
+                  title="Bấm để sắp xếp theo Tên hàng hóa"
+                >
+                  <div className="inline-flex items-center gap-1">
+                    <span>Tên HH</span>
+                    {sortField === 'name' ? (
+                      sortDirection === 'asc' ? (
+                        <ArrowUp className="w-3.5 h-3.5 text-indigo-600 font-bold" />
+                      ) : (
+                        <ArrowDown className="w-3.5 h-3.5 text-indigo-600 font-bold" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleHeaderSort('category')}
+                  className="p-3 text-left cursor-pointer hover:bg-slate-200/80 transition-colors select-none"
+                  title="Bấm để sắp xếp theo Nhóm / Loại hàng hóa"
+                >
+                  <div className="inline-flex items-center gap-1">
+                    <span>Nhóm / Loại HH</span>
+                    {sortField === 'category' ? (
+                      sortDirection === 'asc' ? (
+                        <ArrowUp className="w-3.5 h-3.5 text-indigo-600 font-bold" />
+                      ) : (
+                        <ArrowDown className="w-3.5 h-3.5 text-indigo-600 font-bold" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                    )}
+                  </div>
+                </th>
                 <th className="p-3 text-left">ĐVT_Mua</th>
                 <th className="p-3 text-left">SL quy đổi</th>
                 <th className="p-3 text-left">ĐVT_Bán</th>
@@ -556,7 +759,7 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
             <tbody className="divide-y divide-slate-100">
               {filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={15} className="p-12 text-center text-slate-400">
+                  <td colSpan={16} className="p-12 text-center text-slate-400">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <Package className="w-8 h-8 text-slate-300" />
                       <p className="font-semibold text-slate-600">
@@ -582,7 +785,20 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                   const stock = stockInfo?.inStock ?? 0;
                   const inventoryValue = stockInfo?.inventoryValue ?? 0;
                   return (
-                    <tr key={p.id} className="hover:bg-slate-50/70">
+                    <tr
+                      key={p.id}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, p.id)}
+                      onDragOver={(e) => handleDragOver(e, p.id)}
+                      onDrop={(e) => handleDrop(e, p.id)}
+                      onDragEnd={() => {
+                        setDraggedProductId(null);
+                        setDragOverProductId(null);
+                      }}
+                      className={`hover:bg-slate-50/70 transition-colors ${
+                        dragOverProductId === p.id ? 'border-t-2 border-indigo-600 bg-indigo-50/60' : ''
+                      } ${draggedProductId === p.id ? 'opacity-40' : ''}`}
+                    >
                       <td className="p-3 text-center">
                         <button
                           type="button"
@@ -598,6 +814,42 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                         </button>
                       </td>
                       <td className="p-3 text-center text-slate-400">{idx + 1}</td>
+                      <td className="p-2 text-center whitespace-nowrap">
+                        <div className="inline-flex items-center justify-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => handleMoveProduct(p, 'up')}
+                            disabled={idx === 0}
+                            className={`p-1 rounded cursor-pointer transition-colors ${
+                              idx === 0
+                                ? 'text-slate-200 cursor-not-allowed'
+                                : 'text-slate-500 hover:text-indigo-600 hover:bg-indigo-50'
+                            }`}
+                            title="Di chuyển lên trên"
+                          >
+                            <ArrowUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMoveProduct(p, 'down')}
+                            disabled={idx === filteredProducts.length - 1}
+                            className={`p-1 rounded cursor-pointer transition-colors ${
+                              idx === filteredProducts.length - 1
+                                ? 'text-slate-200 cursor-not-allowed'
+                                : 'text-slate-500 hover:text-indigo-600 hover:bg-indigo-50'
+                            }`}
+                            title="Di chuyển xuống dưới"
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
+                          </button>
+                          <span
+                            className="p-1 text-slate-300 hover:text-slate-600 cursor-grab active:cursor-grabbing"
+                            title="Kéo thả dòng này để thay đổi thứ tự sản phẩm"
+                          >
+                            <GripVertical className="w-3.5 h-3.5" />
+                          </span>
+                        </div>
+                      </td>
                       <td className={`p-3 font-mono font-bold ${stock < 0 ? 'text-red-600' : 'text-indigo-700'}`}>{p.code}</td>
                       <td className={`p-3 font-semibold ${stock < 0 ? 'text-red-600' : 'text-slate-900'}`}>{p.name}</td>
                       <td className="p-3 text-slate-600">{p.category}</td>
@@ -677,7 +929,7 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
             {filteredProducts.length > 0 && (
               <tfoot className="bg-slate-100/90 font-bold text-slate-800 border-t-2 border-slate-300">
                 <tr>
-                  <td colSpan={12} className="p-3 text-right uppercase tracking-wider text-xs font-black text-slate-700">
+                  <td colSpan={13} className="p-3 text-right uppercase tracking-wider text-xs font-black text-slate-700">
                     Tổng cộng ({filteredProducts.length} sản phẩm):
                   </td>
                   <td className="p-3 text-right font-black text-emerald-800 whitespace-nowrap bg-emerald-100/40">

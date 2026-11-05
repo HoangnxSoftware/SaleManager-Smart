@@ -101,7 +101,7 @@ export const PurchaseExcelSyncModal: React.FC<PurchaseExcelSyncModalProps> = ({
   const [duplicateAction, setDuplicateAction] = useState<'overwrite' | 'skip'>('overwrite');
 
   // Filter tab inside modal
-  const [activeTab, setActiveTab] = useState<'all' | 'uncataloged' | 'new_products' | 'new_suppliers' | 'duplicates'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'uncataloged' | 'new_supplier_bills' | 'new_products' | 'new_suppliers' | 'duplicates'>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
   // 1. Detect all unique uncataloged products across all bills
@@ -166,6 +166,11 @@ export const PurchaseExcelSyncModal: React.FC<PurchaseExcelSyncModalProps> = ({
     return parsedBills.filter((b) => b.hasUncatalogedProducts);
   }, [parsedBills]);
 
+  // 5. Bills with new / uncataloged suppliers
+  const newSupplierBills = useMemo(() => {
+    return parsedBills.filter((b) => b.isNewSupplier);
+  }, [parsedBills]);
+
   // Total items count
   const totalItemCount = useMemo(() => {
     return parsedBills.reduce((sum, b) => sum + b.items.length, 0);
@@ -176,6 +181,7 @@ export const PurchaseExcelSyncModal: React.FC<PurchaseExcelSyncModalProps> = ({
     return parsedBills.filter((bill) => {
       // Tab filter
       if (activeTab === 'uncataloged' && !bill.hasUncatalogedProducts) return false;
+      if (activeTab === 'new_supplier_bills' && !bill.isNewSupplier) return false;
       if (activeTab === 'duplicates' && !bill.isDuplicateBill) return false;
 
       // Search term filter
@@ -547,6 +553,22 @@ export const PurchaseExcelSyncModal: React.FC<PurchaseExcelSyncModalProps> = ({
               >
                 {uncatalogedBills.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />}
                 🚨 Phiếu báo đỏ ({uncatalogedBills.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('new_supplier_bills')}
+                className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+                  activeTab === 'new_supplier_bills'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : newSupplierBills.length > 0
+                    ? 'bg-amber-100 text-amber-800 hover:bg-amber-200 font-black'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+                title="Lọc các phiếu có nhà cung cấp mới chưa có trong danh mục"
+              >
+                {newSupplierBills.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
+                🏢 Phiếu NCC mới ({newSupplierBills.length})
               </button>
 
               <button
