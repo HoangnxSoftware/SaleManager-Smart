@@ -11,6 +11,7 @@ import {
 import { PurchaseFormModal } from './PurchaseFormModal';
 import { SupplierModal } from './SupplierModal';
 import { ExcelDuplicateConflictModal, ConflictItem } from '../Common/ExcelDuplicateConflictModal';
+import { PurchaseExcelSyncModal, ParsedBillCheck, ParsedItemCheck } from './PurchaseExcelSyncModal';
 import { useConfirm } from '../../context/ConfirmContext';
 import {
   Package,
@@ -48,6 +49,7 @@ interface InventoryManagerProps {
   onDeleteSupplier: (supplierId: string) => void;
   onBatchUpdateSuppliers?: (suppliers: Supplier[]) => void;
   onAddNewProduct: (product: Product) => void;
+  onBatchUpdateProducts?: (products: Product[]) => void;
 }
 
 export const InventoryManager: React.FC<InventoryManagerProps> = ({
@@ -63,9 +65,20 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
   onDeleteSupplier,
   onBatchUpdateSuppliers,
   onAddNewProduct,
+  onBatchUpdateProducts,
 }) => {
   const confirm = useConfirm();
   const [activeSubTab, setActiveSubTab] = useState<'purchases' | 'suppliers'>('purchases');
+
+  // Excel Purchase Inspection & Sync Modal
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [parsedExcelBills, setParsedExcelBills] = useState<ParsedBillCheck[]>([]);
+
+  // Fast set of existing product codes for checking uncataloged items (báo đỏ)
+  const existingProductCodesMap = useMemo(
+    () => new Set(products.map((p) => p.code.trim().toUpperCase())),
+    [products]
+  );
 
   // Search & Date range filter
   const [searchTerm, setSearchTerm] = useState('');
@@ -456,27 +469,16 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
     alert(`Đã cập nhật/thêm thành công ${pendingOverwrittenBills.length} phiếu nhập kho từ Excel!`);
   };
 
-  // Excel Import Purchases
+  // Handle Excel Import Purchases with Product & Supplier Validation and Synchronization
   const handleExcelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    // REQUIREMENT: Khi up dữ liệu từ excel ở tất cả dữ liệu, xuất hiện thông báo xác nhận xem có thực hiện hay không
-    const ok = await confirm({
-      title: 'Xác nhận nhập phiếu nhập kho từ Excel',
-      message: `Bạn có chắc chắn muốn tải lên và nhập dữ liệu phiếu nhập kho từ file "${file.name}" vào hệ thống không?`,
-      confirmText: 'Xác nhận nhập',
-      type: 'info',
-    });
-    if (!ok) {
-      e.target.value = '';
-      return;
-    }
 
     try {
       const rows = await parseExcelFile(file);
       if (!rows || rows.length === 0) {
         alert('File Excel rỗng.');
+        e.target.value = '';
         return;
       }
 
@@ -489,12 +491,20 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
         billGroups.set(bNo, list);
       });
 
-      const parsedBillsList: PurchaseBill[] = [];
+      // Prepare lookup maps
+      const existingProductMap = new Map(products.map((p) => [p.code.trim().toUpperCase(), p]));
+      const existingSupplierCodeMap = new Map(suppliers.map((s) => [s.code.trim().toUpperCase(), s]));
+      const existingSupplierTaxMap = new Map(
+        suppliers.filter((s) => s.taxCode).map((s) => [s.taxCode.trim().toUpperCase(), s])
+      );
+      const existingBillsMap = new Map<string, PurchaseBill>();
+      purchases.forEach((p) => existingBillsMap.set(p.billNo.trim().toUpperCase(), p));
+
+      const checkedBillsList: ParsedBillCheck[] = [];
 
       for (const [bNo, itemsList] of billGroups.entries()) {
         const first = itemsList[0];
 
-        // REQUIREMENT: Lỗi nếu mã đơn vị cung cấp dài hơn 6 ký tự khi up dữ liệu từ excel vào thông tin mã đơn vị CC và tên đơn vị cung cấp bị sai
         const rawSupCode =
           first['Mã đơn vị CC'] ??
           first['Mã NCC'] ??
@@ -512,25 +522,26 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           first['Tên nhà cung cấp'] ??
           '';
         const excelSupName = String(rawSupName).trim().toUpperCase();
+        const rawSupTax = String(first['MST NCC'] || first['Mã Số Thuế'] || first['Mã số thuế'] || first['MST'] || '').trim();
 
-        // Match case-insensitively, strictly avoid falling back to suppliers[0]!
-        const matchedSup = supCode ? suppliers.find((s) => s.code.trim().toUpperCase() === supCode) : null;
-        const finalSupCode = matchedSup ? matchedSup.code : (supCode || 'NCC-CHUNGDUNG');
-        const finalSupName = matchedSup ? matchedSup.name : (excelSupName || supCode || 'NHÀ CUNG CẤP');
-        const finalSupTax =
-          matchedSup?.taxCode ||
-          String(first['MST NCC'] || first['Mã Số Thuế'] || first['Mã số thuế'] || first['MST'] || '').trim();
+        // Match supplier case-insensitively by Code or Tax
+        const matchedSup = supCode
+          ? existingSupplierCodeMap.get(supCode) || (rawSupTax ? existingSupplierTaxMap.get(rawSupTax.toUpperCase()) : undefined)
+          : (rawSupTax ? existingSupplierTaxMap.get(rawSupTax.toUpperCase()) : undefined);
+
+        const isNewSupplier = !matchedSup;
+        const finalSupCode = matchedSup ? matchedSup.code : (supCode || 'NCC-MOI');
+        const finalSupName = matchedSup ? matchedSup.name : (excelSupName || supCode || 'NHÀ CUNG CẤP MỚI');
+        const finalSupTax = matchedSup?.taxCode || rawSupTax;
 
         let subtotal = 0;
         let totalVat = 0;
 
-        const purchaseItems = itemsList.map((row: any, idx: number) => {
+        const checkedItems: ParsedItemCheck[] = itemsList.map((row: any, idx: number) => {
           const pCode = String(row['Mã HH'] || row['Mã hàng hóa'] || 'PROD').trim().toUpperCase();
           const pName = String(row['Tên Hàng Hóa'] || row['Tên HH'] || row['Tên hàng hóa'] || pCode).trim();
           const pUnit = String(row['ĐVT_Mua'] || row['Đơn vị tính'] || row['ĐVT'] || 'Cái').trim();
 
-          // REQUIREMENT: Cho phép nhập phiếu có số lượng và thành tiền = 0.
-          // Không được chuyển số lượng 0 thành 1, không được chuyển thành tiền 0 thành 100.000!
           const rawQty =
             row['Số lượng'] !== undefined && row['Số lượng'] !== '' && row['Số lượng'] !== null
               ? Number(row['Số lượng'])
@@ -551,6 +562,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           subtotal += amt;
           totalVat += vatAmt;
 
+          // Check if product code exists in software's catalog (báo đỏ nếu chưa có)
+          const matchedProd = existingProductMap.get(pCode);
+          const isUncataloged = !matchedProd;
+
           return {
             id: `pi-imp-${Date.now()}-${idx}-${Math.random()}`,
             productCode: pCode,
@@ -562,6 +577,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
             vatRate: vat,
             vatAmount: vatAmt,
             totalAmount: amt + vatAmt,
+            isUncataloged,
+            matchedProduct: matchedProd,
           };
         });
 
@@ -569,68 +586,118 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
         const rawPaid = first['Đã trả'] ?? first['Đã thanh toán'];
         const paid = rawPaid !== undefined && rawPaid !== '' ? Number(rawPaid) : totalAmt;
 
-        parsedBillsList.push({
-          id: `bill-imp-${Date.now()}-${Math.random()}`,
+        const existingBill = existingBillsMap.get(bNo.toUpperCase());
+        const isDuplicateBill = !!existingBill;
+        const hasUncatalogedProducts = checkedItems.some((it) => it.isUncataloged);
+
+        checkedBillsList.push({
+          id: existingBill ? existingBill.id : `bill-imp-${Date.now()}-${Math.random()}`,
           billNo: bNo,
           purchaseDate: first['Ngày nhập (YYYY-MM-DD)'] || first['Ngày nhập'] || new Date().toISOString().slice(0, 10),
           supplierCode: finalSupCode,
           supplierTaxCode: finalSupTax,
           supplierName: finalSupName,
-          items: purchaseItems,
+          isNewSupplier,
+          matchedSupplier: matchedSup,
+          items: checkedItems,
           subtotal,
           totalVat,
           totalAmount: totalAmt,
           paidAmount: paid,
           paymentStatus: paid >= totalAmt ? 'paid' : paid > 0 ? 'partial' : 'unpaid',
-          createdById: currentUser.id,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          isDuplicateBill,
+          existingBill,
+          hasUncatalogedProducts,
         });
       }
 
-      // REQUIREMENT: Khi up phiếu nhập kho cần có kiểm tra trước khi up dữ liệu, phát hiện số phiếu trùng, cho phép cập nhật phiếu trùng hoặc hủy bỏ
-      const conflicts: ConflictItem[] = [];
-      const newBillsList: PurchaseBill[] = [];
-      const existingBillsMap = new Map<string, PurchaseBill>();
-      purchases.forEach((p) => existingBillsMap.set(p.billNo.trim().toUpperCase(), p));
+      setParsedExcelBills(checkedBillsList);
+      setIsSyncModalOpen(true);
+      e.target.value = '';
+    } catch (err: any) {
+      alert(`Lỗi đọc file Excel: ${err.message}`);
+    }
+  };
 
-      parsedBillsList.forEach((bill) => {
-        const existing = existingBillsMap.get(bill.billNo.trim().toUpperCase());
-        if (existing) {
-          conflicts.push({
-            code: bill.billNo,
-            name: `Phiếu nhập ngày ${existing.purchaseDate} - NCC: ${existing.supplierName}`,
-            oldInfo: `Ngày: ${existing.purchaseDate} | NCC: ${existing.supplierName} (${existing.supplierCode})\nTổng tiền: ${formatCurrency(existing.totalAmount)} | ${existing.items.length} mặt hàng`,
-            newInfo: `Ngày: ${bill.purchaseDate} | NCC: ${bill.supplierName} (${bill.supplierCode})\nTổng tiền: ${formatCurrency(bill.totalAmount)} | ${bill.items.length} mặt hàng`,
-          });
-        } else {
-          newBillsList.push(bill);
+  // Confirm Import & Sync Handler
+  const handleConfirmSyncImport = (config: {
+    billsToImport: PurchaseBill[];
+    newProductsToCreate: Product[];
+    newSuppliersToCreate: Supplier[];
+    suppliersToUpdate: Supplier[];
+    duplicateAction: 'overwrite' | 'skip';
+  }) => {
+    const {
+      billsToImport,
+      newProductsToCreate,
+      newSuppliersToCreate,
+      suppliersToUpdate,
+      duplicateAction,
+    } = config;
+
+    // 1. Sync & Batch Add New Products to Catalog
+    if (newProductsToCreate.length > 0) {
+      if (onBatchUpdateProducts) {
+        onBatchUpdateProducts([...products, ...newProductsToCreate]);
+      } else {
+        newProductsToCreate.forEach(onAddNewProduct);
+      }
+    }
+
+    // 2. Sync & Batch Add New Suppliers to Catalog
+    if (newSuppliersToCreate.length > 0 || suppliersToUpdate.length > 0) {
+      const mergedSuppliers = [...suppliers];
+      // Update existing ones
+      suppliersToUpdate.forEach((up) => {
+        const idx = mergedSuppliers.findIndex((s) => s.id === up.id);
+        if (idx >= 0) mergedSuppliers[idx] = up;
+      });
+      // Add brand new
+      newSuppliersToCreate.forEach((ns) => {
+        if (!mergedSuppliers.some((s) => s.code.toUpperCase() === ns.code.toUpperCase())) {
+          mergedSuppliers.push(ns);
         }
       });
 
-      if (conflicts.length > 0) {
-        setTotalBillsImportedCount(parsedBillsList.length);
-        setPendingPurchaseConflicts(conflicts);
-        setPendingNewBills(newBillsList);
-        // Overwrite list: existing purchases merged/replaced by Excel versions + completely new bills
-        const merged = purchases.map((p) => {
-          const match = parsedBillsList.find((imp) => imp.billNo.trim().toUpperCase() === p.billNo.trim().toUpperCase());
-          return match ? { ...match, id: p.id } : p;
-        });
-        const brandNew = newBillsList.filter(
-          (nb) => !merged.some((m) => m.billNo.trim().toUpperCase() === nb.billNo.trim().toUpperCase())
-        );
-        setPendingOverwrittenBills([...merged, ...brandNew]);
-        setPurchaseConflictModalOpen(true);
+      if (onBatchUpdateSuppliers) {
+        onBatchUpdateSuppliers(mergedSuppliers);
       } else {
-        onBatchUpdatePurchases([...purchases, ...parsedBillsList]);
-        alert(`Đã nhập thành công ${parsedBillsList.length} phiếu nhập kho từ Excel!`);
+        newSuppliersToCreate.forEach(onSaveSupplier);
+        suppliersToUpdate.forEach(onSaveSupplier);
       }
-
-      e.target.value = '';
-    } catch (err: any) {
-      alert(`Lỗi nhập Excel: ${err.message}`);
     }
+
+    // 3. Save Bills (Handling duplicates overwrite or skip)
+    let finalPurchases = [...purchases];
+
+    if (duplicateAction === 'overwrite') {
+      const billsMap = new Map(finalPurchases.map((p) => [p.billNo.trim().toUpperCase(), p]));
+      billsToImport.forEach((b) => {
+        const existing = billsMap.get(b.billNo.trim().toUpperCase());
+        if (existing) {
+          billsMap.set(b.billNo.trim().toUpperCase(), { ...b, id: existing.id });
+        } else {
+          billsMap.set(b.billNo.trim().toUpperCase(), b);
+        }
+      });
+      finalPurchases = Array.from(billsMap.values());
+    } else {
+      const existingNos = new Set(finalPurchases.map((p) => p.billNo.trim().toUpperCase()));
+      const brandNewBills = billsToImport.filter((b) => !existingNos.has(b.billNo.trim().toUpperCase()));
+      finalPurchases = [...finalPurchases, ...brandNewBills];
+    }
+
+    onBatchUpdatePurchases(finalPurchases);
+    setIsSyncModalOpen(false);
+
+    let msg = `Đã nhập thành công ${billsToImport.length} phiếu nhập kho từ Excel!`;
+    if (newProductsToCreate.length > 0) {
+      msg += `\n• Đã tự động thêm ${newProductsToCreate.length} mã hàng hóa mới vào Danh mục sản phẩm.`;
+    }
+    if (newSuppliersToCreate.length > 0) {
+      msg += `\n• Đã tự động thêm ${newSuppliersToCreate.length} nhà cung cấp mới vào Danh mục NCC.`;
+    }
+    alert(msg);
   };
 
   return (
@@ -844,12 +911,18 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                       const isFirstRowOfBill = idx === 0 || row.billId !== flattenedPurchaseItems[idx - 1]?.billId;
                       const isNewBill = idx > 0 && row.billId !== flattenedPurchaseItems[idx - 1]?.billId;
                       const billBorderClass = isNewBill ? 'border-t-2 border-slate-300' : '';
+                      const isUncatalogedProduct = !existingProductCodesMap.has(row.productCode?.trim().toUpperCase());
+                      const billHasUncataloged = row.rawBill.items?.some((it: any) => !existingProductCodesMap.has(it.productCode?.trim().toUpperCase()));
 
                       return (
                         <tr
                           key={`${row.billId}-${row.itemId}-${idx}`}
                           className={`hover:bg-teal-50/30 transition-colors ${billBorderClass} ${
-                            isFirstRowOfBill ? 'bg-white' : 'bg-slate-50/20'
+                            isUncatalogedProduct
+                              ? 'bg-rose-50/40 hover:bg-rose-50/70'
+                              : isFirstRowOfBill
+                              ? 'bg-white'
+                              : 'bg-slate-50/20'
                           }`}
                         >
                           {/* Checkbox chọn phiếu */}
@@ -878,7 +951,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                           {/* 1. Mã phiếu (Bill No) - chỉ hiện tại dòng đầu tiên của phiếu */}
                           <td className="p-2.5 font-mono font-bold text-teal-800 whitespace-nowrap">
                             {isFirstRowOfBill ? (
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1.5 flex-wrap">
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -890,6 +963,15 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                                 >
                                   {row.billNo}
                                 </button>
+                                {billHasUncataloged && (
+                                  <span
+                                    className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-black bg-rose-600 text-white shadow-xs animate-pulse"
+                                    title="Phiếu này có mặt hàng chưa có trong Danh mục sản phẩm!"
+                                  >
+                                    <AlertTriangle className="w-3 h-3 text-rose-200" />
+                                    Báo đỏ: Mã chưa có trong DM
+                                  </span>
+                                )}
                                 {row.totalItemsInBill > 1 && (
                                   <span className="text-[10px] px-1.5 py-0.2 rounded bg-teal-100 text-teal-800 font-normal">
                                     {row.totalItemsInBill} món
@@ -922,8 +1004,20 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                           </td>
 
                           {/* 6. Mã HH */}
-                          <td className="p-2.5 font-mono font-semibold text-slate-700 whitespace-nowrap">
-                            {row.productCode}
+                          <td className="p-2.5 font-mono font-semibold whitespace-nowrap">
+                            {isUncatalogedProduct ? (
+                              <div className="flex flex-col gap-0.5">
+                                <span className="inline-flex items-center gap-1 font-mono font-black text-rose-700 bg-rose-100 border border-rose-300 px-1.5 py-0.5 rounded text-xs w-fit">
+                                  <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0" />
+                                  {row.productCode}
+                                </span>
+                                <span className="text-[10px] text-rose-600 font-bold">
+                                  Chưa có trong DM
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-700">{row.productCode}</span>
+                            )}
                           </td>
 
                           {/* 7. Tên Hàng Hóa */}
@@ -1345,6 +1439,20 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           onSkipDuplicates={handleSkipPurchaseDuplicates}
           onOverwriteDuplicates={handleOverwritePurchaseDuplicates}
           onCancel={() => setPurchaseConflictModalOpen(false)}
+        />
+      )}
+
+      {/* Purchase Excel Synchronization & Catalog Validation Modal */}
+      {isSyncModalOpen && (
+        <PurchaseExcelSyncModal
+          isOpen={isSyncModalOpen}
+          onClose={() => setIsSyncModalOpen(false)}
+          parsedBills={parsedExcelBills}
+          existingProducts={products}
+          existingSuppliers={suppliers}
+          existingPurchases={purchases}
+          currentUser={currentUser}
+          onConfirmImport={handleConfirmSyncImport}
         />
       )}
 

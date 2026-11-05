@@ -68,6 +68,8 @@ interface SalesManagerProps {
   onSaveCustomer: (customer: Customer) => void;
   onDeleteCustomer: (customerId: string) => void;
   onBatchUpdateCustomers?: (customers: Customer[]) => void;
+  onAddNewProduct?: (product: Product) => void;
+  onBatchUpdateProducts?: (products: Product[]) => void;
 }
 
 export const SalesManager: React.FC<SalesManagerProps> = ({
@@ -85,6 +87,8 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
   onSaveCustomer,
   onDeleteCustomer,
   onBatchUpdateCustomers,
+  onAddNewProduct,
+  onBatchUpdateProducts,
 }) => {
   const confirm = useConfirm();
   const [activeSubTab, setActiveSubTab] = useState<'orders' | 'order-details' | 'customers'>('orders');
@@ -139,7 +143,21 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         o.customerCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (o.createdByName && o.createdByName.toLowerCase().includes(searchTerm.toLowerCase()));
 
-      const matchStatus = statusFilter === 'all' || o.deliveryStatus === statusFilter;
+      const isCustomerUncataloged = !customers.some(
+        (c) => c.code.trim().toUpperCase() === o.customerCode?.trim().toUpperCase() || c.id === o.customerId
+      );
+      const hasUncatalogedProds = o.items.some(
+        (it) => !products.some((p) => p.code.trim().toUpperCase() === it.productCode?.trim().toUpperCase())
+      );
+      const isRedFlagged = isCustomerUncataloged || hasUncatalogedProds;
+
+      const matchStatus =
+        statusFilter === 'all'
+          ? true
+          : statusFilter === 'red_flagged'
+          ? isRedFlagged
+          : o.deliveryStatus === statusFilter;
+
       const matchDate =
         (!startDate || o.orderDate >= startDate) && (!endDate || o.orderDate <= endDate);
       const matchSalesperson =
@@ -147,7 +165,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
 
       return matchSearch && matchStatus && matchDate && matchSalesperson;
     }).sort((a, b) => b.orderDate.localeCompare(a.orderDate) || b.createdAt.localeCompare(a.createdAt));
-  }, [orders, searchTerm, statusFilter, startDate, endDate, salespersonFilter]);
+  }, [orders, searchTerm, statusFilter, startDate, endDate, salespersonFilter, customers, products]);
 
   // Duplicate tax codes check for customers (REQUIREMENT: nếu trong danh mục có trùng mã số thuế thì bôi đỏ)
   const duplicateTaxCodes = useMemo(() => {
@@ -490,13 +508,35 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
   const [pendingProductSync, setPendingProductSync] = useState<CodeSyncDetail[]>([]);
   const [pendingCustomerSync, setPendingCustomerSync] = useState<CodeSyncDetail[]>([]);
 
-  const handleConfirmImportOrders = (finalOrders: Order[]) => {
+  const handleConfirmImportOrders = (options: {
+    finalOrders: Order[];
+    newCustomersToAdd: Customer[];
+    newProductsToAdd: Product[];
+  }) => {
+    const { finalOrders, newCustomersToAdd, newProductsToAdd } = options;
+
+    if (newCustomersToAdd.length > 0 && onBatchUpdateCustomers) {
+      onBatchUpdateCustomers(newCustomersToAdd);
+    }
+    if (newProductsToAdd.length > 0 && onBatchUpdateProducts) {
+      onBatchUpdateProducts(newProductsToAdd);
+    }
+
     onBatchUpdateOrders(finalOrders);
     setIsOrderImportCheckModalOpen(false);
     setPendingImportOrders([]);
+    setPendingProductSync([]);
+    setPendingCustomerSync([]);
+
     const adjustedProds = pendingProductSync.filter((p) => p.isAdjusted).length;
     const adjustedCusts = pendingCustomerSync.filter((c) => c.isAdjusted).length;
-    let msg = `Đã nhập thành công ${finalOrders.length} đơn hàng từ Excel vào phần mềm theo thứ tự tăng dần!`;
+    let msg = `Đã nhập thành công ${finalOrders.length} đơn hàng từ Excel vào phần mềm!`;
+    if (newCustomersToAdd.length > 0) {
+      msg += `\n+ Đã thêm ${newCustomersToAdd.length} khách hàng mới vào Danh mục khách hàng`;
+    }
+    if (newProductsToAdd.length > 0) {
+      msg += `\n+ Đã thêm ${newProductsToAdd.length} mã hàng mới vào Danh mục sản phẩm`;
+    }
     if (adjustedProds > 0 || adjustedCusts > 0) {
       msg += `\n(Đã tự động chuẩn hóa & đồng bộ ${adjustedProds} mã hàng hóa và ${adjustedCusts} mã khách hàng)`;
     }
@@ -754,6 +794,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm bg-white cursor-pointer"
                 >
                   <option value="all">Tất cả trạng thái</option>
+                  <option value="red_flagged">🚨 Báo đỏ (Chưa có trong danh mục)</option>
                   <option value="pending">⏳ Chờ giao (Mặc định)</option>
                   <option value="delivering">🚚 Đang giao</option>
                   <option value="completed">✅ Hoàn thành</option>
@@ -957,11 +998,24 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                   ) : (
                     filteredOrders.map((order) => {
                       const isSelected = selectedOrderIds.includes(order.id);
+                      const isCustomerUncataloged = !customers.some(
+                        (c) => c.code.trim().toUpperCase() === order.customerCode?.trim().toUpperCase() || c.id === order.customerId
+                      );
+                      const uncatalogedItemCodes = order.items
+                        .filter((it) => !products.some((p) => p.code.trim().toUpperCase() === it.productCode?.trim().toUpperCase()))
+                        .map((it) => it.productCode);
+                      const hasUncatalogedProds = uncatalogedItemCodes.length > 0;
+                      const isOrderRedFlagged = isCustomerUncataloged || hasUncatalogedProds;
+
                       return (
                         <tr
                           key={order.id}
                           className={`hover:bg-blue-50/40 transition-colors ${
-                            isSelected ? 'bg-blue-50/60' : ''
+                            isOrderRedFlagged
+                              ? 'bg-rose-50/50 hover:bg-rose-50/80 border-l-4 border-l-rose-500'
+                              : isSelected
+                              ? 'bg-blue-50/60'
+                              : ''
                           }`}
                         >
                           <td className="p-3 text-center">
@@ -972,28 +1026,59 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                               className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                             />
                           </td>
-                          <td className="p-3 font-mono font-bold text-blue-700">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setViewingOrder(order);
-                                setIsDetailModalOpen(true);
-                              }}
-                              className="inline-flex items-center gap-1.5 hover:text-blue-900 hover:underline cursor-pointer group text-left"
-                              title="Bấm để xem chi tiết đơn hàng"
-                            >
-                              <span>{order.orderCode}</span>
-                              <Eye className="w-3.5 h-3.5 text-blue-400 group-hover:text-blue-700 opacity-60 group-hover:opacity-100 transition-opacity" />
-                            </button>
+                          <td className="p-3 font-mono font-bold text-blue-700 whitespace-nowrap">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setViewingOrder(order);
+                                  setIsDetailModalOpen(true);
+                                }}
+                                className="inline-flex items-center gap-1 hover:text-blue-900 hover:underline cursor-pointer group text-left"
+                                title="Bấm để xem chi tiết đơn hàng"
+                              >
+                                <span>{order.orderCode}</span>
+                                <Eye className="w-3.5 h-3.5 text-blue-400 group-hover:text-blue-700 opacity-60 group-hover:opacity-100 transition-opacity" />
+                              </button>
+                              {isOrderRedFlagged && (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-black bg-rose-600 text-white shadow-2xs animate-pulse"
+                                  title={`Đơn hàng có thông tin chưa trong danh mục: ${isCustomerUncataloged ? 'Khách hàng mới chưa có trong DM. ' : ''}${hasUncatalogedProds ? `Mã hàng chưa có trong DM: ${uncatalogedItemCodes.join(', ')}` : ''}`}
+                                >
+                                  <AlertTriangle className="w-3 h-3 text-rose-200 shrink-0" />
+                                  Báo đỏ
+                                </span>
+                              )}
+                            </div>
                           </td>
-                          <td className="p-3 text-slate-600">
+                          <td className="p-3 text-slate-600 whitespace-nowrap">
                             {formatDate(order.orderDate)}
                           </td>
                           <td className="p-3">
                             <div className="font-semibold text-slate-900">{order.customerName}</div>
-                            <div className="text-[11px] text-slate-500 font-mono">
-                              {order.customerCode} {order.customerTaxCode && `• MST: ${order.customerTaxCode}`}
+                            <div className="text-[11px] text-slate-500 font-mono flex items-center gap-1.5 flex-wrap mt-0.5">
+                              <span>{order.customerCode} {order.customerTaxCode && `• MST: ${order.customerTaxCode}`}</span>
+                              {isCustomerUncataloged && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-300">
+                                  <AlertTriangle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                  KH chưa có trong DM
+                                </span>
+                              )}
                             </div>
+                            {hasUncatalogedProds && (
+                              <div className="mt-0.5 text-[10px] text-rose-700 font-bold flex items-center gap-1 flex-wrap">
+                                <AlertTriangle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                <span>Mã chưa có trong DM:</span>
+                                {uncatalogedItemCodes.slice(0, 3).map((code, cIdx) => (
+                                  <span key={cIdx} className="font-mono bg-rose-100 text-rose-800 px-1 py-0.2 rounded border border-rose-200">
+                                    {code}
+                                  </span>
+                                ))}
+                                {uncatalogedItemCodes.length > 3 && (
+                                  <span>+{uncatalogedItemCodes.length - 3}</span>
+                                )}
+                              </div>
+                            )}
                           </td>
                           <td className="p-3">
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200">
@@ -1551,6 +1636,8 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           isOpen={isOrderImportCheckModalOpen}
           importedOrders={pendingImportOrders}
           existingOrders={orders}
+          existingProducts={products}
+          existingCustomers={customers}
           rules={settings.orderCodeRules && settings.orderCodeRules.length > 0 ? settings.orderCodeRules : [
             {
               id: 'rule-dh',

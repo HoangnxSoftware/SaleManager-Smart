@@ -736,6 +736,8 @@ export default function App() {
               onSaveCustomer={handleSaveCustomer}
               onDeleteCustomer={handleDeleteCustomer}
               onBatchUpdateCustomers={handleBatchUpdateCustomers}
+              onAddNewProduct={handleSaveProduct}
+              onBatchUpdateProducts={handleBatchUpdateProducts}
             />
           )}
 
@@ -753,6 +755,7 @@ export default function App() {
               onDeleteSupplier={handleDeleteSupplier}
               onBatchUpdateSuppliers={handleBatchUpdateSuppliers}
               onAddNewProduct={handleSaveProduct}
+              onBatchUpdateProducts={handleBatchUpdateProducts}
             />
           )}
 
