@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   AppData,
   AppUser,
@@ -10,6 +10,9 @@ import {
   PurchaseBill,
   DebtPayment,
   DatabaseProfile,
+  AuditLogAction,
+  AuditLogEntity,
+  DeviceSession,
 } from './types';
 import {
   loadData,
@@ -43,8 +46,18 @@ import { SettingsManager } from './components/Settings/SettingsManager';
 import { LoginModal } from './components/LoginModal';
 import { ExitConfirmModal } from './components/Common/ExitConfirmModal';
 import { GoogleSheetsSyncModal } from './components/Common/GoogleSheetsSyncModal';
+import { AuditLogModal } from './components/Common/AuditLogModal';
+import { DeviceConflictModal } from './components/Common/DeviceConflictModal';
 import { AlertTriangle } from 'lucide-react';
 import { resequenceOrders, DEFAULT_ORDER_CODE_RULES } from './services/orderCodeService';
+import {
+  getCurrentDeviceName,
+  setCurrentDeviceName,
+  getCurrentDeviceId,
+  registerOrUpdateDeviceSession,
+  checkDeviceConflict,
+} from './services/deviceService';
+import { createAuditLogEntry, appendAuditLog } from './services/auditLogService';
 
 export default function App() {
   // Database connection state: remember previous file / database id
@@ -70,6 +83,76 @@ export default function App() {
     return stored !== null ? stored === 'true' : true;
   });
   const [globalBanner, setGlobalBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Audit log & Device sync states
+  const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
+  const [deviceConflictSession, setDeviceConflictSession] = useState<DeviceSession | null>(null);
+  const [hasDismissedConflict, setHasDismissedConflict] = useState(false);
+  const [currentDeviceNameState, setCurrentDeviceNameState] = useState(() => getCurrentDeviceName());
+
+  // Helper log hành động người dùng theo thời gian thực
+  const logUserAction = useCallback(
+    (action: AuditLogAction, entity: AuditLogEntity, entityName: string, details: string, entityId?: string) => {
+      if (!currentUser) return;
+      const entry = createAuditLogEntry(currentUser, action, entity, entityName, details, entityId);
+      setData((prev) => ({
+        ...prev,
+        auditLogs: appendAuditLog(prev.auditLogs, entry),
+      }));
+    },
+    [currentUser]
+  );
+
+  // Đổi tên thiết bị
+  const handleChangeDeviceName = () => {
+    const currentName = getCurrentDeviceName();
+    const newName = prompt('Nhập tên cho thiết bị này để phân biệt khi đồng bộ (ví dụ: Máy kế toán, Laptop quản lý...):', currentName);
+    if (newName && newName.trim() && newName.trim() !== currentName) {
+      setCurrentDeviceName(newName.trim());
+      setCurrentDeviceNameState(newName.trim());
+      if (currentUser) {
+        setData((prev) => {
+          const { updatedSessions } = registerOrUpdateDeviceSession(currentUser, prev.activeSessions);
+          return {
+            ...prev,
+            activeSessions: updatedSessions,
+          };
+        });
+      }
+    }
+  };
+
+  // Periodic device session heartbeat & conflict check (mỗi 20 giây)
+  useEffect(() => {
+    if (!currentUser) return;
+
+    // Heartbeat update immediately
+    setData((prev) => {
+      const { updatedSessions, conflictingSession } = registerOrUpdateDeviceSession(currentUser, prev.activeSessions);
+      if (conflictingSession && !hasDismissedConflict) {
+        setDeviceConflictSession(conflictingSession);
+      }
+      return {
+        ...prev,
+        activeSessions: updatedSessions,
+      };
+    });
+
+    const interval = setInterval(() => {
+      setData((prev) => {
+        const { updatedSessions, conflictingSession } = registerOrUpdateDeviceSession(currentUser, prev.activeSessions);
+        if (conflictingSession && !hasDismissedConflict) {
+          setDeviceConflictSession(conflictingSession);
+        }
+        return {
+          ...prev,
+          activeSessions: updatedSessions,
+        };
+      });
+    }, 20000);
+
+    return () => clearInterval(interval);
+  }, [currentUser, hasDismissedConflict]);
 
   // Requirement: "Khi tắt trang phần mềm cũng phải hiện thông báo thoát chương trình"
   useEffect(() => {
@@ -161,7 +244,30 @@ export default function App() {
     setSelectedDbId(dbId);
     setLastUsedDatabaseId(dbId);
     const loaded = await loadDataAsync(dbId);
-    setData(loaded);
+    
+    // Register device session & check concurrent login conflict
+    setHasDismissedConflict(false);
+    const { updatedSessions, conflictingSession } = registerOrUpdateDeviceSession(user, loaded.activeSessions);
+    if (conflictingSession) {
+      setDeviceConflictSession(conflictingSession);
+    }
+
+    // Record login audit log
+    const loginLog = createAuditLogEntry(
+      user,
+      'create',
+      'user',
+      user.fullName,
+      `Đăng nhập vào hệ thống từ thiết bị "${getCurrentDeviceName()}"`
+    );
+
+    const updatedData: AppData = {
+      ...loaded,
+      activeSessions: updatedSessions,
+      auditLogs: appendAuditLog(loaded.auditLogs, loginLog),
+    };
+
+    setData(updatedData);
     setCurrentUser(user);
     setIsLoginModalOpen(false);
 
@@ -177,8 +283,13 @@ export default function App() {
         if (token) {
           const freshData = await loadDataFromGoogleSheets(token, targetSpreadsheetId);
           if (freshData && (freshData.orders.length > 0 || freshData.products.length > 0)) {
-            setData(freshData);
-            saveData(freshData, dbId);
+            // Keep current session in fresh data
+            const freshWithSession: AppData = {
+              ...freshData,
+              activeSessions: registerOrUpdateDeviceSession(user, freshData.activeSessions).updatedSessions,
+            };
+            setData(freshWithSession);
+            saveData(freshWithSession, dbId);
           }
         }
       } catch (err) {
@@ -208,6 +319,15 @@ export default function App() {
         orders: updatedOrders,
       };
     });
+
+    const isExisting = data.orders.some((o) => o.id === newOrder.id);
+    logUserAction(
+      isExisting ? 'update' : 'create',
+      'order',
+      newOrder.orderCode,
+      `${isExisting ? 'Cập nhật' : 'Tạo mới'} đơn hàng ${newOrder.orderCode} - Khách: ${newOrder.customerName} - Tổng tiền: ${newOrder.totalAmount.toLocaleString('vi-VN')} đ`,
+      newOrder.id
+    );
   };
 
   const handleBatchUpdateOrders = (newOrUpdatedOrders: Order[]) => {
@@ -221,9 +341,17 @@ export default function App() {
         orders: Array.from(orderMap.values()),
       };
     });
+
+    logUserAction(
+      'import_excel',
+      'order',
+      `${newOrUpdatedOrders.length} đơn hàng`,
+      `Nhập/đồng bộ hàng loạt ${newOrUpdatedOrders.length} đơn hàng từ Excel hoặc chức năng tính lại giá`
+    );
   };
 
   const handleDeleteOrder = (orderId: string) => {
+    const deletedOrder = data.orders.find((o) => o.id === orderId);
     setData((prev) => {
       const remaining = prev.orders.filter((o) => o.id !== orderId);
       const rules =
@@ -236,6 +364,14 @@ export default function App() {
         orders: resequenced,
       };
     });
+
+    logUserAction(
+      'delete',
+      'order',
+      deletedOrder?.orderCode || `Đơn hàng ${orderId}`,
+      `Xóa đơn hàng ${deletedOrder?.orderCode || orderId} - Khách hàng: ${deletedOrder?.customerName || '—'}`,
+      orderId
+    );
   };
 
   const handleBatchDeleteOrders = (orderIds: string[]) => {
@@ -251,6 +387,13 @@ export default function App() {
         orders: resequenced,
       };
     });
+
+    logUserAction(
+      'delete',
+      'order',
+      `${orderIds.length} đơn hàng`,
+      `Xóa hàng loạt ${orderIds.length} đơn hàng khỏi hệ thống`
+    );
   };
 
   const handleResequenceOrders = () => {
@@ -265,10 +408,18 @@ export default function App() {
         orders: resequenced,
       };
     });
+
+    logUserAction(
+      'update',
+      'order',
+      'Đánh số thứ tự lại',
+      'Tự động đánh lại số đơn hàng theo thứ tự tăng dần theo quy tắc'
+    );
   };
 
   // Customer Handlers
   const handleSaveCustomer = (customer: Customer) => {
+    const isExisting = data.customers.some((c) => c.id === customer.id);
     setData((prev) => {
       const exists = prev.customers.some((c) => c.id === customer.id);
       return {
@@ -278,6 +429,14 @@ export default function App() {
           : [...prev.customers, customer],
       };
     });
+
+    logUserAction(
+      isExisting ? 'update' : 'create',
+      'customer',
+      customer.name,
+      `${isExisting ? 'Cập nhật' : 'Thêm'} khách hàng: ${customer.name} (Mã: ${customer.code}, MST: ${customer.taxCode || '—'})`,
+      customer.id
+    );
   };
 
   const handleBatchUpdateCustomers = (newOrUpdatedCustomers: Customer[]) => {
@@ -291,17 +450,34 @@ export default function App() {
         customers: Array.from(map.values()),
       };
     });
+
+    logUserAction(
+      'import_excel',
+      'customer',
+      `${newOrUpdatedCustomers.length} khách hàng`,
+      `Nhập/cập nhật hàng loạt ${newOrUpdatedCustomers.length} khách hàng từ file Excel`
+    );
   };
 
   const handleDeleteCustomer = (customerId: string) => {
+    const cust = data.customers.find((c) => c.id === customerId);
     setData((prev) => ({
       ...prev,
       customers: prev.customers.filter((c) => c.id !== customerId),
     }));
+
+    logUserAction(
+      'delete',
+      'customer',
+      cust?.name || `Khách hàng ${customerId}`,
+      `Xóa khách hàng: ${cust?.name || customerId} (Mã: ${cust?.code || '—'})`,
+      customerId
+    );
   };
 
   // Inventory & Purchase Handlers
   const handleSavePurchase = (bill: PurchaseBill) => {
+    const isExisting = data.purchases.some((b) => b.id === bill.id);
     setData((prev) => {
       const exists = prev.purchases.some((b) => b.id === bill.id);
       return {
@@ -311,6 +487,14 @@ export default function App() {
           : [bill, ...prev.purchases],
       };
     });
+
+    logUserAction(
+      isExisting ? 'update' : 'create',
+      'purchase',
+      bill.billNo,
+      `${isExisting ? 'Cập nhật' : 'Tạo mới'} phiếu nhập hàng ${bill.billNo} - NCC: ${bill.supplierName} - Tổng tiền: ${bill.totalAmount.toLocaleString('vi-VN')} đ`,
+      bill.id
+    );
   };
 
   const handleBatchUpdatePurchases = (bills: PurchaseBill[]) => {
@@ -324,17 +508,34 @@ export default function App() {
         purchases: Array.from(map.values()),
       };
     });
+
+    logUserAction(
+      'import',
+      'purchase',
+      `${bills.length} phiếu nhập`,
+      `Nhập/cập nhật hàng loạt ${bills.length} phiếu nhập kho từ Excel`
+    );
   };
 
   const handleDeletePurchase = (billId: string) => {
+    const bill = data.purchases.find((b) => b.id === billId);
     setData((prev) => ({
       ...prev,
       purchases: prev.purchases.filter((b) => b.id !== billId),
     }));
+
+    logUserAction(
+      'delete',
+      'purchase',
+      bill?.billNo || `Phiếu nhập ${billId}`,
+      `Xóa phiếu nhập kho: ${bill?.billNo || billId} - NCC: ${bill?.supplierName || '—'}`,
+      billId
+    );
   };
 
   // Supplier Handlers
   const handleSaveSupplier = (supplier: Supplier) => {
+    const isExisting = data.suppliers.some((s) => s.id === supplier.id);
     setData((prev) => {
       const exists = prev.suppliers.some((s) => s.id === supplier.id);
       return {
@@ -344,6 +545,14 @@ export default function App() {
           : [...prev.suppliers, supplier],
       };
     });
+
+    logUserAction(
+      isExisting ? 'update' : 'create',
+      'supplier',
+      supplier.name,
+      `${isExisting ? 'Cập nhật' : 'Thêm'} đơn vị cung cấp: ${supplier.name} (Mã: ${supplier.code}, MST: ${supplier.taxCode || '—'})`,
+      supplier.id
+    );
   };
 
   const handleBatchUpdateSuppliers = (newOrUpdatedSuppliers: Supplier[]) => {
@@ -357,17 +566,34 @@ export default function App() {
         suppliers: Array.from(map.values()),
       };
     });
+
+    logUserAction(
+      'import_excel',
+      'supplier',
+      `${newOrUpdatedSuppliers.length} NCC`,
+      `Nhập/cập nhật hàng loạt ${newOrUpdatedSuppliers.length} đơn vị cung cấp từ Excel`
+    );
   };
 
   const handleDeleteSupplier = (supplierId: string) => {
+    const sup = data.suppliers.find((s) => s.id === supplierId);
     setData((prev) => ({
       ...prev,
       suppliers: prev.suppliers.filter((s) => s.id !== supplierId),
     }));
+
+    logUserAction(
+      'delete',
+      'supplier',
+      sup?.name || `NCC ${supplierId}`,
+      `Xóa đơn vị cung cấp: ${sup?.name || supplierId} (Mã: ${sup?.code || '—'})`,
+      supplierId
+    );
   };
 
   // Product Handlers
   const handleSaveProduct = (product: Product) => {
+    const isExisting = data.products.some((p) => p.id === product.id);
     setData((prev) => {
       const exists = prev.products.some((p) => p.id === product.id);
       return {
@@ -377,6 +603,14 @@ export default function App() {
           : [...prev.products, product],
       };
     });
+
+    logUserAction(
+      isExisting ? 'update' : 'create',
+      'product',
+      product.name,
+      `${isExisting ? 'Cập nhật' : 'Thêm'} sản phẩm: ${product.name} (Mã: ${product.code}, ĐVT: ${product.saleUnit})`,
+      product.id
+    );
   };
 
   const handleBatchUpdateProducts = (products: Product[]) => {
@@ -390,13 +624,29 @@ export default function App() {
         products: Array.from(map.values()),
       };
     });
+
+    logUserAction(
+      'import_excel',
+      'product',
+      `${products.length} sản phẩm`,
+      `Nhập/cập nhật hàng loạt ${products.length} sản phẩm hàng hóa từ Excel`
+    );
   };
 
   const handleDeleteProduct = (productId: string) => {
+    const prod = data.products.find((p) => p.id === productId);
     setData((prev) => ({
       ...prev,
       products: prev.products.filter((p) => p.id !== productId),
     }));
+
+    logUserAction(
+      'delete',
+      'product',
+      prod?.name || `Sản phẩm ${productId}`,
+      `Xóa sản phẩm hàng hóa: ${prod?.name || productId} (Mã: ${prod?.code || '—'})`,
+      productId
+    );
   };
 
   // Debt Payment Handlers
@@ -405,13 +655,30 @@ export default function App() {
       ...prev,
       debtPayments: [payment, ...prev.debtPayments],
     }));
+
+    logUserAction(
+      'create',
+      'debt_payment',
+      payment.code,
+      `Ghi nhận thanh toán công nợ ${payment.code} (${payment.type === 'customer' ? 'Khách hàng' : 'Nhà cung cấp'}: ${payment.entityName}, Số tiền: ${payment.amount.toLocaleString('vi-VN')} đ)`,
+      payment.id
+    );
   };
 
   const handleDeleteDebtPayment = (paymentId: string) => {
+    const pay = data.debtPayments.find((p) => p.id === paymentId);
     setData((prev) => ({
       ...prev,
       debtPayments: prev.debtPayments.filter((p) => p.id !== paymentId),
     }));
+
+    logUserAction(
+      'delete',
+      'debt_payment',
+      pay?.code || `Phiếu thu/chi ${paymentId}`,
+      `Xóa phiếu thanh toán công nợ: ${pay?.code || paymentId}`,
+      paymentId
+    );
   };
 
   const handleBatchUpdateDebtPayments = (newPayments: DebtPayment[]) => {
@@ -684,6 +951,9 @@ export default function App() {
         databaseName={data.databaseName || data.settings.companyName}
         autoSyncEnabled={autoSyncEnabled}
         isAutoSyncing={isAutoSyncing}
+        onOpenAuditLog={() => setIsAuditLogOpen(true)}
+        currentDeviceName={currentDeviceNameState}
+        onChangeDeviceName={handleChangeDeviceName}
       />
 
       {/* Global alert banner */}
@@ -729,6 +999,7 @@ export default function App() {
               debtPayments={data.debtPayments}
               currentUser={currentUser}
               settings={data.settings}
+              users={data.users}
               onSaveOrder={handleSaveOrder}
               onBatchUpdateOrders={handleBatchUpdateOrders}
               onDeleteOrder={handleDeleteOrder}
@@ -842,6 +1113,7 @@ export default function App() {
           debtPayments={data.debtPayments}
           currentUser={currentUser}
           settings={data.settings}
+          users={data.users}
           onAddNewCustomer={handleSaveCustomer}
         />
       )}
@@ -868,6 +1140,32 @@ export default function App() {
           onConfirmSyncAndExit={handleConfirmSyncAndExit}
           data={data}
           isSyncing={isSyncing}
+        />
+      )}
+
+      {/* Audit Log / Nhật ký thao tác Modal */}
+      {isAuditLogOpen && (
+        <AuditLogModal
+          isOpen={isAuditLogOpen}
+          onClose={() => setIsAuditLogOpen(false)}
+          logs={data.auditLogs || []}
+          users={data.users}
+          databaseName={data.databaseName || data.settings.companyName}
+        />
+      )}
+
+      {/* Device Conflict Warning Modal */}
+      {deviceConflictSession && !hasDismissedConflict && (
+        <DeviceConflictModal
+          isOpen={true}
+          conflictingSession={deviceConflictSession}
+          currentUser={currentUser}
+          currentDeviceName={currentDeviceNameState}
+          onContinueThisDevice={() => {
+            setHasDismissedConflict(true);
+            setDeviceConflictSession(null);
+          }}
+          onLogout={handleDirectLogout}
         />
       )}
 

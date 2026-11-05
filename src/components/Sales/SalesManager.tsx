@@ -61,6 +61,7 @@ interface SalesManagerProps {
   debtPayments: DebtPayment[];
   currentUser: AppUser;
   settings: AppSettings;
+  users?: AppUser[];
   onSaveOrder: (order: Order) => void;
   onBatchUpdateOrders: (orders: Order[]) => void;
   onDeleteOrder: (orderId: string) => void;
@@ -80,6 +81,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
   debtPayments,
   currentUser,
   settings,
+  users = [],
   onSaveOrder,
   onBatchUpdateOrders,
   onDeleteOrder,
@@ -100,16 +102,47 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
 
-  // Extract unique salespeople
+  // Helper tra cứu chính xác người tạo đơn từ danh mục tài khoản / nhân viên
+  const getOrderCreator = (order: Order) => {
+    const matched = users.find(
+      (u) =>
+        u.id === order.createdById ||
+        (order.createdByName &&
+          (u.fullName.toLowerCase() === order.createdByName.toLowerCase() ||
+            u.username.toLowerCase() === order.createdByName.toLowerCase()))
+    );
+
+    const displayName =
+      order.createdByName?.trim() ||
+      matched?.fullName ||
+      matched?.username ||
+      (order.createdById ? `ID: ${order.createdById}` : 'Chưa xác định');
+
+    const role = matched?.role;
+    return {
+      name: displayName,
+      role,
+      user: matched,
+    };
+  };
+
+  // Extract unique salespeople (bao gồm cả users hệ thống và tên trong đơn hàng)
   const salespeople = useMemo(() => {
     const set = new Set<string>();
+    // Thêm nhân viên từ hệ thống
+    users.forEach((u) => {
+      if (u.fullName) set.add(u.fullName.trim());
+      else if (u.username) set.add(u.username.trim());
+    });
+    // Thêm người tạo từ các đơn hàng
     orders.forEach((o) => {
-      if (o.createdByName && o.createdByName.trim()) {
-        set.add(o.createdByName.trim());
+      const info = getOrderCreator(o);
+      if (info.name && info.name !== 'Chưa xác định') {
+        set.add(info.name);
       }
     });
     return Array.from(set).sort();
-  }, [orders]);
+  }, [orders, users]);
 
   // Selected orders for batch actions
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
@@ -136,12 +169,15 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
   // Filtered orders
   const filteredOrders = useMemo(() => {
     return orders.filter((o) => {
+      const creatorInfo = getOrderCreator(o);
+
       const matchSearch =
         !searchTerm.trim() ||
         o.orderCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
         o.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         o.customerCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (o.createdByName && o.createdByName.toLowerCase().includes(searchTerm.toLowerCase()));
+        (o.createdByName && o.createdByName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        creatorInfo.name.toLowerCase().includes(searchTerm.toLowerCase());
 
       const isCustomerUncataloged = !customers.some(
         (c) => c.code.trim().toUpperCase() === o.customerCode?.trim().toUpperCase() || c.id === o.customerId
@@ -161,11 +197,13 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
       const matchDate =
         (!startDate || o.orderDate >= startDate) && (!endDate || o.orderDate <= endDate);
       const matchSalesperson =
-        salespersonFilter === 'all' || o.createdByName === salespersonFilter;
+        salespersonFilter === 'all' ||
+        creatorInfo.name === salespersonFilter ||
+        o.createdByName === salespersonFilter;
 
       return matchSearch && matchStatus && matchDate && matchSalesperson;
     }).sort((a, b) => b.orderDate.localeCompare(a.orderDate) || b.createdAt.localeCompare(a.createdAt));
-  }, [orders, searchTerm, statusFilter, startDate, endDate, salespersonFilter, customers, products]);
+  }, [orders, searchTerm, statusFilter, startDate, endDate, salespersonFilter, customers, products, users]);
 
   // Duplicate tax codes check for customers (REQUIREMENT: nếu trong danh mục có trùng mã số thuế thì bôi đỏ)
   const duplicateTaxCodes = useMemo(() => {
@@ -653,6 +691,35 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         const grandTotal = Math.max(0, totalPreTax - totalDiscount - ordDiscount) + totalVat;
         const paid = Number(first['Đã thanh toán']) || 0;
 
+        // Extract and map creator from Excel
+        const rawCreator = String(
+          first['Người tạo đơn/Bán hàng'] ||
+          first['Người tạo đơn'] ||
+          first['Người bán hàng'] ||
+          first['Nhân viên bán hàng'] ||
+          first['NV bán hàng'] ||
+          first['Người tạo'] ||
+          ''
+        ).trim();
+
+        let impCreatedById = currentUser.id;
+        let impCreatedByName = currentUser.fullName || currentUser.username || 'Admin';
+
+        if (rawCreator) {
+          const matchedUser = users.find(
+            (u) =>
+              (u.fullName && u.fullName.toLowerCase() === rawCreator.toLowerCase()) ||
+              (u.username && u.username.toLowerCase() === rawCreator.toLowerCase()) ||
+              u.id === rawCreator
+          );
+          if (matchedUser) {
+            impCreatedById = matchedUser.id;
+            impCreatedByName = matchedUser.fullName || matchedUser.username;
+          } else {
+            impCreatedByName = rawCreator;
+          }
+        }
+
         newOrdersList.push({
           id: `ord-imp-${Date.now()}-${Math.random()}`,
           orderCode: code,
@@ -675,8 +742,8 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           debtAmount: Math.max(0, grandTotal - paid),
           deliveryStatus: 'pending',
           notes: String(first['Ghi chú'] || 'Nhập từ file Excel'),
-          createdById: currentUser.id,
-          createdByName: currentUser.fullName,
+          createdById: impCreatedById,
+          createdByName: impCreatedByName,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
@@ -1081,10 +1148,35 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                             )}
                           </td>
                           <td className="p-3">
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200">
-                              <UserCheck className="w-3.5 h-3.5 text-blue-600" />
-                              {order.createdByName || '—'}
-                            </span>
+                            {(() => {
+                              const creatorInfo = getOrderCreator(order);
+                              return (
+                                <div className="space-y-0.5">
+                                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                                    <UserCheck className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                    <span>{creatorInfo.name}</span>
+                                    {creatorInfo.role && (
+                                      <span
+                                        className={`text-[9px] px-1 py-0.2 rounded font-bold uppercase ${
+                                          creatorInfo.role === 'admin'
+                                            ? 'bg-purple-100 text-purple-700'
+                                            : creatorInfo.role === 'manager'
+                                            ? 'bg-blue-100 text-blue-700'
+                                            : 'bg-emerald-100 text-emerald-700'
+                                        }`}
+                                      >
+                                        {creatorInfo.role === 'admin' ? 'Admin' : creatorInfo.role === 'manager' ? 'Quản lý' : 'Bán hàng'}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {order.updatedByName && (
+                                    <div className="text-[10px] text-slate-400 pl-1">
+                                      Sửa: <span className="font-medium text-slate-600">{order.updatedByName}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </td>
                           <td className="p-3 text-right font-black text-slate-900">
                             {formatCurrency(order.totalAmount)}
@@ -1557,6 +1649,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           debtPayments={debtPayments}
           currentUser={currentUser}
           settings={settings}
+          users={users}
           onAddNewCustomer={onSaveCustomer}
         />
       )}

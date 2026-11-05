@@ -13,7 +13,9 @@ import {
   Laptop,
   Lock,
   AlertTriangle,
-  Building2
+  Building2,
+  History,
+  Edit3
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -29,6 +31,9 @@ interface NavbarProps {
   databaseName?: string;
   autoSyncEnabled?: boolean;
   isAutoSyncing?: boolean;
+  onOpenAuditLog?: () => void;
+  currentDeviceName?: string;
+  onChangeDeviceName?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -44,6 +49,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   databaseName,
   autoSyncEnabled = true,
   isAutoSyncing = false,
+  onOpenAuditLog,
+  currentDeviceName = 'Thiết bị này',
+  onChangeDeviceName,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
@@ -126,17 +134,48 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </button>
           )}
+
+          {/* Audit Log / Nhật ký thao tác Button */}
+          {onOpenAuditLog && (
+            <button
+              type="button"
+              onClick={onOpenAuditLog}
+              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+              title="Xem nhật ký thêm, sửa, xóa dữ liệu thời gian thực"
+            >
+              <History className="w-4 h-4 text-indigo-600" />
+              <span className="hidden md:inline font-bold">Nhật ký</span>
+            </button>
+          )}
         </div>
 
-        {/* User Account / Role switcher & Logout */}
+        {/* Current Device & User Account & Logout */}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Current Device Identifier */}
+          <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100/90 border border-slate-200 text-slate-700 text-xs font-medium">
+            <Laptop className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+            <span className="truncate max-w-32 font-semibold" title={currentDeviceName}>
+              {currentDeviceName}
+            </span>
+            {onChangeDeviceName && (
+              <button
+                type="button"
+                onClick={onChangeDeviceName}
+                className="p-0.5 text-slate-400 hover:text-blue-600 hover:bg-slate-200 rounded transition-colors cursor-pointer"
+                title="Đổi tên thiết bị này để phân biệt khi đồng bộ (Ví dụ: Máy kế toán, Laptop quản lý...)"
+              >
+                <Edit3 className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
           <button
             type="button"
             onClick={onOpenLoginModal}
             className="flex items-center gap-2 p-1 sm:px-3 sm:py-1.5 rounded-xl hover:bg-slate-100 border border-slate-200/80 transition-colors cursor-pointer"
             title="Bấm để kiểm tra tài khoản hoặc đổi cơ sở dữ liệu"
           >
-            <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs">
+            <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs shrink-0">
               {currentUser.role === 'admin' ? (
                 <ShieldCheck className="w-4 h-4 text-indigo-700" />
               ) : currentUser.role === 'manager' ? (
@@ -146,12 +185,16 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </div>
             <div className="hidden sm:block text-left text-xs">
-              <div className="font-bold text-slate-800 leading-tight truncate max-w-28">
+              <div className="font-bold text-slate-800 leading-tight truncate max-w-32">
                 {currentUser.fullName}
               </div>
-              <span className="text-[10px] text-slate-500 font-medium">
-                {currentUser.role === 'admin' ? 'Admin' : currentUser.role === 'manager' ? 'Quản lý' : 'Bán hàng'}
-              </span>
+              <div className="text-[10px] text-slate-500 font-medium flex items-center gap-1">
+                <span className="font-mono text-blue-600">@{currentUser.username}</span>
+                <span>•</span>
+                <span>
+                  {currentUser.role === 'admin' ? 'Admin' : currentUser.role === 'manager' ? 'Quản lý' : 'Bán hàng'}
+                </span>
+              </div>
             </div>
           </button>
 

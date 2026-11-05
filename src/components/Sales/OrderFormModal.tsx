@@ -39,6 +39,7 @@ interface OrderFormModalProps {
   debtPayments: DebtPayment[];
   currentUser: AppUser;
   settings: AppSettings;
+  users?: AppUser[];
   onAddNewCustomer: (customer: Customer) => void;
 }
 
@@ -54,6 +55,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
   debtPayments,
   currentUser,
   settings,
+  users = [],
   onAddNewCustomer,
 }) => {
   const confirm = useConfirm();
@@ -138,6 +140,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [paidAmount, setPaidAmount] = useState<number>(0);
   const [deliveryStatus, setDeliveryStatus] = useState<DeliveryStatus>('pending');
+  const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [createdByName, setCreatedByName] = useState<string>('');
   const [notes, setNotes] = useState('');
 
@@ -177,7 +180,24 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
       setPaymentMethod(initialOrder.paymentMethod);
       setPaidAmount(initialOrder.paidAmount);
       setDeliveryStatus(initialOrder.deliveryStatus);
-      setCreatedByName(initialOrder.createdByName || currentUser.fullName || '');
+
+      // Match creator user
+      const creatorUser = users.find(
+        (u) =>
+          u.id === initialOrder.createdById ||
+          (initialOrder.createdByName && u.fullName.toLowerCase() === initialOrder.createdByName.toLowerCase())
+      );
+      if (creatorUser) {
+        setSelectedUserId(creatorUser.id);
+        setCreatedByName(initialOrder.createdByName || creatorUser.fullName);
+      } else if (initialOrder.createdByName) {
+        setSelectedUserId('custom');
+        setCreatedByName(initialOrder.createdByName);
+      } else {
+        setSelectedUserId(currentUser.id);
+        setCreatedByName(currentUser.fullName || '');
+      }
+
       setNotes(initialOrder.notes || '');
 
       if (initialOrder.orderDiscountPercent > 0) {
@@ -216,10 +236,11 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
       setPaymentMethod('cash');
       setPaidAmount(0);
       setDeliveryStatus('pending'); // Default "Chờ giao"
+      setSelectedUserId(currentUser.id);
       setCreatedByName(currentUser.fullName || '');
       setNotes('');
     }
-  }, [isOpen, initialOrder, customers, allOrders, currentUser, rulesList, settings.defaultOrderCodeRuleId]);
+  }, [isOpen, initialOrder, customers, allOrders, currentUser, rulesList, settings.defaultOrderCodeRuleId, users]);
 
   // Filter customers by Name, Short name, Tax code, Phone, Code
   const filteredCustomers = useMemo(() => {
@@ -501,6 +522,18 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
       return;
     }
 
+    // Determine creator ID and Name
+    let finalCreatedById = initialOrder?.createdById || currentUser.id;
+    let finalCreatedByName = createdByName.trim() || (initialOrder ? initialOrder.createdByName : currentUser.fullName) || 'Admin';
+
+    if (selectedUserId && selectedUserId !== 'custom') {
+      finalCreatedById = selectedUserId;
+      const matchedUser = users.find((u) => u.id === selectedUserId);
+      if (matchedUser) {
+        finalCreatedByName = matchedUser.fullName || matchedUser.username;
+      }
+    }
+
     const newOrder: Order = {
       id: initialOrder ? initialOrder.id : `ord-${Date.now()}`,
       orderCode: orderCode.trim() || `DH-${Date.now()}`,
@@ -524,8 +557,10 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
       deliveryStatus,
       notes,
       orderCodeRuleId: selectedRuleId,
-      createdById: initialOrder ? initialOrder.createdById : currentUser.id,
-      createdByName: createdByName.trim() || (initialOrder ? initialOrder.createdByName : currentUser.fullName) || 'Admin',
+      createdById: finalCreatedById,
+      createdByName: finalCreatedByName,
+      updatedById: currentUser.id,
+      updatedByName: currentUser.fullName || currentUser.username || 'Admin',
       createdAt: initialOrder ? initialOrder.createdAt : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -618,13 +653,42 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
               <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
                 Người tạo đơn / Bán hàng:
               </label>
-              <input
-                type="text"
-                value={createdByName}
-                onChange={(e) => setCreatedByName(e.target.value)}
-                placeholder="Tên nhân viên..."
-                className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-800"
-              />
+              <div className="space-y-1.5">
+                <select
+                  value={selectedUserId}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSelectedUserId(val);
+                    if (val === 'custom') {
+                      // Keep current name or reset
+                    } else {
+                      const u = users.find((item) => item.id === val);
+                      if (u) {
+                        setCreatedByName(u.fullName || u.username);
+                      }
+                    }
+                  }}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 cursor-pointer"
+                >
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.fullName || u.username} ({u.role === 'admin' ? 'Quản trị' : u.role === 'manager' ? 'Quản lý' : 'Bán hàng'})
+                    </option>
+                  ))}
+                  <option value="custom">✏️ Nhập tên khác...</option>
+                </select>
+
+                {selectedUserId === 'custom' && (
+                  <input
+                    type="text"
+                    value={createdByName}
+                    onChange={(e) => setCreatedByName(e.target.value)}
+                    placeholder="Nhập họ tên nhân viên..."
+                    className="w-full px-2.5 py-1 bg-amber-50 border border-amber-300 rounded-lg text-xs font-medium text-slate-800 placeholder-slate-400"
+                    autoFocus
+                  />
+                )}
+              </div>
             </div>
             <div>
               <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">

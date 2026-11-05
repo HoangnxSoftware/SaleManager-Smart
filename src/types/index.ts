@@ -97,6 +97,8 @@ export interface Order {
   orderCodeRuleId?: string; // ID quy tắc áp dụng cho mã đơn
   createdById: string;
   createdByName: string;
+  updatedById?: string;
+  updatedByName?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -143,6 +145,9 @@ export interface PurchaseBill {
   paidAmount: number; // Đã thanh toán
   paymentStatus: 'paid' | 'partial' | 'unpaid';
   createdById: string;
+  createdByName?: string;
+  updatedById?: string;
+  updatedByName?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -158,7 +163,47 @@ export interface DebtPayment {
   amount: number; // Số tiền trả nợ
   paymentMethod: PaymentMethod;
   notes: string;
+  createdById?: string;
+  createdByName?: string;
   createdAt: string;
+}
+
+export type AuditLogAction = 'create' | 'update' | 'delete' | 'import' | 'import_excel' | 'status_change';
+export type AuditLogEntity =
+  | 'order'
+  | 'product'
+  | 'customer'
+  | 'supplier'
+  | 'purchase'
+  | 'debt'
+  | 'debt_payment'
+  | 'user'
+  | 'settings';
+
+export interface AuditLogEntry {
+  id: string;
+  timestamp: string; // ISO 8601 string
+  userId: string;
+  userName: string;
+  userRole: UserRole;
+  action: AuditLogAction;
+  entity: AuditLogEntity;
+  entityId?: string;
+  entityName: string; // VD: "Đơn hàng DH-20261105-001", "Sản phẩm LED-RD-18W"
+  details: string; // Chi tiết thao tác thêm, sửa, xóa
+  deviceId?: string;
+  deviceName?: string;
+}
+
+export interface DeviceSession {
+  deviceId: string;
+  deviceName: string;
+  userId: string;
+  username: string;
+  fullName: string;
+  role: UserRole;
+  loginAt: string;
+  lastActiveAt: string;
 }
 
 export interface AppSettings {
@@ -211,6 +256,8 @@ export interface AppData {
   purchases: PurchaseBill[];
   debtPayments: DebtPayment[];
   settings: AppSettings;
+  auditLogs?: AuditLogEntry[];
+  activeSessions?: DeviceSession[];
   lastSyncedAt?: string;
   syncSource?: 'local' | 'google_drive';
 }
