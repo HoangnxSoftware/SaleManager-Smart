@@ -21,6 +21,8 @@ import {
 
 interface OrderDetailsTabProps {
   orders: Order[];
+  initialStartDate?: string;
+  initialEndDate?: string;
   onSaveOrder: (order: Order) => void;
   onViewOrder: (order: Order) => void;
   onEditOrder: (order: Order) => void;
@@ -37,19 +39,78 @@ interface FlattenedRow {
 
 export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
   orders,
+  initialStartDate = '',
+  initialEndDate = '',
   onSaveOrder,
   onViewOrder,
   onEditOrder,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [dateFilter, setDateFilter] = useState('');
+  const [startDate, setStartDate] = useState(initialStartDate);
+  const [endDate, setEndDate] = useState(initialEndDate);
+  const [activeDatePreset, setActiveDatePreset] = useState<string>('all');
+
+  // Helper tính ngày cho các mốc lọc nhanh
+  const getPresetDates = (preset: string) => {
+    const now = new Date();
+    const formatYMD = (d: Date) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+
+    if (preset === 'today') {
+      const t = formatYMD(now);
+      return { start: t, end: t };
+    }
+    if (preset === 'yesterday') {
+      const y = new Date(now);
+      y.setDate(y.getDate() - 1);
+      const yStr = formatYMD(y);
+      return { start: yStr, end: yStr };
+    }
+    if (preset === '7days') {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 6);
+      return { start: formatYMD(d), end: formatYMD(now) };
+    }
+    if (preset === '30days') {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 29);
+      return { start: formatYMD(d), end: formatYMD(now) };
+    }
+    if (preset === 'this_month') {
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      return { start: formatYMD(firstDay), end: formatYMD(lastDay) };
+    }
+    if (preset === 'last_month') {
+      const firstDay = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastDay = new Date(now.getFullYear(), now.getMonth(), 0);
+      return { start: formatYMD(firstDay), end: formatYMD(lastDay) };
+    }
+    if (preset === 'this_year') {
+      const firstDay = new Date(now.getFullYear(), 0, 1);
+      const lastDay = new Date(now.getFullYear(), 11, 31);
+      return { start: formatYMD(firstDay), end: formatYMD(lastDay) };
+    }
+    return { start: '', end: '' };
+  };
+
+  const handleApplyPreset = (preset: string) => {
+    setActiveDatePreset(preset);
+    const { start, end } = getPresetDates(preset);
+    setStartDate(start);
+    setEndDate(end);
+  };
 
   // Inline editing state for "Đơn giá bán sau thuế"
   // Map key: `${orderId}_${itemId}`
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [tempPostTaxPrice, setTempPostTaxPrice] = useState<string>('');
 
-  // Flatten orders into item rows
+  // Flatten orders into item rows with Date Range Filtering
   const flattenedRows: FlattenedRow[] = useMemo(() => {
     // Sort orders newest first
     const sortedOrders = [...orders].sort(
@@ -59,9 +120,10 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
     const rows: FlattenedRow[] = [];
 
     sortedOrders.forEach((order) => {
-      // Apply filters on order level or item level
-      const matchDate = !dateFilter || order.orderDate === dateFilter;
-      if (!matchDate) return;
+      // REQUIREMENT: cho phép xem chi tiết đơn hàng từ ngày đến ngày
+      const matchStartDate = !startDate || order.orderDate >= startDate;
+      const matchEndDate = !endDate || order.orderDate <= endDate;
+      if (!matchStartDate || !matchEndDate) return;
 
       const items = order.items && order.items.length > 0 ? order.items : [];
       if (items.length === 0) return;
@@ -96,13 +158,21 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
         it.productName.toLowerCase().includes(q)
       );
     });
-  }, [orders, dateFilter, searchTerm]);
+  }, [orders, startDate, endDate, searchTerm]);
+
+  // Unique filtered orders in current date range
+  const filteredOrdersList = useMemo(() => {
+    const idSet = new Set(flattenedRows.map((r) => r.order.id));
+    return orders.filter((o) => idSet.has(o.id));
+  }, [orders, flattenedRows]);
 
   // Aggregate KPI stats
   const kpiStats = useMemo(() => {
     let totalQuantity = 0;
     let totalPreTaxSum = 0;
+    let totalItemDiscountSum = 0;
     let totalVatSum = 0;
+    let totalItemAmountSum = 0;
     let totalPaymentSum = 0;
 
     const uniqueOrderIds = new Set<string>();
@@ -110,7 +180,9 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
     flattenedRows.forEach((r) => {
       totalQuantity += r.item.quantity || 0;
       totalPreTaxSum += r.item.subtotal || 0;
+      totalItemDiscountSum += r.item.itemDiscount || 0;
       totalVatSum += r.item.vatAmount || 0;
+      totalItemAmountSum += r.item.totalAmount || 0;
 
       if (!uniqueOrderIds.has(r.order.id)) {
         uniqueOrderIds.add(r.order.id);
@@ -123,7 +195,9 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
       rowCount: flattenedRows.length,
       totalQuantity,
       totalPreTaxSum,
+      totalItemDiscountSum,
       totalVatSum,
+      totalItemAmountSum,
       totalPaymentSum,
     };
   }, [flattenedRows]);
@@ -210,53 +284,202 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* Filter Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto flex-1">
-          {/* Search */}
-          <div className="relative flex-1 max-w-md">
-            <input
-              type="text"
-              placeholder="Tìm theo Mã đơn, Tên KH, MST, CCCD, Mã HH, Tên HH..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 shadow-2xs"
-            />
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+      {/* Header & Quick Date Range Presets */}
+      <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Layers className="w-5 h-5 text-blue-600" />
+              <h2 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">
+                Chi tiết Đơn hàng & Mặt hàng (Từ ngày đến ngày)
+              </h2>
+            </div>
+            <p className="text-xs sm:text-sm text-slate-500 mt-1">
+              Tra cứu, lọc và phân tích chi tiết từng mặt hàng của tất cả đơn hàng phát sinh trong khoảng thời gian được chọn
+            </p>
           </div>
 
-          {/* Date */}
-          <div className="relative w-full sm:w-48">
-            <input
-              type="date"
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm bg-white cursor-pointer shadow-2xs"
-            />
+          {/* Quick Date Presets */}
+          <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
+            {[
+              { id: 'all', label: 'Tất cả' },
+              { id: 'today', label: 'Hôm nay' },
+              { id: 'yesterday', label: 'Hôm qua' },
+              { id: '7days', label: '7 ngày qua' },
+              { id: '30days', label: '30 ngày qua' },
+              { id: 'this_month', label: 'Tháng này' },
+              { id: 'last_month', label: 'Tháng trước' },
+              { id: 'this_year', label: 'Năm nay' },
+            ].map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => handleApplyPreset(preset.id)}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  activeDatePreset === preset.id
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
           </div>
-
-          {dateFilter && (
-            <button
-              type="button"
-              onClick={() => setDateFilter('')}
-              className="px-2.5 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer font-medium"
-            >
-              Xóa ngày
-            </button>
-          )}
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Filter Inputs & Action Bar */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-3 border-t border-slate-100">
+          <div className="flex flex-wrap items-center gap-2.5 flex-1">
+            {/* Search */}
+            <div className="relative w-full sm:w-64">
+              <input
+                type="text"
+                placeholder="Tìm mã đơn, KH, MST, mã HH..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 shadow-2xs"
+              />
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+            </div>
+
+            {/* Date Range: Từ ngày -> Đến ngày */}
+            <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-300 shadow-2xs">
+              <div className="flex items-center gap-1.5">
+                <Calendar className="w-4 h-4 text-slate-400 ml-1" />
+                <span className="text-xs font-bold text-slate-700">Từ ngày:</span>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => {
+                    setStartDate(e.target.value);
+                    setActiveDatePreset('custom');
+                  }}
+                  className="px-2 py-1 text-xs border border-slate-300 rounded-lg bg-white font-medium focus:ring-2 focus:ring-blue-500"
+                  title="Chọn ngày bắt đầu"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-bold text-slate-700">Đến ngày:</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => {
+                    setEndDate(e.target.value);
+                    setActiveDatePreset('custom');
+                  }}
+                  className="px-2 py-1 text-xs border border-slate-300 rounded-lg bg-white font-medium focus:ring-2 focus:ring-blue-500"
+                  title="Chọn ngày kết thúc"
+                />
+              </div>
+
+              {(startDate || endDate) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStartDate('');
+                    setEndDate('');
+                    setActiveDatePreset('all');
+                  }}
+                  className="px-2 py-1 text-xs text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg cursor-pointer font-bold transition-colors ml-1"
+                  title="Xóa khoảng ngày lọc"
+                >
+                  <X className="w-3.5 h-3.5 inline mr-0.5" />
+                  <span>Đặt lại</span>
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Excel Export Button */}
-          <button
-            type="button"
-            onClick={() => exportOrderDetailsToExcel(orders)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-emerald-500/20 transition-all cursor-pointer"
-            title="Xuất đầy đủ 20 cột chi tiết đơn hàng ra file Excel"
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            <span>Xuất Excel Chi Tiết</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const dateLabel = startDate && endDate
+                  ? `${startDate}_den_${endDate}`
+                  : startDate
+                  ? `tu_${startDate}`
+                  : endDate
+                  ? `den_${endDate}`
+                  : 'tat_ca';
+                exportOrderDetailsToExcel(filteredOrdersList, dateLabel);
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-emerald-500/20 transition-all cursor-pointer whitespace-nowrap"
+              title="Xuất danh sách chi tiết mặt hàng trong khoảng thời gian đã chọn ra file Excel"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>Xuất Excel Chi Tiết ({filteredOrdersList.length} đơn)</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Dynamic Period KPI Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-2">
+          <div className="bg-blue-50/70 border border-blue-200/80 p-3 rounded-xl shadow-2xs">
+            <div className="flex items-center justify-between text-blue-700 text-xs font-semibold mb-1">
+              <span>Đơn hàng trong kỳ</span>
+              <Receipt className="w-4 h-4 text-blue-500" />
+            </div>
+            <div className="text-lg sm:text-xl font-black text-blue-950 tabular-nums">
+              {kpiStats.orderCount} <span className="text-xs font-normal text-blue-800">đơn</span>
+            </div>
+            <div className="text-[11px] text-blue-700/80 mt-0.5 font-medium">
+              Gồm {kpiStats.rowCount} mặt hàng
+            </div>
+          </div>
+
+          <div className="bg-emerald-50/70 border border-emerald-200/80 p-3 rounded-xl shadow-2xs">
+            <div className="flex items-center justify-between text-emerald-700 text-xs font-semibold mb-1">
+              <span>Tổng SL xuất bán</span>
+              <ShoppingBag className="w-4 h-4 text-emerald-500" />
+            </div>
+            <div className="text-lg sm:text-xl font-black text-emerald-950 tabular-nums">
+              {formatNumber(kpiStats.totalQuantity)}
+            </div>
+            <div className="text-[11px] text-emerald-700/80 mt-0.5 font-medium">
+              Sản phẩm theo ĐVT bán
+            </div>
+          </div>
+
+          <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl shadow-2xs">
+            <div className="flex items-center justify-between text-slate-600 text-xs font-semibold mb-1">
+              <span>Doanh thu trước thuế</span>
+              <TrendingUp className="w-4 h-4 text-slate-500" />
+            </div>
+            <div className="text-lg sm:text-xl font-black text-slate-900 tabular-nums truncate">
+              {formatCurrency(kpiStats.totalPreTaxSum)}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5 font-medium">
+              Chưa gồm thuế GTGT
+            </div>
+          </div>
+
+          <div className="bg-amber-50/70 border border-amber-200/80 p-3 rounded-xl shadow-2xs">
+            <div className="flex items-center justify-between text-amber-700 text-xs font-semibold mb-1">
+              <span>Tổng thuế GTGT</span>
+              <Sparkles className="w-4 h-4 text-amber-500" />
+            </div>
+            <div className="text-lg sm:text-xl font-black text-amber-950 tabular-nums truncate">
+              {formatCurrency(kpiStats.totalVatSum)}
+            </div>
+            <div className="text-[11px] text-amber-700/80 mt-0.5 font-medium">
+              Tất cả các mức thuế suất
+            </div>
+          </div>
+
+          <div className="col-span-2 sm:col-span-1 bg-gradient-to-br from-blue-600 to-indigo-700 text-white p-3 rounded-xl shadow-sm">
+            <div className="flex items-center justify-between text-blue-100 text-xs font-medium mb-1">
+              <span>Tổng tiền thanh toán</span>
+              <Receipt className="w-4 h-4 text-blue-200" />
+            </div>
+            <div className="text-lg sm:text-xl font-black text-white tabular-nums truncate">
+              {formatCurrency(kpiStats.totalPaymentSum)}
+            </div>
+            <div className="text-[11px] text-blue-100 mt-0.5 font-medium">
+              {startDate && endDate ? `${formatDate(startDate)} → ${formatDate(endDate)}` : 'Toàn bộ thời gian'}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -264,7 +487,17 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
       <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-xs text-blue-900 flex items-start gap-2">
         <Info className="w-4 h-4 text-blue-700 shrink-0 mt-0.5" />
         <span>
-          <strong>Ghi chú kế toán:</strong> Các thông tin tổng quan đơn hàng (Tên KH, MST, CCCD, Địa chỉ, Tổng thành tiền, Tổng thành tiền theo từng thuế suất, Chiết khấu tổng đơn, Tổng thuế GTGT theo từng thuế suất, Tổng thuế GTGT, Tổng tiền thanh toán) <strong>chỉ hiển thị tại dòng đầu tiên của đơn hàng</strong> theo chuẩn báo cáo kế toán. Trường hợp sửa <strong>Đơn giá bán sau thuế</strong>, hệ thống sẽ tự động tính lại <strong>Đơn giá bán trước thuế với 2 số thập phân</strong> và cập nhật toàn bộ đơn hàng.
+          <strong>Ghi chú kế toán:</strong> Đang xem chi tiết đơn hàng{' '}
+          {startDate && endDate ? (
+            <span className="font-bold underline text-blue-800">từ ngày {formatDate(startDate)} đến ngày {formatDate(endDate)}</span>
+          ) : startDate ? (
+            <span className="font-bold underline text-blue-800">từ ngày {formatDate(startDate)} trở đi</span>
+          ) : endDate ? (
+            <span className="font-bold underline text-blue-800">đến ngày {formatDate(endDate)}</span>
+          ) : (
+            <span className="font-bold text-blue-800">toàn bộ các ngày</span>
+          )}
+          . Các thông tin tổng quan đơn hàng (Tên KH, MST, CCCD, Địa chỉ, Tổng thành tiền, Tổng tiền thanh toán...) chỉ hiển thị tại dòng đầu tiên của mỗi đơn hàng.
         </span>
       </div>
 
@@ -649,6 +882,43 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
                 })
               )}
             </tbody>
+            {flattenedRows.length > 0 && (
+              <tfoot className="sticky bottom-0 z-20 bg-slate-100 font-bold text-slate-800 border-t-2 border-slate-300 text-xs shadow-md">
+                <tr>
+                  <td colSpan={10} className="p-3 text-right uppercase tracking-wider font-black text-slate-700">
+                    Tổng cộng ({kpiStats.orderCount} đơn, {kpiStats.rowCount} mặt hàng):
+                  </td>
+                  <td className="p-3 text-right font-black text-blue-900 bg-blue-50/50 whitespace-nowrap">
+                    {formatNumber(kpiStats.totalQuantity)}
+                  </td>
+                  <td className="p-3"></td>
+                  <td className="p-3 text-right font-bold text-slate-900 whitespace-nowrap">
+                    {formatCurrency(kpiStats.totalPreTaxSum)}
+                  </td>
+                  <td className="p-3 text-right font-semibold text-rose-700 whitespace-nowrap">
+                    {formatCurrency(kpiStats.totalItemDiscountSum)}
+                  </td>
+                  <td className="p-3"></td>
+                  <td className="p-3 text-right font-bold text-amber-900 bg-amber-50/50 whitespace-nowrap">
+                    {formatCurrency(kpiStats.totalVatSum)}
+                  </td>
+                  <td className="p-3 text-right font-bold text-slate-900 whitespace-nowrap">
+                    {formatCurrency(kpiStats.totalItemAmountSum)}
+                  </td>
+                  <td className="p-3 text-right font-bold text-slate-800 bg-slate-200/50 whitespace-nowrap">
+                    {formatCurrency(kpiStats.totalPreTaxSum)}
+                  </td>
+                  <td className="p-3"></td>
+                  <td className="p-3 text-right font-bold text-amber-900 whitespace-nowrap">
+                    {formatCurrency(kpiStats.totalVatSum)}
+                  </td>
+                  <td className="p-3 text-right font-black text-blue-950 bg-blue-100/60 whitespace-nowrap text-sm">
+                    {formatCurrency(kpiStats.totalPaymentSum)}
+                  </td>
+                  <td colSpan={4} className="p-3"></td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       </div>

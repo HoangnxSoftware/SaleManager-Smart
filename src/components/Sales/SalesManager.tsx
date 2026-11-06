@@ -1021,6 +1021,20 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                   />
                 </label>
 
+                {/* Shortcut to view order details from date to date */}
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('order-details')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition-colors cursor-pointer"
+                  title="Chuyển sang xem bảng chi tiết từng mặt hàng của các đơn hàng trong khoảng thời gian này"
+                >
+                  <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>
+                    Xem chi tiết mặt hàng
+                    {startDate || endDate ? ` (${filteredOrders.length} đơn)` : ''}
+                  </span>
+                </button>
+
                 {/* Template download */}
                 <button
                   type="button"
@@ -1311,6 +1325,8 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
       ) : activeSubTab === 'order-details' ? (
         <OrderDetailsTab
           orders={orders}
+          initialStartDate={startDate}
+          initialEndDate={endDate}
           onSaveOrder={onSaveOrder}
           onViewOrder={(order) => {
             setViewingOrder(order);

@@ -42,7 +42,7 @@ export function exportOrdersToExcel(orders: Order[]) {
 /**
  * Exports detailed order items to Excel with exact columns and first-row grouping
  */
-export function exportOrderDetailsToExcel(orders: Order[]) {
+export function exportOrderDetailsToExcel(orders: Order[], dateRangeStr?: string) {
   const rows: any[] = [];
   let stt = 1;
 
@@ -102,7 +102,8 @@ export function exportOrderDetailsToExcel(orders: Order[]) {
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'ChiTietDonHang');
-  downloadWorkbook(wb, `Chi_Tiet_Don_Hang_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  const dateSuffix = dateRangeStr ? `_${dateRangeStr}` : `_${new Date().toISOString().slice(0, 10)}`;
+  downloadWorkbook(wb, `Chi_Tiet_Don_Hang${dateSuffix}.xlsx`);
 }
 
 /**
