@@ -288,3 +288,148 @@ export function resequenceOrders(orders: Order[], rules: OrderCodeRule[]): Order
     return ord;
   });
 }
+
+/**
+ * Sinh mã gốc quy chiếu tự tăng dần cho đơn hàng mới: DH-ROOT-00001, DH-ROOT-00002...
+ * Mã này là bất biến khi thêm, sửa, xóa, đánh số lại mã đơn hiển thị.
+ */
+export function generateNextRootCode(allOrders: Order[] = []): string {
+  let maxNum = 0;
+  for (const o of allOrders) {
+    if (o.rootCode) {
+      const match = o.rootCode.match(/(\d+)$/);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (!isNaN(n) && n > maxNum) {
+          maxNum = n;
+        }
+      }
+    }
+  }
+  const nextNum = maxNum + 1;
+  return `DH-ROOT-${String(nextNum).padStart(5, '0')}`;
+}
+
+/**
+ * Đảm bảo mọi đơn hàng đều có mã gốc quy chiếu để đồng bộ chuẩn xác
+ */
+export function ensureOrdersHaveRootCode(orders: Order[] = []): Order[] {
+  let nextNum = 0;
+  // Tìm số max hiện có
+  for (const o of orders) {
+    if (o.rootCode) {
+      const match = o.rootCode.match(/(\d+)$/);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (!isNaN(n) && n > nextNum) {
+          nextNum = n;
+        }
+      }
+    }
+  }
+
+  return orders.map((ord) => {
+    if (ord.rootCode && ord.rootCode.trim()) {
+      return ord;
+    }
+    nextNum += 1;
+    return {
+      ...ord,
+      rootCode: `DH-ROOT-${String(nextNum).padStart(5, '0')}`,
+    };
+  });
+}
+
+/**
+ * Hợp nhất thông minh danh sách đơn hàng giữa các thiết bị (Máy tính & Điện thoại)
+ * theo Mã gốc quy chiếu (rootCode).
+ * - Tuyệt đối không làm mất đơn hàng mới tạo từ thiết bị khác.
+ * - Bảo toàn vẹn toàn Người tạo đơn (createdById, createdByName) của nhân viên tạo đơn.
+ * - Khi cùng đơn hàng bị chỉnh sửa trên nhiều máy: lấy bản ghi có thời gian updatedAt mới nhất.
+ */
+export function mergeOrdersByRootCode(localOrders: Order[] = [], remoteOrders: Order[] = []): Order[] {
+  const map = new Map<string, Order>();
+
+  // 1. Đưa local orders vào map theo key quy chiếu (rootCode -> id -> orderCode)
+  for (const lo of localOrders) {
+    const key = lo.rootCode || lo.id || lo.orderCode;
+    map.set(key, lo);
+  }
+
+  // 2. Đối chiếu với remote orders
+  for (const ro of remoteOrders) {
+    // Tìm key tương ứng
+    let matchedKey: string | null = null;
+
+    if (ro.rootCode && map.has(ro.rootCode)) {
+      matchedKey = ro.rootCode;
+    } else if (ro.id && map.has(ro.id)) {
+      matchedKey = ro.id;
+    } else if (ro.orderCode && map.has(ro.orderCode)) {
+      matchedKey = ro.orderCode;
+    }
+
+    if (!matchedKey) {
+      // Đơn mới từ thiết bị khác -> Thêm vào map
+      const key = ro.rootCode || ro.id || ro.orderCode;
+      map.set(key, ro);
+    } else {
+      // Đơn đã tồn tại trên cả 2 thiết bị -> Quy chiếu theo mã gốc
+      const localItem = map.get(matchedKey)!;
+
+      const localTime = new Date(localItem.updatedAt || localItem.createdAt || 0).getTime();
+      const remoteTime = new Date(ro.updatedAt || ro.createdAt || 0).getTime();
+
+      // Quyết định bản ghi mới nhất
+      const isRemoteNewer = remoteTime > localTime;
+      const base = isRemoteNewer ? ro : localItem;
+      const other = isRemoteNewer ? localItem : ro;
+
+      // Bảo toàn mã gốc và thông tin người tạo đơn gốc
+      const rootCode = base.rootCode || other.rootCode || `DH-ROOT-${Date.now()}`;
+      
+      // Người tạo đơn gốc: ưu tiên giữ người tạo ban đầu (đặc biệt nếu là nhân viên bán hàng hoặc tên cụ thể)
+      let finalCreatedById = other.createdById || base.createdById;
+      let finalCreatedByName = other.createdByName || base.createdByName;
+
+      // Nếu other là bản gốc ban đầu (có createdAt sớm hơn), ưu tiên người tạo của other
+      const otherCreatedTime = new Date(other.createdAt || 0).getTime();
+      const baseCreatedTime = new Date(base.createdAt || 0).getTime();
+      if (otherCreatedTime > 0 && (baseCreatedTime === 0 || otherCreatedTime <= baseCreatedTime)) {
+        finalCreatedById = other.createdById || base.createdById;
+        finalCreatedByName = other.createdByName || base.createdByName;
+      }
+
+      // Tránh việc người tạo bị rơi vào fallback Admin nếu có nhân viên tạo
+      if (finalCreatedByName === 'Admin' && other.createdByName && other.createdByName !== 'Admin') {
+        finalCreatedByName = other.createdByName;
+        finalCreatedById = other.createdById;
+      } else if (finalCreatedByName === 'Admin' && base.createdByName && base.createdByName !== 'Admin') {
+        finalCreatedByName = base.createdByName;
+        finalCreatedById = base.createdById;
+      }
+
+      const merged: Order = {
+        ...base,
+        rootCode,
+        createdById: finalCreatedById,
+        createdByName: finalCreatedByName,
+        createdAt: other.createdAt && base.createdAt
+          ? (new Date(other.createdAt).getTime() < new Date(base.createdAt).getTime() ? other.createdAt : base.createdAt)
+          : (other.createdAt || base.createdAt || new Date().toISOString()),
+        updatedAt: isRemoteNewer ? (ro.updatedAt || new Date().toISOString()) : (localItem.updatedAt || new Date().toISOString()),
+        updatedById: isRemoteNewer ? ro.updatedById : localItem.updatedById,
+        updatedByName: isRemoteNewer ? ro.updatedByName : localItem.updatedByName,
+      };
+
+      // Cập nhật lại trong map
+      map.set(matchedKey, merged);
+      if (rootCode !== matchedKey) {
+        map.delete(matchedKey);
+        map.set(rootCode, merged);
+      }
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) => b.orderDate.localeCompare(a.orderDate) || b.createdAt.localeCompare(a.createdAt));
+}

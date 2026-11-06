@@ -58,8 +58,26 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                     : 'Đã hủy'}
                 </span>
               </div>
-              <p className="text-slate-300 text-xs mt-0.5">
-                Ngày tạo đơn: {formatDate(order.orderDate)} • Người lập: {order.createdByName}
+              <p className="text-slate-300 text-xs mt-0.5 flex items-center gap-1.5 flex-wrap">
+                <span>Ngày: {formatDate(order.orderDate)}</span>
+                <span>•</span>
+                <span>Người tạo: <strong className="text-white">{order.createdByName || '—'}</strong></span>
+                {order.rootCode && (
+                  <>
+                    <span>•</span>
+                    <span className="bg-white/20 text-white font-mono px-1.5 py-0.5 rounded text-[11px]" title="Mã gốc quy chiếu bất biến để đồng bộ đa thiết bị">
+                      Mã gốc: {order.rootCode}
+                    </span>
+                  </>
+                )}
+                {order.updatedByName && (
+                  <>
+                    <span>•</span>
+                    <span className="text-amber-200">
+                      Sửa gần nhất: {order.updatedByName}
+                    </span>
+                  </>
+                )}
               </p>
             </div>
           </div>

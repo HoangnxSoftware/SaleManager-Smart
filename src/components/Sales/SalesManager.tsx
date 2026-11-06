@@ -20,6 +20,7 @@ import {
   analyzeOrderImportCodes,
   CodeSyncDetail,
 } from '../../services/codeSyncService';
+import { generateNextRootCode } from '../../services/orderCodeService';
 import { OrderPrintModal } from '../Print/OrderPrintModal';
 import { OrderDetailsTab } from './OrderDetailsTab';
 import { ExcelDuplicateConflictModal, ConflictItem } from '../Common/ExcelDuplicateConflictModal';
@@ -433,6 +434,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
     const copied: Order = {
       ...src,
       id: `ord-${Date.now()}`,
+      rootCode: generateNextRootCode(orders),
       orderCode: newCode,
       orderDate: today,
       deliveryStatus: 'pending', // Mặc định: Chờ giao
@@ -483,6 +485,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         newOrders.push({
           ...src,
           id: `ord-${Date.now()}-${idx}`,
+          rootCode: generateNextRootCode([...orders, ...newOrders]),
           orderCode: `DH-${datePart}-${Math.floor(100 + Math.random() * 900)}`,
           orderDate: today,
           deliveryStatus: 'pending',
@@ -722,6 +725,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
 
         newOrdersList.push({
           id: `ord-imp-${Date.now()}-${Math.random()}`,
+          rootCode: generateNextRootCode([...orders, ...newOrdersList]),
           orderCode: code,
           orderDate: first['Ngày (YYYY-MM-DD)'] || new Date().toISOString().slice(0, 10),
           customerId: cust?.id || `cust-imp-${syncedCustCode}`,
@@ -1107,6 +1111,14 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                                 <span>{order.orderCode}</span>
                                 <Eye className="w-3.5 h-3.5 text-blue-400 group-hover:text-blue-700 opacity-60 group-hover:opacity-100 transition-opacity" />
                               </button>
+                              {order.rootCode && (
+                                <span
+                                  className="inline-flex items-center text-[10px] px-1.5 py-0.2 rounded font-mono font-normal bg-slate-100 text-slate-600 border border-slate-200"
+                                  title="Mã gốc quy chiếu tự sinh để đồng bộ chuẩn xác giữa các thiết bị"
+                                >
+                                  Gốc: {order.rootCode}
+                                </span>
+                              )}
                               {isOrderRedFlagged && (
                                 <span
                                   className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-black bg-rose-600 text-white shadow-2xs animate-pulse"

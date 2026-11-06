@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Product, PurchaseBill, Order } from '../../types';
+import { Product, PurchaseBill, Order, AppUser } from '../../types';
 import { formatNumber, formatCurrency } from '../../utils/formatters';
 import {
   exportProductsToExcel,
@@ -29,13 +29,16 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
-  GripVertical
+  GripVertical,
+  Eye,
+  ShieldAlert
 } from 'lucide-react';
 
 interface ProductManagerProps {
   products: Product[];
   purchases: PurchaseBill[];
   orders: Order[];
+  currentUser?: AppUser | null;
   onSaveProduct: (product: Product) => void;
   onDeleteProduct: (productId: string) => void;
   onBatchUpdateProducts: (products: Product[]) => void;
@@ -45,11 +48,15 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
   products,
   purchases,
   orders,
+  currentUser,
   onSaveProduct,
   onDeleteProduct,
   onBatchUpdateProducts,
 }) => {
   const confirm = useConfirm();
+  // REQUIREMENT: phần Danh mục sản phẩm tài khoản nhân viên bán hàng chỉ được phép xem, không được phép chỉnh sửa
+  const isReadOnly = currentUser?.role === 'salesperson';
+
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
 
@@ -441,17 +448,24 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
             <span className="font-black text-emerald-800 text-sm">{formatCurrency(inventoryTotals.totalValue)}</span>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              setEditingProduct(null);
-              setIsModalOpen(true);
-            }}
-            className="inline-flex items-center justify-center gap-2.5 px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold text-sm sm:text-base shadow-lg shadow-indigo-500/25 transition-all cursor-pointer"
-          >
-            <Plus className="w-5 h-5" />
-            <span>THÊM HÀNG HÓA MỚI</span>
-          </button>
+          {isReadOnly ? (
+            <div className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 font-bold text-xs sm:text-sm shadow-xs">
+              <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Chế độ chỉ xem giá & tồn kho (Nhân viên bán hàng)</span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setEditingProduct(null);
+                setIsModalOpen(true);
+              }}
+              className="inline-flex items-center justify-center gap-2.5 px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold text-sm sm:text-base shadow-lg shadow-indigo-500/25 transition-all cursor-pointer"
+            >
+              <Plus className="w-5 h-5" />
+              <span>THÊM HÀNG HÓA MỚI</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -610,8 +624,8 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* Batch Delete Products - Requirement 6 */}
-            {selectedProductIds.length > 0 && (
+            {/* Batch Delete Products - Only for admin/manager */}
+            {!isReadOnly && selectedProductIds.length > 0 && (
               <button
                 type="button"
                 onClick={handleBatchDeleteProducts}
@@ -623,17 +637,20 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
               </button>
             )}
 
-            {/* Download template */}
-            <button
-              type="button"
-              onClick={downloadProductTemplate}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
-              title="Tải file mẫu Excel nhập sản phẩm"
-            >
-              <Download className="w-3.5 h-3.5 text-slate-600" />
-              <span>Mẫu Excel</span>
-            </button>
+            {/* Download template - Only for admin/manager */}
+            {!isReadOnly && (
+              <button
+                type="button"
+                onClick={downloadProductTemplate}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                title="Tải file mẫu Excel nhập sản phẩm"
+              >
+                <Download className="w-3.5 h-3.5 text-slate-600" />
+                <span>Mẫu Excel</span>
+              </button>
+            )}
 
+            {/* Export Excel is available for all roles including salesperson */}
             <button
               type="button"
               onClick={() => exportProductsToExcel(filteredProducts, inventoryStockMap)}
@@ -643,16 +660,19 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
               <span>Xuất Excel</span>
             </button>
 
-            <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 cursor-pointer">
-              <Upload className="w-3.5 h-3.5" />
-              <span>Nhập Excel</span>
-              <input
-                type="file"
-                accept=".xlsx, .xls"
-                onChange={handleExcelImport}
-                className="hidden"
-              />
-            </label>
+            {/* Import Excel - Only for admin/manager */}
+            {!isReadOnly && (
+              <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 cursor-pointer">
+                <Upload className="w-3.5 h-3.5" />
+                <span>Nhập Excel</span>
+                <input
+                  type="file"
+                  accept=".xlsx, .xls"
+                  onChange={handleExcelImport}
+                  className="hidden"
+                />
+              </label>
+            )}
           </div>
         </div>
 
@@ -675,18 +695,22 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
             <thead className="bg-slate-100 text-slate-700 uppercase font-bold text-[11px] sm:text-xs">
               <tr>
                 <th className="p-3 w-10 text-center">
-                  <button
-                    type="button"
-                    onClick={handleToggleSelectAllProducts}
-                    className="cursor-pointer inline-flex items-center justify-center text-slate-500 hover:text-indigo-600"
-                    title="Chọn tất cả sản phẩm"
-                  >
-                    {selectedProductIds.length > 0 && selectedProductIds.length === filteredProducts.length ? (
-                      <CheckSquare className="w-4 h-4 text-indigo-600" />
-                    ) : (
-                      <Square className="w-4 h-4 text-slate-400" />
-                    )}
-                  </button>
+                  {!isReadOnly ? (
+                    <button
+                      type="button"
+                      onClick={handleToggleSelectAllProducts}
+                      className="cursor-pointer inline-flex items-center justify-center text-slate-500 hover:text-indigo-600"
+                      title="Chọn tất cả sản phẩm"
+                    >
+                      {selectedProductIds.length > 0 && selectedProductIds.length === filteredProducts.length ? (
+                        <CheckSquare className="w-4 h-4 text-indigo-600" />
+                      ) : (
+                        <Square className="w-4 h-4 text-slate-400" />
+                      )}
+                    </button>
+                  ) : (
+                    <span className="text-slate-300 text-xs">—</span>
+                  )}
                 </th>
                 <th className="p-3 w-10 text-left">STT</th>
                 <th className="p-3 w-20 text-center whitespace-nowrap">Thứ tự</th>
@@ -787,10 +811,10 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                   return (
                     <tr
                       key={p.id}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, p.id)}
-                      onDragOver={(e) => handleDragOver(e, p.id)}
-                      onDrop={(e) => handleDrop(e, p.id)}
+                      draggable={!isReadOnly}
+                      onDragStart={(e) => !isReadOnly && handleDragStart(e, p.id)}
+                      onDragOver={(e) => !isReadOnly && handleDragOver(e, p.id)}
+                      onDrop={(e) => !isReadOnly && handleDrop(e, p.id)}
                       onDragEnd={() => {
                         setDraggedProductId(null);
                         setDragOverProductId(null);
@@ -800,55 +824,63 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                       } ${draggedProductId === p.id ? 'opacity-40' : ''}`}
                     >
                       <td className="p-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleSelectProduct(p.id)}
-                          className="cursor-pointer inline-flex items-center justify-center text-slate-500 hover:text-indigo-600"
-                          title="Chọn sản phẩm này để xóa"
-                        >
-                          {selectedProductIds.includes(p.id) ? (
-                            <CheckSquare className="w-4 h-4 text-indigo-600" />
-                          ) : (
-                            <Square className="w-4 h-4 text-slate-400" />
-                          )}
-                        </button>
+                        {!isReadOnly ? (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSelectProduct(p.id)}
+                            className="cursor-pointer inline-flex items-center justify-center text-slate-500 hover:text-indigo-600"
+                            title="Chọn sản phẩm này để xóa"
+                          >
+                            {selectedProductIds.includes(p.id) ? (
+                              <CheckSquare className="w-4 h-4 text-indigo-600" />
+                            ) : (
+                              <Square className="w-4 h-4 text-slate-400" />
+                            )}
+                          </button>
+                        ) : (
+                          <span className="text-slate-300 text-xs">—</span>
+                        )}
                       </td>
                       <td className="p-3 text-center text-slate-400">{idx + 1}</td>
                       <td className="p-2 text-center whitespace-nowrap">
-                        <div className="inline-flex items-center justify-center gap-0.5">
-                          <button
-                            type="button"
-                            onClick={() => handleMoveProduct(p, 'up')}
-                            disabled={idx === 0}
-                            className={`p-1 rounded cursor-pointer transition-colors ${
-                              idx === 0
-                                ? 'text-slate-200 cursor-not-allowed'
-                                : 'text-slate-500 hover:text-indigo-600 hover:bg-indigo-50'
-                            }`}
-                            title="Di chuyển lên trên"
-                          >
-                            <ArrowUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleMoveProduct(p, 'down')}
-                            disabled={idx === filteredProducts.length - 1}
-                            className={`p-1 rounded cursor-pointer transition-colors ${
-                              idx === filteredProducts.length - 1
-                                ? 'text-slate-200 cursor-not-allowed'
-                                : 'text-slate-500 hover:text-indigo-600 hover:bg-indigo-50'
-                            }`}
-                            title="Di chuyển xuống dưới"
-                          >
-                            <ArrowDown className="w-3.5 h-3.5" />
-                          </button>
-                          <span
-                            className="p-1 text-slate-300 hover:text-slate-600 cursor-grab active:cursor-grabbing"
-                            title="Kéo thả dòng này để thay đổi thứ tự sản phẩm"
-                          >
-                            <GripVertical className="w-3.5 h-3.5" />
-                          </span>
-                        </div>
+                        {!isReadOnly ? (
+                          <div className="inline-flex items-center justify-center gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => handleMoveProduct(p, 'up')}
+                              disabled={idx === 0}
+                              className={`p-1 rounded cursor-pointer transition-colors ${
+                                idx === 0
+                                  ? 'text-slate-200 cursor-not-allowed'
+                                  : 'text-slate-500 hover:text-indigo-600 hover:bg-indigo-50'
+                              }`}
+                              title="Di chuyển lên trên"
+                            >
+                              <ArrowUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleMoveProduct(p, 'down')}
+                              disabled={idx === filteredProducts.length - 1}
+                              className={`p-1 rounded cursor-pointer transition-colors ${
+                                idx === filteredProducts.length - 1
+                                  ? 'text-slate-200 cursor-not-allowed'
+                                  : 'text-slate-500 hover:text-indigo-600 hover:bg-indigo-50'
+                              }`}
+                              title="Di chuyển xuống dưới"
+                            >
+                              <ArrowDown className="w-3.5 h-3.5" />
+                            </button>
+                            <span
+                              className="p-1 text-slate-300 hover:text-slate-600 cursor-grab active:cursor-grabbing"
+                              title="Kéo thả dòng này để thay đổi thứ tự sản phẩm"
+                            >
+                              <GripVertical className="w-3.5 h-3.5" />
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 text-xs font-mono">{idx + 1}</span>
+                        )}
                       </td>
                       <td className={`p-3 font-mono font-bold ${stock < 0 ? 'text-red-600' : 'text-indigo-700'}`}>{p.code}</td>
                       <td className={`p-3 font-semibold ${stock < 0 ? 'text-red-600' : 'text-slate-900'}`}>{p.name}</td>
@@ -889,37 +921,52 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                         {formatCurrency(inventoryValue)}
                       </td>
                       <td className="p-3 text-center">
-                        <div className="flex items-center justify-center gap-1">
+                        {isReadOnly ? (
                           <button
                             type="button"
                             onClick={() => {
                               setEditingProduct(p);
                               setIsModalOpen(true);
                             }}
-                            className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg cursor-pointer"
-                            title="Sửa hàng hóa"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg cursor-pointer text-xs font-semibold border border-slate-200"
+                            title="Xem chi tiết hàng hóa"
                           >
-                            <Edit className="w-4 h-4" />
+                            <Eye className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Xem</span>
                           </button>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              const ok = await confirm({
-                                title: 'Xác nhận xóa hàng hóa',
-                                message: `Bạn có chắc chắn muốn xóa sản phẩm "${p.name}" (Mã: ${p.code})?`,
-                                confirmText: 'Xóa hàng hóa',
-                                type: 'danger',
-                              });
-                              if (ok) {
-                                onDeleteProduct(p.id);
-                              }
-                            }}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
-                            title="Xóa hàng hóa"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
+                        ) : (
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingProduct(p);
+                                setIsModalOpen(true);
+                              }}
+                              className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg cursor-pointer"
+                              title="Sửa hàng hóa"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const ok = await confirm({
+                                  title: 'Xác nhận xóa hàng hóa',
+                                  message: `Bạn có chắc chắn muốn xóa sản phẩm "${p.name}" (Mã: ${p.code})?`,
+                                  confirmText: 'Xóa hàng hóa',
+                                  type: 'danger',
+                                });
+                                if (ok) {
+                                  onDeleteProduct(p.id);
+                                }
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                              title="Xóa hàng hóa"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
@@ -954,6 +1001,7 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
           initialProduct={editingProduct}
           existingCount={products.length}
           existingProducts={products}
+          isReadOnly={isReadOnly}
         />
       )}
 

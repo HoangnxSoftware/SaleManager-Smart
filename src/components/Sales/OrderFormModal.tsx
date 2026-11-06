@@ -24,7 +24,7 @@ import {
   Edit,
   RefreshCw,
 } from 'lucide-react';
-import { DEFAULT_ORDER_CODE_RULES, generateNextOrderCode, matchOrderToRule } from '../../services/orderCodeService';
+import { DEFAULT_ORDER_CODE_RULES, generateNextOrderCode, matchOrderToRule, generateNextRootCode } from '../../services/orderCodeService';
 import { ChangeProductModal } from './ChangeProductModal';
 
 interface OrderFormModalProps {
@@ -522,20 +522,34 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
       return;
     }
 
-    // Determine creator ID and Name
-    let finalCreatedById = initialOrder?.createdById || currentUser.id;
-    let finalCreatedByName = createdByName.trim() || (initialOrder ? initialOrder.createdByName : currentUser.fullName) || 'Admin';
+    // 1. Mã gốc quy chiếu (rootCode): Bất biến khi thêm, sửa, xóa
+    const finalRootCode = initialOrder?.rootCode || generateNextRootCode(allOrders);
 
-    if (selectedUserId && selectedUserId !== 'custom') {
-      finalCreatedById = selectedUserId;
+    // 2. Bảo toàn vẹn toàn Người tạo đơn gốc ban đầu
+    let finalCreatedById = initialOrder?.createdById;
+    let finalCreatedByName = initialOrder?.createdByName;
+
+    if (!finalCreatedById || !finalCreatedByName) {
+      if (selectedUserId && selectedUserId !== 'custom') {
+        finalCreatedById = selectedUserId;
+        const matchedUser = users.find((u) => u.id === selectedUserId);
+        finalCreatedByName = matchedUser?.fullName || matchedUser?.username || currentUser.fullName || 'Admin';
+      } else {
+        finalCreatedById = currentUser.id;
+        finalCreatedByName = createdByName.trim() || currentUser.fullName || 'Admin';
+      }
+    } else if (selectedUserId && selectedUserId !== 'custom' && selectedUserId !== initialOrder?.createdById) {
+      // Chỉ khi người dùng chủ động chọn đổi nhân viên tạo đơn khác
       const matchedUser = users.find((u) => u.id === selectedUserId);
       if (matchedUser) {
+        finalCreatedById = selectedUserId;
         finalCreatedByName = matchedUser.fullName || matchedUser.username;
       }
     }
 
     const newOrder: Order = {
       id: initialOrder ? initialOrder.id : `ord-${Date.now()}`,
+      rootCode: finalRootCode,
       orderCode: orderCode.trim() || `DH-${Date.now()}`,
       orderDate,
       customerId: selectedCustomer.id,

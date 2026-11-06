@@ -10,7 +10,7 @@ import {
   PurchaseBill,
   DebtPayment,
 } from '../types';
-import { DEFAULT_ORDER_CODE_RULES } from './orderCodeService';
+import { DEFAULT_ORDER_CODE_RULES, ensureOrdersHaveRootCode, mergeOrdersByRootCode } from './orderCodeService';
 import { INITIAL_USERS, DEFAULT_SETTINGS } from './storage';
 
 // Initialize Firebase if not already initialized
@@ -414,14 +414,55 @@ export async function syncDataToGoogleSheets(
     ])
   ];
 
-  // 5. Orders
+  // 5. Orders - Lưu trữ đầy đủ Mã gốc quy chiếu và Người tạo đơn ban đầu
+  const processedOrders = ensureOrdersHaveRootCode(data.orders);
   const orderRows: string[][] = [
-    ['Mã đơn', 'Ngày', 'Mã KH', 'Tên KH', 'MST', 'CCCD', 'Địa chỉ', 'Tổng trước thuế', 'Chiết khấu đơn', 'Thuế GTGT', 'Tổng thanh toán', 'Đã trả', 'Còn nợ', 'PT thanh toán', 'Trạng thái giao', 'Ghi chú', 'Chi tiết mặt hàng (JSON)'],
-    ...data.orders.map(o => [
-      o.orderCode, o.orderDate, o.customerCode, o.customerName, o.customerTaxCode, o.customerIdCard, o.customerAddress,
-      String(o.totalPreTax), String(o.orderDiscount), String(o.totalVat), String(o.totalAmount), String(o.paidAmount), String(o.debtAmount),
-      o.paymentMethod, o.deliveryStatus, o.notes || '', JSON.stringify(o.items)
-    ])
+    [
+      'Mã đơn',
+      'Mã gốc quy chiếu',
+      'Ngày',
+      'Mã KH',
+      'Tên KH',
+      'MST',
+      'CCCD',
+      'Địa chỉ',
+      'Tổng trước thuế',
+      'Chiết khấu đơn',
+      'Thuế GTGT',
+      'Tổng thanh toán',
+      'Đã trả',
+      'Còn nợ',
+      'PT thanh toán',
+      'Trạng thái giao',
+      'Người tạo đơn / Bán hàng',
+      'Mã người tạo',
+      'Người sửa gần nhất',
+      'Ghi chú',
+      'Chi tiết mặt hàng (JSON)',
+    ],
+    ...processedOrders.map((o) => [
+      o.orderCode,
+      o.rootCode || '',
+      o.orderDate,
+      o.customerCode,
+      o.customerName,
+      o.customerTaxCode,
+      o.customerIdCard,
+      o.customerAddress,
+      String(o.totalPreTax),
+      String(o.orderDiscount),
+      String(o.totalVat),
+      String(o.totalAmount),
+      String(o.paidAmount),
+      String(o.debtAmount),
+      o.paymentMethod,
+      o.deliveryStatus,
+      o.createdByName || '',
+      o.createdById || '',
+      o.updatedByName || '',
+      o.notes || '',
+      JSON.stringify(o.items),
+    ]),
   ];
 
   // 6. Purchases
@@ -694,6 +735,7 @@ export async function loadDataFromGoogleSheets(
     };
 
     const idxCode = getColIdx(['mã đơn', 'mã đơn hàng', 'số đơn', 'số chứng từ', 'code'], 0);
+    const idxRootCode = getColIdx(['mã gốc quy chiếu', 'mã gốc', 'rootcode', 'root_code', 'root'], -1);
     const idxDate = getColIdx(['ngày', 'ngày đơn', 'date'], 1);
     const idxCustCode = getColIdx(['mã kh', 'mã khách hàng', 'mã khách'], 2);
     const idxCustName = getColIdx(['tên kh', 'tên khách hàng', 'tên khách'], 3);
@@ -708,6 +750,9 @@ export async function loadDataFromGoogleSheets(
     const idxDebt = getColIdx(['còn nợ', 'nợ', 'debt'], 12);
     const idxMethod = getColIdx(['pt thanh toán', 'phương thức', 'hình thức', 'payment'], 13);
     const idxStatus = getColIdx(['trạng thái', 'tình trạng', 'status'], 14);
+    const idxCreatedByName = getColIdx(['người tạo đơn / bán hàng', 'người tạo đơn', 'người bán hàng', 'nhân viên bán hàng', 'người tạo', 'createdbyname'], -1);
+    const idxCreatedById = getColIdx(['mã người tạo', 'id người tạo', 'createdbyid'], -1);
+    const idxUpdatedByName = getColIdx(['người sửa gần nhất', 'người sửa', 'updatedbyname'], -1);
     const idxNotes = getColIdx(['ghi chú', 'notes'], 15);
     const idxItems = getColIdx(['chi tiết mặt hàng', 'chi tiết', 'items'], 16);
 
@@ -731,6 +776,7 @@ export async function loadDataFromGoogleSheets(
       }
 
       const ordDate = String(r[idxDate] || r[1] || '').trim() || new Date().toISOString().slice(0, 10);
+      const rootCode = idxRootCode !== -1 && r[idxRootCode] ? String(r[idxRootCode]).trim() : '';
       const custCode = String(r[idxCustCode] || r[2] || '').trim();
       const custName = String(r[idxCustName] || r[3] || '').trim();
       const custTax = String(r[idxTax] || r[4] || '').trim();
@@ -744,6 +790,9 @@ export async function loadDataFromGoogleSheets(
       const debt = Number(r[idxDebt] !== undefined ? r[idxDebt] : r[12]) || 0;
       const pMethod = ((r[idxMethod] !== undefined ? r[idxMethod] : r[13]) || 'cash') as any;
       const dStatus = ((r[idxStatus] !== undefined ? r[idxStatus] : r[14]) || 'pending') as any;
+      const createdByName = idxCreatedByName !== -1 && r[idxCreatedByName] ? String(r[idxCreatedByName]).trim() : '';
+      const createdById = idxCreatedById !== -1 && r[idxCreatedById] ? String(r[idxCreatedById]).trim() : '';
+      const updatedByName = idxUpdatedByName !== -1 && r[idxUpdatedByName] ? String(r[idxUpdatedByName]).trim() : '';
       const notes = String((r[idxNotes] !== undefined ? r[idxNotes] : r[15]) || '');
 
       let items: any[] = [];
@@ -780,6 +829,7 @@ export async function loadDataFromGoogleSheets(
 
       parsedSheetOrders.push({
         id: `ord-${code}`,
+        rootCode: rootCode || undefined,
         orderCode: code,
         orderDate: ordDate,
         customerId: `cust-${custCode || 'unknown'}`,
@@ -800,8 +850,9 @@ export async function loadDataFromGoogleSheets(
         debtAmount: debt,
         deliveryStatus: dStatus,
         notes,
-        createdById: 'admin-1',
-        createdByName: 'Admin',
+        createdById: createdById || '',
+        createdByName: createdByName || '',
+        updatedByName: updatedByName || '',
         createdAt: ordDate + 'T08:00:00.000Z',
         updatedAt: ordDate + 'T08:00:00.000Z',
       });
@@ -953,28 +1004,11 @@ export async function loadDataFromGoogleSheets(
 
   if (parsedFromJson) {
     finalResult = parsedFromJson;
-    // CRITICAL: If sheet tab 'Orders' has orders, ensure they are present in finalResult!
+    // CRITICAL: Hợp nhất thông minh theo Mã gốc quy chiếu (rootCode)
     if (parsedSheetOrders.length > 0) {
-      if (!finalResult.orders || finalResult.orders.length === 0) {
-        finalResult.orders = parsedSheetOrders;
-      } else {
-        const existingCodes = new Set(finalResult.orders.map((o) => o.orderCode));
-        const missing = parsedSheetOrders.filter((o) => !existingCodes.has(o.orderCode));
-        if (missing.length > 0) {
-          finalResult.orders = [...finalResult.orders, ...missing];
-        }
-        // Update any existing orders that might have been updated directly on Google Sheets
-        parsedSheetOrders.forEach((so) => {
-          const idx = finalResult.orders.findIndex((o) => o.orderCode === so.orderCode);
-          if (idx !== -1) {
-            finalResult.orders[idx] = {
-              ...finalResult.orders[idx],
-              ...so,
-              items: (finalResult.orders[idx].items && finalResult.orders[idx].items.length > 0) ? finalResult.orders[idx].items : so.items,
-            };
-          }
-        });
-      }
+      finalResult.orders = mergeOrdersByRootCode(finalResult.orders || [], parsedSheetOrders);
+    } else {
+      finalResult.orders = ensureOrdersHaveRootCode(finalResult.orders || []);
     }
     // Also merge other entities if sheet tab has rows but backup was empty
     if (parsedSheetPurchases.length > 0 && (!finalResult.purchases || finalResult.purchases.length === 0)) {

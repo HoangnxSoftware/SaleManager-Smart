@@ -49,7 +49,7 @@ import { GoogleSheetsSyncModal } from './components/Common/GoogleSheetsSyncModal
 import { AuditLogModal } from './components/Common/AuditLogModal';
 import { DeviceConflictModal } from './components/Common/DeviceConflictModal';
 import { AlertTriangle } from 'lucide-react';
-import { resequenceOrders, DEFAULT_ORDER_CODE_RULES } from './services/orderCodeService';
+import { resequenceOrders, DEFAULT_ORDER_CODE_RULES, mergeOrdersByRootCode } from './services/orderCodeService';
 import {
   getCurrentDeviceName,
   setCurrentDeviceName,
@@ -825,11 +825,19 @@ export default function App() {
           console.log('Detected remote update on Google Sheets from another device. Reloading data...');
           const restored = await loadDataFromGoogleSheets(token, data.spreadsheetId!);
           if (restored) {
-            setData(restored);
-            saveData(restored, selectedDbId);
+            setData((prev) => {
+              const mergedOrders = mergeOrdersByRootCode(prev.orders, restored.orders);
+              const merged: AppData = {
+                ...restored,
+                orders: mergedOrders,
+                activeSessions: prev.activeSessions,
+              };
+              saveData(merged, selectedDbId);
+              return merged;
+            });
             setGlobalBanner({
               type: 'success',
-              message: `🔄 Đã tự động cập nhật dữ liệu mới từ Google Sheets (thiết bị khác) lúc ${new Date(meta.lastSyncedAt).toLocaleTimeString('vi-VN')}!`,
+              message: `🔄 Đã tự động đồng bộ đơn hàng mới từ Google Sheets (thiết bị khác) lúc ${new Date(meta.lastSyncedAt).toLocaleTimeString('vi-VN')}!`,
             });
           }
         }
@@ -1035,6 +1043,7 @@ export default function App() {
               products={data.products}
               purchases={data.purchases}
               orders={data.orders}
+              currentUser={currentUser}
               onSaveProduct={handleSaveProduct}
               onDeleteProduct={handleDeleteProduct}
               onBatchUpdateProducts={handleBatchUpdateProducts}

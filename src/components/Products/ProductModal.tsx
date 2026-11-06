@@ -9,6 +9,7 @@ interface ProductModalProps {
   initialProduct?: Product | null;
   existingCount?: number;
   existingProducts?: Product[];
+  isReadOnly?: boolean;
 }
 
 export const ProductModal: React.FC<ProductModalProps> = ({
@@ -18,6 +19,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   initialProduct,
   existingCount = 0,
   existingProducts = [],
+  isReadOnly = false,
 }) => {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
@@ -118,6 +120,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isReadOnly) {
+      onClose();
+      return;
+    }
     if (!code.trim() || !name.trim()) return;
 
     const trimmedCode = code.trim().toUpperCase();
@@ -164,17 +170,27 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/80 backdrop-blur-xs overflow-y-auto">
       <div className="relative w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-6">
         {/* Header */}
-        <div className="bg-gradient-to-r from-indigo-700 to-purple-700 p-5 text-white flex items-center justify-between">
+        <div className={`p-5 text-white flex items-center justify-between ${
+          isReadOnly
+            ? 'bg-gradient-to-r from-slate-700 to-indigo-800'
+            : 'bg-gradient-to-r from-indigo-700 to-purple-700'
+        }`}>
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-xl bg-white/20">
               <Package className="w-5 h-5 text-white" />
             </div>
             <div>
               <h2 className="text-lg font-bold">
-                {isEditMode ? 'Cập nhật thông tin Hàng Hóa' : 'Thêm mới Hàng Hóa'}
+                {isReadOnly
+                  ? 'Chi tiết Hàng Hóa (Chỉ xem)'
+                  : isEditMode
+                  ? 'Cập nhật thông tin Hàng Hóa'
+                  : 'Thêm mới Hàng Hóa'}
               </h2>
               <p className="text-indigo-100 text-xs">
-                Mã HH, ĐVT mua/bán, tỷ lệ quy đổi và tỷ suất lợi nhuận
+                {isReadOnly
+                  ? 'Tài khoản nhân viên bán hàng chỉ có quyền tra cứu thông tin và giá bán'
+                  : 'Mã HH, ĐVT mua/bán, tỷ lệ quy đổi và tỷ suất lợi nhuận'}
               </p>
             </div>
           </div>
@@ -187,7 +203,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         </div>
 
         {/* Duplicate Code Alert Banner */}
-        {duplicateWarning && (
+        {duplicateWarning && !isReadOnly && (
           <div className="p-3.5 bg-rose-50 border-b border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-rose-900">
             <div className="flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
@@ -209,7 +225,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         )}
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <fieldset disabled={isReadOnly} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Mã HH <span className="text-rose-500">*</span>
@@ -394,6 +411,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm"
             />
           </div>
+          </fieldset>
 
           <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-3">
             <button
@@ -401,15 +419,17 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               onClick={onClose}
               className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
             >
-              Hủy
+              {isReadOnly ? 'Đóng' : 'Hủy'}
             </button>
-            <button
-              type="submit"
-              className="flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md cursor-pointer"
-            >
-              <Save className="w-4 h-4" />
-              <span>{isEditMode ? 'Cập nhật thông tin' : 'Lưu hàng hóa'}</span>
-            </button>
+            {!isReadOnly && (
+              <button
+                type="submit"
+                className="flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md cursor-pointer"
+              >
+                <Save className="w-4 h-4" />
+                <span>{isEditMode ? 'Cập nhật thông tin' : 'Lưu hàng hóa'}</span>
+              </button>
+            )}
           </div>
         </form>
       </div>

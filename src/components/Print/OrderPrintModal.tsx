@@ -258,6 +258,9 @@ function generateOrderPrintHtml(orders: Order[], settings: AppSettings): string 
 <head>
   <meta charset="UTF-8">
   <title>Bản In Hóa Đơn - ${orders.map((o) => o.orderCode).join(', ')}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     @page {
       size: A4 portrait;
@@ -269,7 +272,7 @@ function generateOrderPrintHtml(orders: Order[], settings: AppSettings): string 
       print-color-adjust: exact !important;
     }
     body {
-      font-family: 'Calibri', 'Carlito', Arial, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       font-size: 11.5px;
       color: #0f172a;
       background: #ffffff;
