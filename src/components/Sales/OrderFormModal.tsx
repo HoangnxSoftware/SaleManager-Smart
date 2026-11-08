@@ -584,36 +584,38 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/80 backdrop-blur-xs overflow-y-auto">
-      <div className="relative w-full max-w-6xl xl:max-w-7xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-4 flex flex-col max-h-[95vh]">
+    <div className="fixed inset-0 z-50 flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 bg-slate-900/80 backdrop-blur-xs overflow-hidden sm:overflow-y-auto">
+      <div className="relative w-full h-[100dvh] sm:h-auto sm:max-h-[95vh] max-w-full sm:max-w-6xl xl:max-w-7xl bg-white rounded-none sm:rounded-2xl shadow-2xl border-0 sm:border border-slate-200 flex flex-col overflow-hidden my-0 sm:my-4">
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 p-4 sm:p-5 text-white flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-white/20 shadow-inner">
-              <ShoppingCart className="w-6 h-6 text-white" />
+        <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 px-3.5 py-3 sm:p-5 text-white flex items-center justify-between shrink-0 rounded-none sm:rounded-t-2xl z-20">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 pr-2">
+            <div className="p-2 sm:p-2.5 rounded-xl bg-white/20 shadow-inner shrink-0">
+              <ShoppingCart className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
             </div>
-            <div>
-              <h2 className="text-lg sm:text-xl font-bold">
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-xl font-bold truncate">
                 {initialOrder ? `Chỉnh sửa Đơn hàng: ${initialOrder.orderCode}` : 'Tạo mới Đơn hàng'}
               </h2>
-              <p className="text-blue-100 text-xs">
+              <p className="text-blue-100 text-[11px] sm:text-xs truncate">
                 Mã đơn: <span className="font-mono font-semibold">{orderCode}</span> • Ngày: {formatDate(orderDate)}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-blue-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            type="button"
+            className="p-2 -mr-1 rounded-xl text-blue-200 hover:text-white hover:bg-white/10 active:bg-white/20 transition-colors cursor-pointer shrink-0"
+            aria-label="Đóng cửa sổ"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
         </div>
 
         {/* Scrollable Body */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-6">
+        <div className="p-3 sm:p-6 overflow-y-auto overflow-x-hidden space-y-4 sm:space-y-6 flex-1 overscroll-contain">
           {/* Top Bar: Order Code & Rule & Date */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
-            <div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3 bg-slate-50 p-3 sm:p-3.5 rounded-xl border border-slate-200 min-w-0">
+            <div className="min-w-0">
               <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
                 Quy tắc tạo mã:
               </label>
@@ -630,7 +632,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                 ))}
               </select>
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center justify-between mb-1">
                 <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
                   Mã đơn hàng:
@@ -652,7 +654,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                 className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-sm font-mono font-bold text-slate-800"
               />
             </div>
-            <div>
+            <div className="min-w-0">
               <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
                 Ngày đặt hàng:
               </label>
@@ -663,7 +665,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                 className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-800"
               />
             </div>
-            <div>
+            <div className="min-w-0">
               <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
                 Người tạo đơn / Bán hàng:
               </label>
@@ -704,7 +706,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                 )}
               </div>
             </div>
-            <div>
+            <div className="min-w-0">
               <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
                 Trạng thái giao hàng (Mặc định: Chờ giao):
               </label>
@@ -1759,21 +1761,21 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
+        <div className="p-3 sm:p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2 shrink-0 rounded-none sm:rounded-b-2xl z-20">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 bg-white hover:bg-slate-100 rounded-xl border border-slate-300 transition-colors cursor-pointer"
+            className="px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-semibold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 rounded-xl border border-slate-300 transition-colors cursor-pointer shrink-0"
           >
             Đóng / Hủy
           </button>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={handleSaveOrder}
-              className="flex items-center gap-2 px-6 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
+              className="flex items-center justify-center gap-1.5 sm:gap-2 px-4 sm:px-6 py-2.5 text-xs sm:text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
             >
-              <CheckCircle2 className="w-5 h-5" />
+              <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
               <span>{initialOrder ? 'Cập nhật đơn hàng' : 'Lưu đơn hàng'}</span>
             </button>
           </div>

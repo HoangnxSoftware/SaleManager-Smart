@@ -161,26 +161,28 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/80 backdrop-blur-xs overflow-y-auto">
-      <div className="relative w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-6">
+    <div className="fixed inset-0 z-50 flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 bg-slate-900/80 backdrop-blur-xs overflow-hidden sm:overflow-y-auto">
+      <div className="relative w-full h-[100dvh] sm:h-auto sm:max-h-[92vh] max-w-full sm:max-w-xl bg-white rounded-none sm:rounded-2xl shadow-2xl border-0 sm:border border-slate-200 overflow-hidden my-0 sm:my-6 flex flex-col">
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-700 to-indigo-700 p-5 text-white flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-white/20">
+        <div className="bg-gradient-to-r from-blue-700 to-indigo-700 px-3.5 py-3 sm:p-5 text-white flex items-center justify-between shrink-0 rounded-none sm:rounded-t-2xl z-20">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 pr-2">
+            <div className="p-2 sm:p-2.5 rounded-xl bg-white/20 shrink-0">
               <User className="w-5 h-5 text-white" />
             </div>
-            <div>
-              <h2 className="text-lg font-bold">
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-lg font-bold truncate">
                 {isEditMode ? 'Cập nhật thông tin Khách hàng' : 'Thêm mới Khách hàng'}
               </h2>
-              <p className="text-blue-100 text-xs">
-                Quản lý thông tin định danh, MST, CCCD và liên hệ (Tên mặc định viết hoa)
+              <p className="text-blue-100 text-[11px] sm:text-xs truncate">
+                Quản lý thông tin định danh, MST, CCCD và liên hệ
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg text-blue-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            type="button"
+            className="p-2 -mr-1 rounded-lg text-blue-200 hover:text-white hover:bg-white/10 active:bg-white/20 transition-colors cursor-pointer shrink-0"
+            aria-label="Đóng"
           >
             <X className="w-5 h-5" />
           </button>
@@ -209,7 +211,7 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
         )}
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 overscroll-contain">
           {/* Customer Type Choice */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">

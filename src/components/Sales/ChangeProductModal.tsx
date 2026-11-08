@@ -112,22 +112,22 @@ export const ChangeProductModal: React.FC<ChangeProductModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-60 flex items-center justify-center p-3 sm:p-4 bg-slate-900/80 backdrop-blur-xs overflow-y-auto">
-      <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-4 flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-60 flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 bg-slate-900/80 backdrop-blur-xs overflow-hidden sm:overflow-y-auto">
+      <div className="relative w-full h-[100dvh] sm:h-auto sm:max-h-[90vh] max-w-full sm:max-w-3xl bg-white rounded-none sm:rounded-2xl shadow-2xl border-0 sm:border border-slate-200 overflow-hidden my-0 sm:my-4 flex flex-col">
         {/* Header */}
-        <div className="bg-gradient-to-r from-indigo-700 via-indigo-800 to-purple-800 p-4 sm:p-5 text-white flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-white/20 shadow-xs">
+        <div className="bg-gradient-to-r from-indigo-700 via-indigo-800 to-purple-800 px-3.5 py-3 sm:p-5 text-white flex items-center justify-between shrink-0 rounded-none sm:rounded-t-2xl z-20">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 pr-2">
+            <div className="p-2 sm:p-2.5 rounded-xl bg-white/20 shadow-xs shrink-0">
               <RefreshCw className="w-5 h-5 text-white animate-spin-reverse" />
             </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-bold flex items-center gap-2">
-                <span>Đổi mặt hàng đã chọn</span>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/50 text-indigo-100 border border-indigo-400/40">
+            <div className="min-w-0">
+              <h2 className="text-sm sm:text-lg font-bold flex items-center gap-1.5 sm:gap-2 truncate">
+                <span>Đổi mặt hàng</span>
+                <span className="text-[10px] sm:text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/50 text-indigo-100 border border-indigo-400/40 shrink-0">
                   Dòng #{itemIndex + 1}
                 </span>
               </h2>
-              <p className="text-indigo-100 text-xs mt-0.5">
+              <p className="text-indigo-100 text-[11px] sm:text-xs mt-0.5 truncate">
                 Chọn mặt hàng mới thay thế cho mặt hàng hiện tại trong đơn hàng
               </p>
             </div>
@@ -135,9 +135,10 @@ export const ChangeProductModal: React.FC<ChangeProductModalProps> = ({
           <button
             onClick={onClose}
             type="button"
-            className="p-2 rounded-lg text-indigo-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            className="p-2 -mr-1 rounded-lg text-indigo-200 hover:text-white hover:bg-white/10 active:bg-white/20 transition-colors cursor-pointer shrink-0"
+            aria-label="Đóng"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
         </div>
 

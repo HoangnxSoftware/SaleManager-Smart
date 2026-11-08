@@ -25,10 +25,10 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   if (!isOpen || !order) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/80 backdrop-blur-xs overflow-y-auto">
-      <div className="relative w-full max-w-5xl xl:max-w-6xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-4 max-h-[92vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 bg-slate-900/80 backdrop-blur-xs overflow-hidden sm:overflow-y-auto">
+      <div className="relative w-full h-[100dvh] sm:h-auto sm:max-h-[92vh] max-w-full sm:max-w-5xl xl:max-w-6xl bg-white rounded-none sm:rounded-2xl shadow-2xl border-0 sm:border border-slate-200 overflow-hidden my-0 sm:my-4 flex flex-col">
         {/* Header */}
-        <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 p-4 sm:p-5 text-white flex items-center justify-between shrink-0">
+        <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 px-3.5 py-3 sm:p-5 text-white flex items-center justify-between shrink-0 rounded-none sm:rounded-t-2xl z-20">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl bg-white/10">
               <FileText className="w-6 h-6 text-blue-400" />

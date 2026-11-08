@@ -482,17 +482,37 @@ export async function syncDataToGoogleSheets(
     ])
   ];
 
+function getColumnLetter(colIndex: number): string {
+  let temp = colIndex;
+  let letter = '';
+  while (temp > 0) {
+    const mod = (temp - 1) % 26;
+    letter = String.fromCharCode(65 + mod) + letter;
+    temp = Math.floor((temp - mod) / 26);
+  }
+  return letter || 'A';
+}
+
+function getSheetRange(tabName: string, rows: (string | number)[][], minRows = 100): string {
+  const colCount = Math.max(1, rows[0]?.length || 1);
+  const colLetter = getColumnLetter(colCount);
+  const rowCount = Math.max(minRows, rows.length + 5);
+  return `'${tabName}'!A1:${colLetter}${rowCount}`;
+}
+
   // Send batch clear & write to spreadsheet formatted entirely as text
+  // Dynamically compute exact range for each tab (e.g. Orders has 21 columns -> A1:U...)
+  // to avoid Google Sheets 400 error: 'Requested writing within range, but tried writing to column'
   const payload = {
     valueInputOption: 'RAW',
     data: [
-      { range: `Metadata!A1:C${Math.max(100, metadataRows.length + 5)}`, values: metadataRows.map(toTextRow) },
-      { range: `Customers!A1:J${Math.max(500, customerRows.length + 5)}`, values: customerRows.map(toTextRow) },
-      { range: `Suppliers!A1:H${Math.max(500, supplierRows.length + 5)}`, values: supplierRows.map(toTextRow) },
-      { range: `Products!A1:I${Math.max(500, productRows.length + 5)}`, values: productRows.map(toTextRow) },
-      { range: `Orders!A1:Q${Math.max(1000, orderRows.length + 5)}`, values: orderRows.map(toTextRow) },
-      { range: `Purchases!A1:K${Math.max(1000, purchaseRows.length + 5)}`, values: purchaseRows.map(toTextRow) },
-      { range: `DebtPayments!A1:H${Math.max(1000, debtRows.length + 5)}`, values: debtRows.map(toTextRow) },
+      { range: getSheetRange('Metadata', metadataRows, 100), values: metadataRows.map(toTextRow) },
+      { range: getSheetRange('Customers', customerRows, 500), values: customerRows.map(toTextRow) },
+      { range: getSheetRange('Suppliers', supplierRows, 500), values: supplierRows.map(toTextRow) },
+      { range: getSheetRange('Products', productRows, 500), values: productRows.map(toTextRow) },
+      { range: getSheetRange('Orders', orderRows, 1000), values: orderRows.map(toTextRow) },
+      { range: getSheetRange('Purchases', purchaseRows, 1000), values: purchaseRows.map(toTextRow) },
+      { range: getSheetRange('DebtPayments', debtRows, 1000), values: debtRows.map(toTextRow) },
     ],
   };
 

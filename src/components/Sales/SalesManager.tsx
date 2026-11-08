@@ -102,6 +102,53 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
   const [salespersonFilter, setSalespersonFilter] = useState<string>('all');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
+  const [activeDatePreset, setActiveDatePreset] = useState<string>('all');
+
+  const handleApplyDatePreset = (preset: string) => {
+    setActiveDatePreset(preset);
+    const now = new Date();
+    const formatYMD = (d: Date) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+
+    if (preset === 'today') {
+      const today = formatYMD(now);
+      setStartDate(today);
+      setEndDate(today);
+    } else if (preset === 'yesterday') {
+      const yest = new Date(now);
+      yest.setDate(yest.getDate() - 1);
+      const yestStr = formatYMD(yest);
+      setStartDate(yestStr);
+      setEndDate(yestStr);
+    } else if (preset === 'last_7_days') {
+      const past = new Date(now);
+      past.setDate(past.getDate() - 6);
+      setStartDate(formatYMD(past));
+      setEndDate(formatYMD(now));
+    } else if (preset === 'this_month') {
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      setStartDate(formatYMD(firstDay));
+      setEndDate(formatYMD(lastDay));
+    } else if (preset === 'last_month') {
+      const firstDay = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastDay = new Date(now.getFullYear(), now.getMonth(), 0);
+      setStartDate(formatYMD(firstDay));
+      setEndDate(formatYMD(lastDay));
+    } else if (preset === 'this_year') {
+      const firstDay = new Date(now.getFullYear(), 0, 1);
+      const lastDay = new Date(now.getFullYear(), 11, 31);
+      setStartDate(formatYMD(firstDay));
+      setEndDate(formatYMD(lastDay));
+    } else {
+      setStartDate('');
+      setEndDate('');
+    }
+  };
 
   // Helper tra cứu chính xác người tạo đơn từ danh mục tài khoản / nhân viên
   const getOrderCreator = (order: Order) => {
@@ -844,25 +891,35 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         <div className="space-y-4">
           {/* Controls & Batch Action Bar */}
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            {/* Top filter row: Search, Status, Salesperson */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3">
               {/* Search */}
-              <div className="sm:col-span-2 relative">
+              <div className="sm:col-span-2 lg:col-span-6 relative">
                 <input
                   type="text"
                   placeholder="Tìm theo Mã đơn, Tên KH, Mã KH, Người tạo đơn..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500"
+                  className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 shadow-2xs"
                 />
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm('')}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
               </div>
 
               {/* Status filter */}
-              <div>
+              <div className="lg:col-span-3">
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm bg-white cursor-pointer"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm bg-white cursor-pointer shadow-2xs font-medium text-slate-700"
                 >
                   <option value="all">Tất cả trạng thái</option>
                   <option value="red_flagged">🚨 Báo đỏ (Chưa có trong danh mục)</option>
@@ -874,11 +931,11 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
               </div>
 
               {/* Salesperson filter */}
-              <div>
+              <div className="lg:col-span-3">
                 <select
                   value={salespersonFilter}
                   onChange={(e) => setSalespersonFilter(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm bg-white cursor-pointer"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm bg-white cursor-pointer shadow-2xs font-medium text-slate-700"
                   title="Lọc theo người tạo đơn/bán hàng"
                 >
                   <option value="all">Tất cả người tạo đơn</option>
@@ -889,38 +946,90 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                   ))}
                 </select>
               </div>
+            </div>
 
-              {/* Date range filter */}
-              <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-300">
-                <span className="text-[11px] font-semibold text-slate-500 pl-1">Từ:</span>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full px-1.5 py-1 text-xs border border-slate-200 rounded-lg bg-white"
-                  title="Từ ngày"
-                />
-                <span className="text-[11px] font-semibold text-slate-500">Đến:</span>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full px-1.5 py-1 text-xs border border-slate-200 rounded-lg bg-white"
-                  title="Đến ngày"
-                />
-                {(startDate || endDate) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStartDate('');
-                      setEndDate('');
+            {/* Redesigned Date Filter Strip: Presets & Custom Date Range */}
+            <div className="p-3 bg-gradient-to-r from-slate-50 via-blue-50/30 to-indigo-50/20 rounded-xl border border-slate-200/80 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+              {/* Presets Pills */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 mr-1 shrink-0">
+                  <Calendar className="w-4 h-4 text-blue-600" />
+                  <span>Thời gian:</span>
+                </div>
+                {[
+                  { id: 'all', label: 'Tất cả' },
+                  { id: 'today', label: 'Hôm nay' },
+                  { id: 'yesterday', label: 'Hôm qua' },
+                  { id: 'last_7_days', label: '7 ngày qua' },
+                  { id: 'this_month', label: 'Tháng này' },
+                  { id: 'last_month', label: 'Tháng trước' },
+                  { id: 'this_year', label: 'Năm nay' },
+                ].map((p) => {
+                  const isSelected = activeDatePreset === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => handleApplyDatePreset(p.id)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-blue-600 text-white shadow-xs font-bold ring-2 ring-blue-500/20'
+                          : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200/80'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Exact Date Inputs + Reset + Count indicator */}
+              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
+                <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-lg border border-slate-300 shadow-2xs">
+                  <span className="text-[11px] font-semibold text-slate-500 shrink-0">Từ ngày:</span>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => {
+                      setStartDate(e.target.value);
+                      setActiveDatePreset('custom');
                     }}
-                    className="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
-                    title="Xóa lọc ngày"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
+                    className="text-xs font-medium text-slate-800 bg-transparent focus:outline-hidden"
+                    title="Từ ngày"
+                  />
+                  <span className="text-slate-400 font-bold text-xs">➔</span>
+                  <span className="text-[11px] font-semibold text-slate-500 shrink-0">Đến ngày:</span>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => {
+                      setEndDate(e.target.value);
+                      setActiveDatePreset('custom');
+                    }}
+                    className="text-xs font-medium text-slate-800 bg-transparent focus:outline-hidden"
+                    title="Đến ngày"
+                  />
+                  {(startDate || endDate) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStartDate('');
+                        setEndDate('');
+                        setActiveDatePreset('all');
+                      }}
+                      className="p-0.5 text-slate-400 hover:text-rose-600 rounded-md cursor-pointer transition-colors"
+                      title="Xóa lọc ngày (xem tất cả)"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white border border-slate-200 text-slate-700 shadow-2xs shrink-0">
+                  <span className="text-slate-400 font-normal">Đang xem:</span>
+                  <span className="text-blue-700 font-bold font-mono">{filteredOrders.length}</span>
+                  <span className="text-slate-500 font-normal">/ {orders.length} đơn</span>
+                </div>
               </div>
             </div>
 
