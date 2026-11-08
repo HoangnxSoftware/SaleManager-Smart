@@ -20,7 +20,7 @@ import {
   analyzeOrderImportCodes,
   CodeSyncDetail,
 } from '../../services/codeSyncService';
-import { generateNextRootCode } from '../../services/orderCodeService';
+import { generateNextRootCode, deduplicateOrders } from '../../services/orderCodeService';
 import { OrderPrintModal } from '../Print/OrderPrintModal';
 import { OrderDetailsTab } from './OrderDetailsTab';
 import { ExcelDuplicateConflictModal, ConflictItem } from '../Common/ExcelDuplicateConflictModal';
@@ -214,9 +214,11 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
   const [customerSortField, setCustomerSortField] = useState<'default' | 'code' | 'taxCode' | 'type'>('default');
   const [customerSortDirection, setCustomerSortDirection] = useState<'asc' | 'desc'>('asc');
 
-  // Filtered orders
+  // Filtered orders (strictly deduplicated so 1 rootCode/orderCode appears only once)
+  const uniqueOrders = useMemo(() => deduplicateOrders(orders), [orders]);
+
   const filteredOrders = useMemo(() => {
-    return orders.filter((o) => {
+    return uniqueOrders.filter((o) => {
       const creatorInfo = getOrderCreator(o);
 
       const matchSearch =
@@ -251,7 +253,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
 
       return matchSearch && matchStatus && matchDate && matchSalesperson;
     }).sort((a, b) => b.orderDate.localeCompare(a.orderDate) || b.createdAt.localeCompare(a.createdAt));
-  }, [orders, searchTerm, statusFilter, startDate, endDate, salespersonFilter, customers, products, users]);
+  }, [uniqueOrders, searchTerm, statusFilter, startDate, endDate, salespersonFilter, customers, products, users]);
 
   // Duplicate tax codes check for customers (REQUIREMENT: nếu trong danh mục có trùng mã số thuế thì bôi đỏ)
   const duplicateTaxCodes = useMemo(() => {
@@ -843,24 +845,24 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
       </div>
 
       {/* Tabs: Đơn hàng vs Chi tiết đơn hàng vs Khách hàng */}
-      <div className="flex flex-wrap items-center gap-1 sm:gap-2 border-b border-slate-200">
+      <div className="flex items-center gap-1 sm:gap-2 border-b border-slate-200 overflow-x-auto no-scrollbar max-w-full pb-0.5">
         <button
           type="button"
           onClick={() => setActiveSubTab('orders')}
-          className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer ${
+          className={`shrink-0 whitespace-nowrap flex items-center gap-2 px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer ${
             activeSubTab === 'orders'
               ? 'border-blue-600 text-blue-600 bg-blue-50/50'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
           <ShoppingCart className="w-4 h-4" />
-          <span>Danh sách Đơn hàng ({orders.length})</span>
+          <span>Danh sách Đơn hàng ({uniqueOrders.length})</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveSubTab('order-details')}
-          className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer ${
+          className={`shrink-0 whitespace-nowrap flex items-center gap-2 px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer ${
             activeSubTab === 'order-details'
               ? 'border-blue-600 text-blue-600 bg-blue-50/50'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -869,14 +871,14 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           <Layers className="w-4 h-4" />
           <span>
             Chi tiết đơn hàng (
-            {orders.reduce((sum, o) => sum + (o.items ? o.items.length : 0), 0)})
+            {uniqueOrders.reduce((sum, o) => sum + (o.items ? o.items.length : 0), 0)})
           </span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveSubTab('customers')}
-          className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer ${
+          className={`shrink-0 whitespace-nowrap flex items-center gap-2 px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer ${
             activeSubTab === 'customers'
               ? 'border-blue-600 text-blue-600 bg-blue-50/50'
               : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -1028,7 +1030,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                 <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white border border-slate-200 text-slate-700 shadow-2xs shrink-0">
                   <span className="text-slate-400 font-normal">Đang xem:</span>
                   <span className="text-blue-700 font-bold font-mono">{filteredOrders.length}</span>
-                  <span className="text-slate-500 font-normal">/ {orders.length} đơn</span>
+                  <span className="text-slate-500 font-normal">/ {uniqueOrders.length} đơn</span>
                 </div>
               </div>
             </div>
@@ -1157,8 +1159,8 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           </div>
 
           {/* Orders Table */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden max-w-full">
+            <div className="overflow-x-auto max-w-full overscroll-x-contain">
               <table className="w-full text-xs sm:text-sm text-left border-collapse">
                 <thead className="bg-slate-100 text-slate-700 uppercase font-bold text-[11px] sm:text-xs tracking-wider">
                   <tr>
@@ -1433,7 +1435,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         </div>
       ) : activeSubTab === 'order-details' ? (
         <OrderDetailsTab
-          orders={orders}
+          orders={uniqueOrders}
           initialStartDate={startDate}
           initialEndDate={endDate}
           onSaveOrder={onSaveOrder}
@@ -1782,7 +1784,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           customers={customers}
           products={products}
           purchases={purchases}
-          allOrders={orders}
+          allOrders={uniqueOrders}
           debtPayments={debtPayments}
           currentUser={currentUser}
           settings={settings}
@@ -1813,7 +1815,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
       {/* Recalculate Prices Modal */}
       {isRecalcModalOpen && (
         <RecalculatePricesModal
-          orders={orders}
+          orders={uniqueOrders}
           selectedOrderIds={selectedOrderIds}
           products={products}
           purchases={purchases}

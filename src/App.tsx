@@ -49,7 +49,7 @@ import { GoogleSheetsSyncModal } from './components/Common/GoogleSheetsSyncModal
 import { AuditLogModal } from './components/Common/AuditLogModal';
 import { DeviceConflictModal } from './components/Common/DeviceConflictModal';
 import { AlertTriangle } from 'lucide-react';
-import { resequenceOrders, DEFAULT_ORDER_CODE_RULES, mergeOrdersByRootCode } from './services/orderCodeService';
+import { resequenceOrders, DEFAULT_ORDER_CODE_RULES, mergeOrdersByRootCode, deduplicateOrders } from './services/orderCodeService';
 import {
   getCurrentDeviceName,
   setCurrentDeviceName,
@@ -62,7 +62,13 @@ import { createAuditLogEntry, appendAuditLog } from './services/auditLogService'
 export default function App() {
   // Database connection state: remember previous file / database id
   const [selectedDbId, setSelectedDbId] = useState<string>(() => getLastUsedDatabaseId());
-  const [data, setData] = useState<AppData>(() => loadData(selectedDbId));
+  const [data, setData] = useState<AppData>(() => {
+    const loaded = loadData(selectedDbId);
+    return {
+      ...loaded,
+      orders: deduplicateOrders(loaded.orders),
+    };
+  });
 
   // Authentication state: MUST show Login Window first when opening app!
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
@@ -309,18 +315,38 @@ export default function App() {
   // Order Handlers
   const handleSaveOrder = (newOrder: Order) => {
     setData((prev) => {
-      const exists = prev.orders.some((o) => o.id === newOrder.id);
-      const updatedOrders = exists
-        ? prev.orders.map((o) => (o.id === newOrder.id ? newOrder : o))
-        : [newOrder, ...prev.orders];
+      // Tìm xem đơn hàng đã tồn tại hay chưa theo rootCode, orderCode hoặc id
+      const existingIdx = prev.orders.findIndex(
+        (o) =>
+          (newOrder.rootCode && o.rootCode && o.rootCode.trim().toUpperCase() === newOrder.rootCode.trim().toUpperCase()) ||
+          o.id === newOrder.id ||
+          (newOrder.orderCode && o.orderCode && o.orderCode.trim().toLowerCase() === newOrder.orderCode.trim().toLowerCase())
+      );
+
+      let updatedOrders: Order[];
+      if (existingIdx !== -1) {
+        // Cập nhật đơn hàng đã có trong danh sách
+        updatedOrders = prev.orders.map((o, idx) => (idx === existingIdx ? newOrder : o));
+      } else {
+        // Thêm đơn hàng mới
+        updatedOrders = [newOrder, ...prev.orders];
+      }
+
+      // Khử trùng tuyệt đối: 1 mã gốc chỉ có duy nhất 1 đơn hàng
+      const cleanOrders = deduplicateOrders(updatedOrders);
 
       return {
         ...prev,
-        orders: updatedOrders,
+        orders: cleanOrders,
       };
     });
 
-    const isExisting = data.orders.some((o) => o.id === newOrder.id);
+    const isExisting = data.orders.some(
+      (o) =>
+        o.id === newOrder.id ||
+        (newOrder.rootCode && o.rootCode && o.rootCode.trim().toUpperCase() === newOrder.rootCode.trim().toUpperCase()) ||
+        (newOrder.orderCode && o.orderCode && o.orderCode.trim().toLowerCase() === newOrder.orderCode.trim().toLowerCase())
+    );
     logUserAction(
       isExisting ? 'update' : 'create',
       'order',
@@ -332,13 +358,12 @@ export default function App() {
 
   const handleBatchUpdateOrders = (newOrUpdatedOrders: Order[]) => {
     setData((prev) => {
-      const orderMap = new Map<string, Order>();
-      prev.orders.forEach((o) => orderMap.set(o.id, o));
-      newOrUpdatedOrders.forEach((o) => orderMap.set(o.id, o));
+      const combined = [...newOrUpdatedOrders, ...prev.orders];
+      const cleanOrders = deduplicateOrders(combined);
 
       return {
         ...prev,
-        orders: Array.from(orderMap.values()),
+        orders: cleanOrders,
       };
     });
 
@@ -361,7 +386,7 @@ export default function App() {
       const resequenced = resequenceOrders(remaining, rules);
       return {
         ...prev,
-        orders: resequenced,
+        orders: deduplicateOrders(resequenced),
       };
     });
 
@@ -923,23 +948,23 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100/70 text-slate-900 flex flex-col font-sans pb-16 md:pb-0">
+    <div className="min-h-screen bg-slate-100/70 text-slate-900 flex flex-col font-sans pb-20 md:pb-0 max-w-full overflow-x-hidden">
       {/* 2. REQUIREMENT: "nếu đăng nhập vào dữ liệu mẫu tạo cảnh báo đỏ đang sử dụng dữ liệu mẫu Demo" */}
       {data.isDemo && (
-        <div className="bg-rose-600 text-white px-4 py-2 text-xs sm:text-sm font-bold shadow-md flex items-center justify-between border-b border-rose-700 animate-pulse z-50">
-          <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 mx-auto flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-yellow-300 shrink-0" />
-              <span>
-                CẢNH BÁO: BẠN ĐANG SỬ DỤNG DỮ LIỆU MẪU (DEMO) — KHÔNG CHO PHÉP ĐỒNG BỘ DỮ LIỆU LÊN GOOGLE SHEETS ĐỂ TRÁNH GHI ĐÈ DỮ LIỆU THẬT!
+        <div className="bg-rose-600 text-white px-3 sm:px-4 py-2 text-xs sm:text-sm font-bold shadow-md flex items-center justify-between border-b border-rose-700 animate-pulse z-50">
+          <div className="w-full px-2 sm:px-6 lg:px-8 xl:px-10 mx-auto flex items-center justify-between gap-2 sm:gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-300 shrink-0" />
+              <span className="truncate sm:whitespace-normal">
+                CẢNH BÁO: BẠN ĐANG SỬ DỤNG DỮ LIỆU MẪU (DEMO) — KHÔNG ĐỒNG BỘ LÊN SHEETS!
               </span>
             </div>
             <button
               type="button"
               onClick={handleOpenExitConfirm}
-              className="px-3 py-1 bg-white text-rose-700 hover:bg-rose-50 text-xs font-bold rounded-lg shrink-0 cursor-pointer shadow-xs"
+              className="px-2.5 sm:px-3 py-1 bg-white text-rose-700 hover:bg-rose-50 text-xs font-bold rounded-lg shrink-0 cursor-pointer shadow-xs whitespace-nowrap"
             >
-              Đổi sang CSDL Thật
+              Đổi CSDL Thật
             </button>
           </div>
         </div>
@@ -967,17 +992,17 @@ export default function App() {
       {/* Global alert banner */}
       {globalBanner && (
         <div
-          className={`px-4 py-2.5 text-xs sm:text-sm font-semibold flex items-center justify-between transition-all ${
+          className={`px-3 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm font-semibold flex items-center justify-between transition-all ${
             globalBanner.type === 'success'
               ? 'bg-emerald-600 text-white'
               : 'bg-rose-600 text-white'
           }`}
         >
-          <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 mx-auto flex items-center justify-between">
-            <span>{globalBanner.message}</span>
+          <div className="w-full px-2 sm:px-6 lg:px-8 xl:px-10 mx-auto flex items-center justify-between gap-2">
+            <span className="truncate">{globalBanner.message}</span>
             <button
               onClick={() => setGlobalBanner(null)}
-              className="text-white/80 hover:text-white ml-3 underline cursor-pointer"
+              className="text-white/80 hover:text-white ml-2 underline cursor-pointer shrink-0"
             >
               Đóng
             </button>
@@ -985,8 +1010,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Container: Expanded for Desktop to both sides */}
-      <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 flex flex-1 gap-6">
+      {/* Main Container: Expanded for Desktop and optimized for Mobile */}
+      <div className="w-full px-2.5 sm:px-6 lg:px-8 xl:px-10 flex flex-1 gap-4 sm:gap-6 max-w-full overflow-x-hidden">
         {/* Desktop / Tablet Sidebar */}
         <Sidebar
           currentTab={currentTab}
@@ -997,7 +1022,7 @@ export default function App() {
         />
 
         {/* Tab View Content */}
-        <main className="flex-1 py-6 min-w-0">
+        <main className="flex-1 py-3 sm:py-6 min-w-0 max-w-full overflow-x-hidden">
           {currentTab === 'sales' && (
             <SalesManager
               orders={data.orders}
@@ -1102,12 +1127,6 @@ export default function App() {
         </main>
       </div>
 
-      {/* Mobile Bottom Navigation */}
-      <MobileNav
-        currentTab={currentTab}
-        onSelectTab={setCurrentTab}
-        currentUser={currentUser}
-      />
 
       {/* Global Order Creation Modal triggered from Navbar or anywhere */}
       {isOrderModalOpen && (
@@ -1208,6 +1227,15 @@ export default function App() {
           onDatabaseCreated={handleDatabaseCreated}
         />
       )}
+
+      {/* Mobile Bottom Navigation Bar: Fix & Fit for Phone screens */}
+      <MobileNav
+        currentTab={currentTab}
+        onSelectTab={setCurrentTab}
+        currentUser={currentUser}
+        ordersCount={data.orders.length}
+        purchasesCount={data.purchases.length}
+      />
     </div>
   );
 }

@@ -54,25 +54,25 @@ export const Navbar: React.FC<NavbarProps> = ({
   onChangeDeviceName,
 }) => {
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
-      <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 h-16 flex items-center justify-between gap-3 sm:gap-6">
+    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs max-w-full">
+      <div className="w-full px-2.5 sm:px-6 lg:px-8 xl:px-10 h-14 sm:h-16 flex items-center justify-between gap-1.5 sm:gap-6 max-w-full">
         {/* Brand */}
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-700 via-indigo-600 to-blue-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
-            <ShoppingBag className="w-5 h-5" />
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0 min-w-0">
+          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-blue-700 via-indigo-600 to-blue-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20 shrink-0">
+            <ShoppingBag className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-black text-base sm:text-lg text-slate-900 tracking-tight">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <span className="font-black text-sm sm:text-lg text-slate-900 tracking-tight truncate">
                 SaleManager<span className="text-blue-600">-Smart</span>
               </span>
               {isDemo ? (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-300">
-                  <AlertTriangle className="w-3 h-3 text-rose-600" />
-                  DEMO (Khóa đồng bộ)
+                <span className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-300 shrink-0">
+                  <AlertTriangle className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-rose-600" />
+                  <span className="hidden xs:inline">DEMO</span>
                 </span>
               ) : (
-                <span className="hidden md:inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <span className="hidden md:inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
                   <Building2 className="w-3 h-3" />
                   CSDL Thật
                 </span>
@@ -84,16 +84,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* Central Prominent CTA: TẠO ĐƠN HÀNG (Easy to spot on both phone & PC) */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        {/* Central Prominent CTA: TẠO ĐƠN HÀNG */}
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           <button
             type="button"
             onClick={onOpenOrderModal}
-            className="inline-flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white font-bold text-xs sm:text-sm shadow-md shadow-blue-500/25 ring-2 ring-blue-500/20 transition-all transform active:scale-95 cursor-pointer"
+            className="inline-flex items-center justify-center gap-1 sm:gap-2 px-2.5 sm:px-5 py-1.5 sm:py-2.5 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white font-bold text-xs sm:text-sm shadow-md shadow-blue-500/25 ring-2 ring-blue-500/20 transition-all transform active:scale-95 cursor-pointer shrink-0"
             title="Tạo đơn hàng mới nhanh chóng"
           >
-            <Plus className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
-            <span className="whitespace-nowrap font-black tracking-wide">+ TẠO ĐƠN HÀNG</span>
+            <Plus className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-[2.5]" />
+            <span className="whitespace-nowrap font-black tracking-wide text-[11px] sm:text-sm">
+              <span className="hidden sm:inline">+ </span>TẠO ĐƠN
+            </span>
           </button>
 
           {/* Quick Drive Sync Status Button */}
@@ -140,7 +142,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               type="button"
               onClick={onOpenAuditLog}
-              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 p-1.5 sm:px-3 sm:py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-2xs transition-colors cursor-pointer shrink-0"
               title="Xem nhật ký thêm, sửa, xóa dữ liệu thời gian thực"
             >
               <History className="w-4 h-4 text-indigo-600" />

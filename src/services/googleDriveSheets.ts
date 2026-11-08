@@ -10,7 +10,7 @@ import {
   PurchaseBill,
   DebtPayment,
 } from '../types';
-import { DEFAULT_ORDER_CODE_RULES, ensureOrdersHaveRootCode, mergeOrdersByRootCode } from './orderCodeService';
+import { DEFAULT_ORDER_CODE_RULES, ensureOrdersHaveRootCode, mergeOrdersByRootCode, deduplicateOrders } from './orderCodeService';
 import { INITIAL_USERS, DEFAULT_SETTINGS } from './storage';
 
 // Initialize Firebase if not already initialized
@@ -414,8 +414,8 @@ export async function syncDataToGoogleSheets(
     ])
   ];
 
-  // 5. Orders - Lưu trữ đầy đủ Mã gốc quy chiếu và Người tạo đơn ban đầu
-  const processedOrders = ensureOrdersHaveRootCode(data.orders);
+  // 5. Orders - Lưu trữ đầy đủ Mã gốc quy chiếu và Người tạo đơn ban đầu, khử trùng tuyệt đối
+  const processedOrders = deduplicateOrders(ensureOrdersHaveRootCode(data.orders));
   const orderRows: string[][] = [
     [
       'Mã đơn',
@@ -1062,7 +1062,7 @@ export async function loadDataFromGoogleSheets(
       customers: parsedSheetCustomers,
       suppliers: parsedSheetSuppliers,
       products: parsedSheetProducts,
-      orders: parsedSheetOrders,
+      orders: deduplicateOrders(parsedSheetOrders),
       purchases: parsedSheetPurchases,
       debtPayments: parsedSheetDebts,
       users: INITIAL_USERS,
@@ -1073,6 +1073,7 @@ export async function loadDataFromGoogleSheets(
     };
   }
 
+  finalResult.orders = deduplicateOrders(finalResult.orders || []);
   finalResult.lastSyncedAt = new Date().toISOString();
   finalResult.syncSource = 'google_drive';
   finalResult.spreadsheetId = targetId;
