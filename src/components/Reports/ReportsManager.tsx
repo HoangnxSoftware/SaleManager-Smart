@@ -391,28 +391,37 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
         </div>
 
         {/* Date Filter - Responsive for mobile */}
-        <div className="w-full sm:w-auto bg-slate-50 p-2 sm:p-1.5 rounded-xl border border-slate-200 text-xs min-w-0">
-          <div className="grid grid-cols-1 min-[340px]:grid-cols-2 sm:flex sm:items-center gap-2 sm:gap-1.5 min-w-0">
-            <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-300 min-w-0">
-              <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-              <span className="font-bold text-slate-600 shrink-0">Từ:</span>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full min-w-0 text-xs bg-transparent font-medium text-slate-800 focus:outline-hidden cursor-pointer"
-                title="Chọn ngày bắt đầu"
-              />
+        <div className="w-full sm:w-auto bg-slate-50 p-2 sm:p-2 rounded-xl border border-slate-200 text-xs min-w-0">
+          <div className="grid grid-cols-1 min-[340px]:grid-cols-2 sm:flex sm:items-end gap-2 sm:gap-2 min-w-0">
+            <div className="min-w-0 space-y-1">
+              <label className="block text-[11px] font-bold text-slate-600 flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                <span>Từ ngày:</span>
+              </label>
+              <div className="flex items-center bg-white px-2.5 py-1.5 rounded-lg border border-slate-300 min-w-0">
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full min-w-0 text-xs bg-transparent font-medium text-slate-800 focus:outline-hidden cursor-pointer"
+                  title="Chọn ngày bắt đầu"
+                />
+              </div>
             </div>
-            <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-300 min-w-0">
-              <span className="font-bold text-slate-600 shrink-0">Đến:</span>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="w-full min-w-0 text-xs bg-transparent font-medium text-slate-800 focus:outline-hidden cursor-pointer"
-                title="Chọn ngày kết thúc"
-              />
+
+            <div className="min-w-0 space-y-1">
+              <label className="block text-[11px] font-bold text-slate-600">
+                Đến ngày:
+              </label>
+              <div className="flex items-center bg-white px-2.5 py-1.5 rounded-lg border border-slate-300 min-w-0">
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="w-full min-w-0 text-xs bg-transparent font-medium text-slate-800 focus:outline-hidden cursor-pointer"
+                  title="Chọn ngày kết thúc"
+                />
+              </div>
             </div>
           </div>
         </div>

@@ -345,49 +345,59 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
             </div>
 
             {/* Date Range: Từ ngày -> Đến ngày - Responsive for mobile */}
-            <div className="w-full sm:w-auto bg-slate-50 p-2 sm:p-1.5 rounded-xl border border-slate-300 shadow-2xs">
-              <div className="grid grid-cols-1 min-[360px]:grid-cols-2 sm:flex sm:items-center gap-2 sm:gap-2">
-                <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 min-w-0">
-                  <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                  <span className="text-xs font-bold text-slate-700 shrink-0">Từ:</span>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => {
-                      setStartDate(e.target.value);
-                      setActiveDatePreset('custom');
-                    }}
-                    className="w-full min-w-0 text-xs font-medium bg-transparent focus:outline-hidden cursor-pointer"
-                    title="Chọn ngày bắt đầu"
-                  />
+            <div className="w-full sm:w-auto bg-slate-50 p-2 sm:p-2 rounded-xl border border-slate-300 shadow-2xs">
+              <div className="grid grid-cols-1 min-[360px]:grid-cols-2 sm:flex sm:items-end gap-2 sm:gap-2">
+                <div className="min-w-0 space-y-1">
+                  <label className="block text-xs font-bold text-slate-700 flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                    <span>Từ ngày:</span>
+                  </label>
+                  <div className="flex items-center bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 min-w-0">
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => {
+                        setStartDate(e.target.value);
+                        setActiveDatePreset('custom');
+                      }}
+                      className="w-full min-w-0 text-xs font-medium bg-transparent focus:outline-hidden cursor-pointer"
+                      title="Chọn ngày bắt đầu"
+                    />
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 min-w-0">
-                  <span className="text-xs font-bold text-slate-700 shrink-0">Đến:</span>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => {
-                      setEndDate(e.target.value);
-                      setActiveDatePreset('custom');
-                    }}
-                    className="w-full min-w-0 text-xs font-medium bg-transparent focus:outline-hidden cursor-pointer"
-                    title="Chọn ngày kết thúc"
-                  />
-                  {(startDate || endDate) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setStartDate('');
-                        setEndDate('');
-                        setActiveDatePreset('all');
+                <div className="min-w-0 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-700">
+                      Đến ngày:
+                    </label>
+                    {(startDate || endDate) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStartDate('');
+                          setEndDate('');
+                          setActiveDatePreset('all');
+                        }}
+                        className="text-[10px] text-rose-600 hover:underline font-bold cursor-pointer"
+                        title="Xóa lọc ngày"
+                      >
+                        Đặt lại
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 min-w-0">
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => {
+                        setEndDate(e.target.value);
+                        setActiveDatePreset('custom');
                       }}
-                      className="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer shrink-0 transition-colors"
-                      title="Xóa lọc ngày"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                      className="w-full min-w-0 text-xs font-medium bg-transparent focus:outline-hidden cursor-pointer"
+                      title="Chọn ngày kết thúc"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
