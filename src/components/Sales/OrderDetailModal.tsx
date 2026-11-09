@@ -1,7 +1,7 @@
 import React from 'react';
 import { Order, AppSettings } from '../../types';
 import { formatCurrency, formatDate, formatNumber } from '../../utils/formatters';
-import { X, Printer, Copy, Edit, FileText, CheckCircle, Clock, Truck, AlertCircle } from 'lucide-react';
+import { X, Printer, Copy, Edit, FileText, CheckCircle, Clock, Truck, AlertCircle, Ban, RotateCcw } from 'lucide-react';
 
 interface OrderDetailModalProps {
   order: Order | null;
@@ -11,6 +11,7 @@ interface OrderDetailModalProps {
   onEdit: (order: Order) => void;
   onCopy: (order: Order) => void;
   onPrint: (order: Order) => void;
+  onToggleCancel?: (order: Order) => void;
 }
 
 export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
@@ -21,6 +22,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   onEdit,
   onCopy,
   onPrint,
+  onToggleCancel,
 }) => {
   if (!isOpen || !order) return null;
 
@@ -98,6 +100,14 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Cancelled Order Notice Banner */}
+        {order.deliveryStatus === 'cancelled' && (
+          <div className="bg-rose-50 border-b border-rose-200 px-4 py-2.5 text-rose-800 text-xs sm:text-sm font-bold flex items-center gap-2 shrink-0">
+            <Ban className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>ĐƠN HÀNG ĐÃ BỊ HỦY: Đơn hàng này không trừ tồn kho hàng hóa và không tính vào công nợ khách hàng.</span>
+          </div>
+        )}
 
         {/* Content */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-6">
@@ -302,6 +312,33 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             Đóng
           </button>
           <div className="flex items-center gap-2">
+            {onToggleCancel && (
+              <button
+                type="button"
+                onClick={() => {
+                  onToggleCancel(order);
+                  onClose();
+                }}
+                className={`flex items-center gap-1.5 px-3.5 py-2 text-xs sm:text-sm font-semibold rounded-xl border transition-colors cursor-pointer ${
+                  order.deliveryStatus === 'cancelled'
+                    ? 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                    : 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
+                }`}
+                title={order.deliveryStatus === 'cancelled' ? 'Khôi phục đơn hàng' : 'Đánh dấu hủy đơn hàng'}
+              >
+                {order.deliveryStatus === 'cancelled' ? (
+                  <>
+                    <RotateCcw className="w-4 h-4 text-amber-600" />
+                    <span>Khôi phục đơn</span>
+                  </>
+                ) : (
+                  <>
+                    <Ban className="w-4 h-4 text-rose-600" />
+                    <span>Đánh dấu Hủy đơn</span>
+                  </>
+                )}
+              </button>
+            )}
             <button
               onClick={() => {
                 onCopy(order);

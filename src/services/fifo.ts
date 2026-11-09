@@ -1,4 +1,4 @@
-import { AppData, Product, PurchaseBill, Order } from '../types';
+import { AppData, Product, PurchaseBill, Order, AppSettings } from '../types';
 import { roundPrice } from '../utils/formatters';
 
 export interface PurchaseLot {
@@ -756,4 +756,112 @@ export function generateFifoCostDetailsReport(
     totalExportQtyPurchaseUnit,
     totalCostAmount,
   };
+}
+
+/**
+ * Automatically recalculates selling prices for orders based on FIFO cost and product profit margins.
+ * Tự động tính lại giá bán cho các đơn hàng dựa trên giá vốn FIFO và tỷ suất lợi nhuận sản phẩm.
+ */
+export function autoRecalculateOrderPrices(
+  orders: Order[],
+  products: Product[],
+  purchases: PurchaseBill[],
+  settings: AppSettings,
+  targetOrderIds?: string[]
+): { updatedOrders: Order[]; affectedCount: number } {
+  const decimals = settings.salePriceDecimals ?? 2;
+  const factor = Math.pow(10, decimals);
+  const postTaxDecimals = settings.postTaxSalePriceDecimals ?? -2;
+
+  const productMap = new Map<string, Product>();
+  products.forEach((p) => productMap.set(p.code, p));
+
+  const targetSet = targetOrderIds && targetOrderIds.length > 0 ? new Set(targetOrderIds) : null;
+  let affectedCount = 0;
+
+  const updatedOrders = orders.map((ord) => {
+    // Only recalculate matching target orders and skip cancelled orders
+    if (targetSet && !targetSet.has(ord.id)) {
+      return ord;
+    }
+    if (ord.deliveryStatus === 'cancelled') {
+      return ord;
+    }
+
+    let updatedTotalPreTax = 0;
+    let updatedTotalVat = 0;
+    let updatedItemDiscountTotal = 0;
+    let hasChanges = false;
+
+    const newItems = ord.items.map((item) => {
+      const prod = productMap.get(item.productCode);
+      const vatRate = item.vatRate ?? 10;
+      let newPreTaxPrice = item.preTaxPrice;
+      let postTaxPrice = item.postTaxPrice || Number((item.preTaxPrice * (1 + vatRate / 100)).toFixed(decimals));
+
+      if (prod) {
+        const sp = calculateSuggestedPrices(
+          prod,
+          ord.orderDate,
+          products,
+          purchases,
+          orders,
+          postTaxDecimals,
+          decimals,
+          ord.id
+        );
+        if (sp.priceByMargin > 0) {
+          postTaxPrice = sp.priceByMargin;
+          newPreTaxPrice = Number((sp.priceByMargin / (1 + vatRate / 100)).toFixed(decimals));
+        } else if (prod.defaultSalePrice && prod.defaultSalePrice > 0) {
+          postTaxPrice = prod.defaultSalePrice;
+          newPreTaxPrice = Number((prod.defaultSalePrice / (1 + vatRate / 100)).toFixed(decimals));
+        }
+      }
+
+      if (newPreTaxPrice !== item.preTaxPrice || postTaxPrice !== item.postTaxPrice) {
+        hasChanges = true;
+      }
+
+      const newSubtotal = item.quantity * newPreTaxPrice;
+      const netAfterItemDiscount = Math.max(0, newSubtotal - (item.itemDiscount || 0));
+      const vatAmount = Math.round(((netAfterItemDiscount * vatRate) / 100) * factor) / factor;
+      const totalAmount = netAfterItemDiscount + vatAmount;
+
+      updatedTotalPreTax += newSubtotal;
+      updatedItemDiscountTotal += item.itemDiscount || 0;
+      updatedTotalVat += vatAmount;
+
+      return {
+        ...item,
+        preTaxPrice: newPreTaxPrice,
+        postTaxPrice,
+        subtotal: newSubtotal,
+        vatAmount,
+        totalAmount,
+      };
+    });
+
+    const orderDiscount = ord.orderDiscount || 0;
+    const netPreTaxOrder = Math.max(0, updatedTotalPreTax - updatedItemDiscountTotal - orderDiscount);
+    const finalTotalAmount = netPreTaxOrder + updatedTotalVat;
+    const newDebt = Math.max(0, finalTotalAmount - ord.paidAmount);
+
+    if (hasChanges || finalTotalAmount !== ord.totalAmount) {
+      affectedCount++;
+    }
+
+    return {
+      ...ord,
+      items: newItems,
+      totalPreTax: updatedTotalPreTax,
+      itemDiscountTotal: updatedItemDiscountTotal,
+      totalVat: updatedTotalVat,
+      totalAmount: finalTotalAmount,
+      debtAmount: newDebt,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+
+  return { updatedOrders, affectedCount };
 }

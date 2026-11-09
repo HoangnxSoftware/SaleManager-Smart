@@ -178,6 +178,8 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
     const uniqueOrderIds = new Set<string>();
 
     flattenedRows.forEach((r) => {
+      if (r.order.deliveryStatus === 'cancelled') return;
+
       totalQuantity += r.item.quantity || 0;
       totalPreTaxSum += r.item.subtotal || 0;
       totalItemDiscountSum += r.item.itemDiscount || 0;
@@ -563,11 +565,17 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
                   // Apply visual border separating different orders
                   const orderBorderClass = isFirstRow && idx > 0 ? 'border-t-2 border-slate-300' : '';
 
+                  const isCancelled = order.deliveryStatus === 'cancelled';
+
                   return (
                     <tr
                       key={row.rowId}
                       className={`hover:bg-blue-50/40 transition-colors ${orderBorderClass} ${
-                        isFirstRow ? 'bg-white' : 'bg-slate-50/20'
+                        isCancelled
+                          ? 'bg-slate-50/80 opacity-75 border-l-4 border-l-rose-400'
+                          : isFirstRow
+                          ? 'bg-white'
+                          : 'bg-slate-50/20'
                       }`}
                     >
                       {/* STT */}
@@ -578,15 +586,22 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
                       {/* 1. Mã đơn */}
                       <td className="p-3 font-mono font-bold text-blue-700 sticky left-12 bg-inherit z-10 whitespace-nowrap">
                         {isFirstRow ? (
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <button
                               type="button"
                               onClick={() => onViewOrder(order)}
-                              className="hover:underline hover:text-blue-900 text-left cursor-pointer"
+                              className={`hover:underline cursor-pointer ${
+                                isCancelled ? 'line-through text-slate-500 hover:text-slate-700' : 'hover:text-blue-900'
+                              }`}
                               title="Bấm để xem chi tiết đơn hàng"
                             >
                               {order.orderCode}
                             </button>
+                            {isCancelled && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded bg-rose-600 text-white font-black shadow-2xs">
+                                ĐÃ HỦY
+                              </span>
+                            )}
                             <span className="text-[10px] px-1.5 py-0.2 rounded bg-blue-100 text-blue-800 font-normal">
                               {order.items.length} món
                             </span>

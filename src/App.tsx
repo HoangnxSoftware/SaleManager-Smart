@@ -376,6 +376,16 @@ export default function App() {
   };
 
   const handleDeleteOrder = (orderId: string) => {
+    // REQUIREMENT: "chỉ cho tài khoản Admin xóa đơn hàng"
+    if (currentUser?.role !== 'admin') {
+      setGlobalBanner({
+        type: 'error',
+        message: '⚠️ BẠN KHÔNG CÓ QUYỀN: Chỉ tài khoản Admin mới được phép xóa đơn hàng khỏi hệ thống!',
+      });
+      alert('Chỉ tài khoản Admin mới được phép xóa đơn hàng!');
+      return;
+    }
+
     const deletedOrder = data.orders.find((o) => o.id === orderId);
     setData((prev) => {
       const remaining = prev.orders.filter((o) => o.id !== orderId);
@@ -400,6 +410,16 @@ export default function App() {
   };
 
   const handleBatchDeleteOrders = (orderIds: string[]) => {
+    // REQUIREMENT: "chỉ cho tài khoản Admin xóa đơn hàng"
+    if (currentUser?.role !== 'admin') {
+      setGlobalBanner({
+        type: 'error',
+        message: '⚠️ BẠN KHÔNG CÓ QUYỀN: Chỉ tài khoản Admin mới được phép xóa đơn hàng khỏi hệ thống!',
+      });
+      alert('Chỉ tài khoản Admin mới được phép xóa đơn hàng!');
+      return;
+    }
+
     setData((prev) => {
       const remaining = prev.orders.filter((o) => !orderIds.includes(o.id));
       const rules =
@@ -409,7 +429,7 @@ export default function App() {
       const resequenced = resequenceOrders(remaining, rules);
       return {
         ...prev,
-        orders: resequenced,
+        orders: deduplicateOrders(resequenced),
       };
     });
 
@@ -900,6 +920,212 @@ export default function App() {
     setSyncModalMode('push');
   };
 
+  // 1. Manual Reset / Làm mới dữ liệu tại chỗ
+  const handleManualResetData = async () => {
+    try {
+      const loaded = await loadDataAsync(selectedDbId);
+      const cleanOrders = deduplicateOrders(loaded.orders);
+      const refreshed: AppData = {
+        ...loaded,
+        orders: cleanOrders,
+      };
+      setData(refreshed);
+      saveData(refreshed, selectedDbId);
+      setGlobalBanner({
+        type: 'success',
+        message: `✓ Đã làm mới hệ thống: Kiểm tra toàn vẹn ${cleanOrders.length} đơn hàng, khử sạch mã trùng lặp và tính toán lại tồn kho & công nợ!`,
+      });
+      logUserAction('import', 'settings', 'Làm mới', 'Làm mới và kiểm tra toàn vẹn dữ liệu thủ công');
+    } catch (err: any) {
+      console.error(err);
+      setGlobalBanner({
+        type: 'error',
+        message: `Lỗi làm mới dữ liệu: ${err.message || 'Thao tác không thành công'}`,
+      });
+    }
+  };
+
+  // 2. Manual Push / Đẩy dữ liệu lên Google Sheets
+  const handleManualPush = async () => {
+    if (data.isDemo) {
+      setGlobalBanner({
+        type: 'error',
+        message: '⚠️ CẢNH BÁO: Dữ liệu mẫu Demo không cho phép đẩy lên Google Sheets để tránh ghi đè dữ liệu thật.',
+      });
+      return;
+    }
+
+    if (!data.spreadsheetId) {
+      setSyncModalMode('push');
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      let token = await getAccessToken();
+      if (!token) {
+        const signinRes = await googleSignIn();
+        token = signinRes?.accessToken || null;
+      }
+
+      if (!token) {
+        setSyncModalMode('push');
+        setIsSyncing(false);
+        return;
+      }
+
+      const res = await syncDataToGoogleSheets(data, token, data.spreadsheetId);
+      if (res && res.spreadsheetId) {
+        const now = new Date().toISOString();
+        setData((prev) => ({
+          ...prev,
+          lastSyncedAt: now,
+          syncSource: 'google_drive',
+        }));
+        saveData({ ...data, lastSyncedAt: now }, selectedDbId);
+        setGlobalBanner({
+          type: 'success',
+          message: '✓ Đã đẩy và sao lưu dữ liệu toàn vẹn lên Google Sheets thành công! Các máy khác đã có thể xem được dữ liệu mới.',
+        });
+        logUserAction('update', 'settings', 'Google Sheets', 'Đẩy dữ liệu thủ công lên Google Sheets');
+      }
+    } catch (err: any) {
+      console.error('Manual push error:', err);
+      setGlobalBanner({
+        type: 'error',
+        message: `Lỗi đẩy dữ liệu lên Google Sheets: ${err.message || 'Vui lòng kiểm tra quyền truy cập Google Drive'}`,
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // 3. Manual Pull / Nhận dữ liệu từ Google Sheets
+  const handleManualPull = async () => {
+    if (data.isDemo) {
+      setGlobalBanner({
+        type: 'error',
+        message: '⚠️ Chế độ Demo không hỗ trợ nhận dữ liệu từ Google Sheets.',
+      });
+      return;
+    }
+
+    if (!data.spreadsheetId) {
+      setSyncModalMode('pull');
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      let token = await getAccessToken();
+      if (!token) {
+        const signinRes = await googleSignIn();
+        token = signinRes?.accessToken || null;
+      }
+
+      if (!token) {
+        setSyncModalMode('pull');
+        setIsSyncing(false);
+        return;
+      }
+
+      const restored = await loadDataFromGoogleSheets(token, data.spreadsheetId);
+      if (restored) {
+        const mergedOrders = deduplicateOrders(mergeOrdersByRootCode(data.orders, restored.orders));
+        const updated: AppData = {
+          ...restored,
+          orders: mergedOrders,
+          activeSessions: data.activeSessions,
+          lastSyncedAt: new Date().toISOString(),
+        };
+        setData(updated);
+        saveData(updated, selectedDbId);
+        setGlobalBanner({
+          type: 'success',
+          message: `✓ Đã nhận dữ liệu mới nhất từ Google Sheets! Đã đồng bộ ${mergedOrders.length} đơn hàng theo mã gốc.`,
+        });
+        logUserAction('import', 'settings', 'Google Sheets', 'Nhận dữ liệu thủ công từ Google Sheets');
+      }
+    } catch (err: any) {
+      console.error('Manual pull error:', err);
+      setGlobalBanner({
+        type: 'error',
+        message: `Lỗi nhận dữ liệu từ Google Sheets: ${err.message || 'Không thể tải dữ liệu'}`,
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // 4. Manual 2-Way Sync / Đồng bộ 2 chiều
+  const handleManualSync2Way = async () => {
+    if (data.isDemo) {
+      setGlobalBanner({
+        type: 'error',
+        message: '⚠️ Chế độ Demo không hỗ trợ đồng bộ 2 chiều.',
+      });
+      return;
+    }
+
+    if (!data.spreadsheetId) {
+      setSyncModalMode('push');
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      let token = await getAccessToken();
+      if (!token) {
+        const signinRes = await googleSignIn();
+        token = signinRes?.accessToken || null;
+      }
+
+      if (!token) {
+        setSyncModalMode('push');
+        setIsSyncing(false);
+        return;
+      }
+
+      // Step A: Pull remote
+      const remote = await loadDataFromGoogleSheets(token, data.spreadsheetId);
+      let combinedData = { ...data };
+      if (remote) {
+        const mergedOrders = deduplicateOrders(mergeOrdersByRootCode(data.orders, remote.orders));
+        combinedData = {
+          ...remote,
+          ...data,
+          orders: mergedOrders,
+        };
+      }
+
+      // Step B: Push back
+      const res = await syncDataToGoogleSheets(combinedData, token, data.spreadsheetId);
+      if (res && res.spreadsheetId) {
+        const now = new Date().toISOString();
+        const finalData: AppData = {
+          ...combinedData,
+          lastSyncedAt: now,
+          syncSource: 'google_drive',
+        };
+        setData(finalData);
+        saveData(finalData, selectedDbId);
+        setGlobalBanner({
+          type: 'success',
+          message: '✓ Đồng bộ 2 chiều hoàn tất! Toàn bộ đơn hàng và dữ liệu giữa máy tính và điện thoại đã khớp nhau hoàn toàn.',
+        });
+        logUserAction('update', 'settings', 'Google Sheets', 'Đồng bộ 2 chiều thủ công');
+      }
+    } catch (err: any) {
+      console.error('2-way sync error:', err);
+      setGlobalBanner({
+        type: 'error',
+        message: `Lỗi đồng bộ 2 chiều: ${err.message || 'Vui lòng kiểm tra kết nối mạng'}`,
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   // Exit & Logout handlers
   const handleOpenExitConfirm = () => {
     setIsExitModalOpen(true);
@@ -1042,6 +1268,18 @@ export default function App() {
               onBatchUpdateCustomers={handleBatchUpdateCustomers}
               onAddNewProduct={handleSaveProduct}
               onBatchUpdateProducts={handleBatchUpdateProducts}
+              isSyncing={isSyncing}
+              isAutoSyncing={isAutoSyncing}
+              autoSyncEnabled={autoSyncEnabled}
+              lastSyncedAt={data.lastSyncedAt}
+              spreadsheetId={data.spreadsheetId}
+              isDemo={data.isDemo}
+              currentDeviceName={currentDeviceNameState}
+              onManualReset={handleManualResetData}
+              onManualPush={handleManualPush}
+              onManualPull={handleManualPull}
+              onManualSync2Way={handleManualSync2Way}
+              onOpenSyncModal={() => setSyncModalMode('push')}
             />
           )}
 
@@ -1235,6 +1473,10 @@ export default function App() {
         currentUser={currentUser}
         ordersCount={data.orders.length}
         purchasesCount={data.purchases.length}
+        onOpenSyncModal={() => setSyncModalMode('push')}
+        onOpenLoginModal={() => setIsLoginModalOpen(true)}
+        onLogout={handleOpenExitConfirm}
+        onOpenAuditLog={() => setIsAuditLogOpen(true)}
       />
     </div>
   );

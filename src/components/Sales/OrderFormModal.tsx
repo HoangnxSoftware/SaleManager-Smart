@@ -23,6 +23,7 @@ import {
   AlertCircle,
   Edit,
   RefreshCw,
+  Sparkles,
 } from 'lucide-react';
 import { DEFAULT_ORDER_CODE_RULES, generateNextOrderCode, matchOrderToRule, generateNextRootCode } from '../../services/orderCodeService';
 import { ChangeProductModal } from './ChangeProductModal';
@@ -334,6 +335,52 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
 
   if (!isOpen) return null;
 
+  // Tự động tính lại đơn giá sau thuế cho tất cả các mặt hàng hiện có theo Giá vốn cao nhất (FIFO) và Tỷ suất lợi nhuận
+  const handleAutoRecalculateCurrentOrder = () => {
+    if (items.length === 0) return;
+    const factor = Math.pow(10, salePriceDecimals);
+    const updatedItems = items.map((item) => {
+      const prod = products.find((p) => p.code === item.productCode);
+      if (!prod) return item;
+
+      const sp = calculateSuggestedPrices(
+        prod,
+        orderDate,
+        products,
+        purchases,
+        allOrders,
+        settings.postTaxSalePriceDecimals ?? -2,
+        salePriceDecimals,
+        initialOrder?.id
+      );
+
+      let newPostTax = item.postTaxPrice;
+      if (sp.priceByMargin > 0) {
+        newPostTax = sp.priceByMargin;
+      } else if (prod.defaultSalePrice && prod.defaultSalePrice > 0) {
+        newPostTax = prod.defaultSalePrice;
+      }
+
+      const vatRate = item.vatRate;
+      const preTax = Number((newPostTax / (1 + vatRate / 100)).toFixed(salePriceDecimals));
+      const subtotal = item.quantity * preTax;
+      const net = Math.max(0, subtotal - (item.itemDiscount || 0));
+      const vatAmount = Math.round(((net * vatRate) / 100) * factor) / factor;
+      const totalAmount = net + vatAmount;
+
+      return {
+        ...item,
+        postTaxPrice: newPostTax,
+        preTaxPrice: preTax,
+        subtotal,
+        vatAmount,
+        totalAmount,
+      };
+    });
+
+    setItems(updatedItems);
+  };
+
   // Add product to items
   const handleAddProduct = (prod: Product, customPrice?: number) => {
     const sp = calculateSuggestedPrices(
@@ -567,7 +614,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
       totalAmount: totals.grandTotal,
       paymentMethod,
       paidAmount,
-      debtAmount: totals.currentOrderDebt,
+      debtAmount: deliveryStatus === 'cancelled' ? 0 : totals.currentOrderDebt,
       deliveryStatus,
       notes,
       orderCodeRuleId: selectedRuleId,
@@ -1049,6 +1096,22 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
               </div>
             ) : (
               <>
+                {/* Header with quick auto-recalculate prices */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-1">
+                  <span className="text-xs font-bold text-slate-700">
+                    Danh sách mặt hàng ({items.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleAutoRecalculateCurrentOrder}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300 transition-colors shadow-2xs cursor-pointer"
+                    title="Tự động tính lại đơn giá sau thuế cho tất cả các mặt hàng theo Giá vốn cao nhất (FIFO) và Tỷ suất lợi nhuận của từng sản phẩm"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                    <span>⚡ Tự động tính lại giá bán tất cả mặt hàng</span>
+                  </button>
+                </div>
+
                 {/* Desktop View: Full detailed table with align-top */}
                 <div className="hidden md:block overflow-x-auto">
                   <table className="w-full text-xs text-left border-collapse">

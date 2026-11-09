@@ -24,6 +24,7 @@ import { generateNextRootCode, deduplicateOrders } from '../../services/orderCod
 import { OrderPrintModal } from '../Print/OrderPrintModal';
 import { OrderDetailsTab } from './OrderDetailsTab';
 import { ExcelDuplicateConflictModal, ConflictItem } from '../Common/ExcelDuplicateConflictModal';
+import { ManualSyncBar } from '../Common/ManualSyncBar';
 import { useConfirm } from '../../context/ConfirmContext';
 import {
   Plus,
@@ -51,7 +52,9 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  X
+  X,
+  Ban,
+  RotateCcw,
 } from 'lucide-react';
 
 interface SalesManagerProps {
@@ -72,6 +75,19 @@ interface SalesManagerProps {
   onBatchUpdateCustomers?: (customers: Customer[]) => void;
   onAddNewProduct?: (product: Product) => void;
   onBatchUpdateProducts?: (products: Product[]) => void;
+  // Sync props
+  isSyncing?: boolean;
+  isAutoSyncing?: boolean;
+  autoSyncEnabled?: boolean;
+  lastSyncedAt?: string;
+  spreadsheetId?: string;
+  isDemo?: boolean;
+  currentDeviceName?: string;
+  onManualReset?: () => void;
+  onManualPush?: () => void;
+  onManualPull?: () => void;
+  onManualSync2Way?: () => void;
+  onOpenSyncModal?: () => void;
 }
 
 export const SalesManager: React.FC<SalesManagerProps> = ({
@@ -92,6 +108,18 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
   onBatchUpdateCustomers,
   onAddNewProduct,
   onBatchUpdateProducts,
+  isSyncing = false,
+  isAutoSyncing = false,
+  autoSyncEnabled = true,
+  lastSyncedAt,
+  spreadsheetId,
+  isDemo = false,
+  currentDeviceName = 'Thiết bị này',
+  onManualReset = () => {},
+  onManualPush = () => {},
+  onManualPull = () => {},
+  onManualSync2Way = () => {},
+  onOpenSyncModal = () => {},
 }) => {
   const confirm = useConfirm();
   const [activeSubTab, setActiveSubTab] = useState<'orders' | 'order-details' | 'customers'>('orders');
@@ -575,6 +603,104 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
     }
   };
 
+  // Toggle Cancel Order (Đánh dấu đơn hàng bị hủy / Khôi phục)
+  const handleToggleCancelOrder = async (order: Order) => {
+    const isCancelled = order.deliveryStatus === 'cancelled';
+    if (!isCancelled) {
+      const ok = await confirm({
+        title: 'Xác nhận hủy đơn hàng',
+        message: `Bạn có chắc chắn muốn ĐÁNH DẤU HỦY đơn hàng ${order.orderCode} (Khách: ${order.customerName})? Đơn hàng bị hủy sẽ không trừ tồn kho hàng hóa và không tính vào công nợ khách hàng.`,
+        confirmText: 'Đánh dấu hủy',
+        type: 'danger',
+      });
+      if (ok) {
+        const updatedOrder: Order = {
+          ...order,
+          deliveryStatus: 'cancelled',
+          debtAmount: 0,
+          updatedById: currentUser.id,
+          updatedByName: currentUser.fullName,
+          updatedAt: new Date().toISOString(),
+        };
+        onSaveOrder(updatedOrder);
+        if (viewingOrder?.id === order.id) {
+          setViewingOrder(updatedOrder);
+        }
+      }
+    } else {
+      const ok = await confirm({
+        title: 'Khôi phục đơn hàng',
+        message: `Bạn có muốn KHÔI PHỤC đơn hàng ${order.orderCode}? Đơn hàng sẽ trở lại trạng thái Chờ giao và kích hoạt lại tính công nợ.`,
+        confirmText: 'Khôi phục đơn',
+        type: 'info',
+      });
+      if (ok) {
+        const updatedOrder: Order = {
+          ...order,
+          deliveryStatus: 'pending',
+          debtAmount: Math.max(0, order.totalAmount - order.paidAmount),
+          updatedById: currentUser.id,
+          updatedByName: currentUser.fullName,
+          updatedAt: new Date().toISOString(),
+        };
+        onSaveOrder(updatedOrder);
+        if (viewingOrder?.id === order.id) {
+          setViewingOrder(updatedOrder);
+        }
+      }
+    }
+  };
+
+  // Batch Cancel Orders (Đánh dấu hủy hàng loạt)
+  const handleBatchCancel = async () => {
+    if (selectedOrderIds.length === 0) {
+      alert('Vui lòng chọn ít nhất một đơn hàng để đánh dấu hủy.');
+      return;
+    }
+    const ok = await confirm({
+      title: 'Xác nhận hủy đơn hàng hàng loạt',
+      message: `Bạn có chắc chắn muốn ĐÁNH DẤU HỦY ${selectedOrderIds.length} đơn hàng đã chọn? Các đơn bị hủy sẽ không tính vào công nợ và không xuất kho.`,
+      confirmText: 'Đánh dấu hủy hàng loạt',
+      type: 'danger',
+    });
+    if (ok) {
+      const updated = orders
+        .filter((o) => selectedOrderIds.includes(o.id))
+        .map((o) => ({
+          ...o,
+          deliveryStatus: 'cancelled' as DeliveryStatus,
+          debtAmount: 0,
+          updatedById: currentUser.id,
+          updatedByName: currentUser.fullName,
+          updatedAt: new Date().toISOString(),
+        }));
+      onBatchUpdateOrders(updated);
+      setSelectedOrderIds([]);
+      alert(`Đã đánh dấu hủy ${updated.length} đơn hàng.`);
+    }
+  };
+
+  // Batch Restore Orders (Khôi phục đơn hàng loạt)
+  const handleBatchRestore = () => {
+    if (selectedOrderIds.length === 0) {
+      alert('Vui lòng chọn ít nhất một đơn hàng để khôi phục.');
+      return;
+    }
+    const updated = orders
+      .filter((o) => selectedOrderIds.includes(o.id))
+      .map((o) => ({
+        ...o,
+        deliveryStatus: 'pending' as DeliveryStatus,
+        debtAmount: Math.max(0, o.totalAmount - o.paidAmount),
+        updatedById: currentUser.id,
+        updatedByName: currentUser.fullName,
+        updatedAt: new Date().toISOString(),
+      }));
+    onBatchUpdateOrders(updated);
+    setSelectedOrderIds([]);
+    alert(`Đã khôi phục ${updated.length} đơn hàng.`);
+  };
+
   // Batch Print Orders
   const handleOpenBatchPrint = () => {
     if (selectedOrderIds.length === 0) {
@@ -844,6 +970,24 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         </div>
       </div>
 
+      {/* Manual Sync Bar: Làm mới, Cập nhật, Đẩy dữ liệu, Nhận dữ liệu thủ công tại màn hình chính */}
+      <ManualSyncBar
+        isSyncing={isSyncing}
+        isAutoSyncing={isAutoSyncing}
+        autoSyncEnabled={autoSyncEnabled}
+        lastSyncedAt={lastSyncedAt}
+        spreadsheetId={spreadsheetId}
+        companyName={settings.companyName}
+        taxCode={settings.taxCode}
+        isDemo={isDemo}
+        currentDeviceName={currentDeviceName}
+        onManualReset={onManualReset}
+        onManualPush={onManualPush}
+        onManualPull={onManualPull}
+        onManualSync2Way={onManualSync2Way}
+        onOpenSyncModal={onOpenSyncModal}
+      />
+
       {/* Tabs: Đơn hàng vs Chi tiết đơn hàng vs Khách hàng */}
       <div className="flex items-center gap-1 sm:gap-2 border-b border-slate-200 overflow-x-auto no-scrollbar max-w-full pb-0.5">
         <button
@@ -1074,27 +1218,54 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                   <span>Copy đơn hàng loạt</span>
                 </button>
 
-                {/* Batch Delete Orders - Requirement 6 */}
+                {/* Batch Cancel Orders (Đánh dấu hủy đơn) */}
                 <button
                   type="button"
                   disabled={selectedOrderIds.length === 0}
-                  onClick={handleBatchDeleteOrders}
+                  onClick={handleBatchCancel}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                  title="Xóa các đơn hàng đã chọn cùng một lúc"
+                  title="Đánh dấu các đơn đã chọn là ĐÃ HỦY (không tính công nợ, không xuất kho)"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Xóa các đơn đã chọn ({selectedOrderIds.length})</span>
+                  <Ban className="w-3.5 h-3.5" />
+                  <span>Đánh dấu Hủy ({selectedOrderIds.length})</span>
                 </button>
 
-                {/* Recalculate Prices Button */}
+                {/* Batch Restore Orders (Khôi phục đơn) */}
+                {selectedOrderIds.some((id) => orders.find((o) => o.id === id)?.deliveryStatus === 'cancelled') && (
+                  <button
+                    type="button"
+                    onClick={handleBatchRestore}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300 cursor-pointer"
+                    title="Khôi phục các đơn đã hủy về trạng thái Chờ giao"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Khôi phục đơn đã hủy</span>
+                  </button>
+                )}
+
+                {/* Batch Delete Orders - CHỈ CHO TÀI KHOẢN ADMIN XÓA ĐƠN HÀNG */}
+                {currentUser.role === 'admin' && (
+                  <button
+                    type="button"
+                    disabled={selectedOrderIds.length === 0}
+                    onClick={handleBatchDeleteOrders}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-100 text-red-800 hover:bg-red-200 border border-red-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    title="Chỉ tài khoản Admin mới có quyền xóa đơn hàng"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                    <span>Xóa các đơn đã chọn ({selectedOrderIds.length})</span>
+                  </button>
+                )}
+
+                {/* Recalculate Prices Advanced Modal Button */}
                 <button
                   type="button"
                   onClick={() => setIsRecalcModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300 shadow-xs cursor-pointer"
-                  title="Tự động tính lại đơn giá bán theo Giá vốn cao nhất và Tỷ suất lợi nhuận"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300 shadow-2xs cursor-pointer"
+                  title="Mở bảng xem trước chi tiết tính lại giá bán theo khoảng ngày"
                 >
                   <Calculator className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Tính lại giá bán tự động</span>
+                  <span className="hidden sm:inline">Tùy chỉnh tính giá</span>
                 </button>
               </div>
 
@@ -1202,12 +1373,15 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                         .map((it) => it.productCode);
                       const hasUncatalogedProds = uncatalogedItemCodes.length > 0;
                       const isOrderRedFlagged = isCustomerUncataloged || hasUncatalogedProds;
+                      const isCancelled = order.deliveryStatus === 'cancelled';
 
                       return (
                         <tr
                           key={order.id}
                           className={`hover:bg-blue-50/40 transition-colors ${
-                            isOrderRedFlagged
+                            isCancelled
+                              ? 'bg-slate-50/80 opacity-75 hover:bg-slate-100/80 border-l-4 border-l-rose-400'
+                              : isOrderRedFlagged
                               ? 'bg-rose-50/50 hover:bg-rose-50/80 border-l-4 border-l-rose-500'
                               : isSelected
                               ? 'bg-blue-50/60'
@@ -1230,12 +1404,23 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                                   setViewingOrder(order);
                                   setIsDetailModalOpen(true);
                                 }}
-                                className="inline-flex items-center gap-1 hover:text-blue-900 hover:underline cursor-pointer group text-left"
+                                className={`inline-flex items-center gap-1 hover:text-blue-900 hover:underline cursor-pointer group text-left ${
+                                  isCancelled ? 'line-through text-slate-500' : ''
+                                }`}
                                 title="Bấm để xem chi tiết đơn hàng"
                               >
                                 <span>{order.orderCode}</span>
                                 <Eye className="w-3.5 h-3.5 text-blue-400 group-hover:text-blue-700 opacity-60 group-hover:opacity-100 transition-opacity" />
                               </button>
+                              {isCancelled && (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.2 rounded font-black bg-rose-600 text-white shadow-2xs"
+                                  title="Đơn hàng này đã bị hủy: không trừ tồn kho và không tính vào công nợ"
+                                >
+                                  <Ban className="w-2.5 h-2.5 shrink-0" />
+                                  ĐÃ HỦY
+                                </span>
+                              )}
                               {order.rootCode && (
                                 <span
                                   className="inline-flex items-center text-[10px] px-1.5 py-0.2 rounded font-mono font-normal bg-slate-100 text-slate-600 border border-slate-200"
@@ -1316,15 +1501,27 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                             })()}
                           </td>
                           <td className="p-3 text-right font-black text-slate-900">
-                            {formatCurrency(order.totalAmount)}
+                            {isCancelled ? (
+                              <span className="line-through text-slate-400 font-semibold" title="Đơn hàng đã hủy - không tính doanh thu">
+                                {formatCurrency(order.totalAmount)}
+                              </span>
+                            ) : (
+                              formatCurrency(order.totalAmount)
+                            )}
                           </td>
                           <td className="p-3 text-right font-semibold text-emerald-600">
                             {formatCurrency(order.paidAmount)}
                           </td>
                           <td className="p-3 text-right font-semibold">
-                            <span className={order.debtAmount > 0 ? 'text-rose-600 font-bold' : 'text-slate-400'}>
-                              {formatCurrency(order.debtAmount)}
-                            </span>
+                            {isCancelled ? (
+                              <span className="text-slate-400 font-medium text-xs bg-slate-100 px-2 py-0.5 rounded">
+                                0 đ (Đã hủy)
+                              </span>
+                            ) : (
+                              <span className={order.debtAmount > 0 ? 'text-rose-600 font-bold' : 'text-slate-400'}>
+                                {formatCurrency(order.debtAmount)}
+                              </span>
+                            )}
                           </td>
                           <td className="p-3 text-center">
                             <span className="inline-block px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-700">
@@ -1390,6 +1587,20 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                                 <Copy className="w-4 h-4" />
                               </button>
 
+                              {/* Toggle Cancel / Restore */}
+                              <button
+                                type="button"
+                                onClick={() => handleToggleCancelOrder(order)}
+                                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                  isCancelled
+                                    ? 'text-amber-600 hover:text-emerald-600 hover:bg-emerald-50'
+                                    : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                                }`}
+                                title={isCancelled ? 'Khôi phục đơn hàng' : 'Đánh dấu hủy đơn hàng (không trừ kho, không tính nợ)'}
+                              >
+                                {isCancelled ? <RotateCcw className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
+                              </button>
+
                               {/* Print */}
                               <button
                                 type="button"
@@ -1403,25 +1614,27 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                                 <Printer className="w-4 h-4" />
                               </button>
 
-                              {/* Delete */}
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  const ok = await confirm({
-                                    title: 'Xác nhận xóa đơn hàng',
-                                    message: `Bạn có chắc chắn muốn xóa đơn hàng ${order.orderCode} của khách hàng "${order.customerName}"?`,
-                                    confirmText: 'Xóa đơn hàng',
-                                    type: 'danger',
-                                  });
-                                  if (ok) {
-                                    onDeleteOrder(order.id);
-                                  }
-                                }}
-                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                title="Xóa đơn hàng"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              {/* Delete - CHỈ CHO PHÉP TÀI KHOẢN ADMIN XÓA */}
+                              {currentUser.role === 'admin' && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    const ok = await confirm({
+                                      title: 'Xác nhận xóa đơn hàng',
+                                      message: `Bạn có chắc chắn muốn xóa đơn hàng ${order.orderCode} của khách hàng "${order.customerName}"?`,
+                                      confirmText: 'Xóa đơn hàng',
+                                      type: 'danger',
+                                    });
+                                    if (ok) {
+                                      onDeleteOrder(order.id);
+                                    }
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Xóa đơn hàng (Chỉ Admin)"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -1809,6 +2022,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
             setOrdersToPrint([ord]);
             setIsPrintModalOpen(true);
           }}
+          onToggleCancel={handleToggleCancelOrder}
         />
       )}
 
