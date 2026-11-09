@@ -390,23 +390,31 @@ export const ReportsManager: React.FC<ReportsManagerProps> = ({
           </p>
         </div>
 
-        {/* Date Filter */}
-        <div className="flex flex-wrap items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-          <Calendar className="w-4 h-4 text-slate-500" />
-          <span className="text-xs font-semibold text-slate-600">Từ:</span>
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            className="px-2.5 py-1 text-xs border border-slate-300 rounded-lg bg-white font-medium"
-          />
-          <span className="text-xs font-semibold text-slate-600">Đến:</span>
-          <input
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            className="px-2.5 py-1 text-xs border border-slate-300 rounded-lg bg-white font-medium"
-          />
+        {/* Date Filter - Responsive for mobile */}
+        <div className="w-full sm:w-auto bg-slate-50 p-2 sm:p-1.5 rounded-xl border border-slate-200 text-xs min-w-0">
+          <div className="grid grid-cols-1 min-[340px]:grid-cols-2 sm:flex sm:items-center gap-2 sm:gap-1.5 min-w-0">
+            <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-300 min-w-0">
+              <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+              <span className="font-bold text-slate-600 shrink-0">Từ:</span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full min-w-0 text-xs bg-transparent font-medium text-slate-800 focus:outline-hidden cursor-pointer"
+                title="Chọn ngày bắt đầu"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-300 min-w-0">
+              <span className="font-bold text-slate-600 shrink-0">Đến:</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-full min-w-0 text-xs bg-transparent font-medium text-slate-800 focus:outline-hidden cursor-pointer"
+                title="Chọn ngày kết thúc"
+              />
+            </div>
+          </div>
         </div>
       </div>
 

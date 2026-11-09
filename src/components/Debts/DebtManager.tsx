@@ -64,6 +64,60 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
   // Date range filter for Debts
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [activeDatePreset, setActiveDatePreset] = useState<string>('all');
+
+  const handleApplyDatePreset = (preset: string) => {
+    setActiveDatePreset(preset);
+    const now = new Date();
+    const formatYMD = (d: Date) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+
+    if (preset === 'today') {
+      const today = formatYMD(now);
+      setStartDate(today);
+      setEndDate(today);
+    } else if (preset === 'yesterday') {
+      const yest = new Date(now);
+      yest.setDate(yest.getDate() - 1);
+      const yestStr = formatYMD(yest);
+      setStartDate(yestStr);
+      setEndDate(yestStr);
+    } else if (preset === 'last_7_days') {
+      const past = new Date(now);
+      past.setDate(past.getDate() - 6);
+      setStartDate(formatYMD(past));
+      setEndDate(formatYMD(now));
+    } else if (preset === 'this_month') {
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      setStartDate(formatYMD(firstDay));
+      setEndDate(formatYMD(lastDay));
+    } else if (preset === 'last_month') {
+      const firstDay = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastDay = new Date(now.getFullYear(), now.getMonth(), 0);
+      setStartDate(formatYMD(firstDay));
+      setEndDate(formatYMD(lastDay));
+    } else if (preset === 'this_quarter') {
+      const q = Math.floor(now.getMonth() / 3);
+      const firstDay = new Date(now.getFullYear(), q * 3, 1);
+      const lastDay = new Date(now.getFullYear(), q * 3 + 3, 0);
+      setStartDate(formatYMD(firstDay));
+      setEndDate(formatYMD(lastDay));
+    } else if (preset === 'this_year') {
+      const firstDay = new Date(now.getFullYear(), 0, 1);
+      const lastDay = new Date(now.getFullYear(), 11, 31);
+      setStartDate(formatYMD(firstDay));
+      setEndDate(formatYMD(lastDay));
+    } else {
+      // all
+      setStartDate('');
+      setEndDate('');
+    }
+  };
 
   // Selected entity for detailed drilldown
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
@@ -746,79 +800,202 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
         </div>
       </div>
 
-      {/* View Switch, Date Filter & Excel Import Toolbar */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
-        <div className="flex flex-wrap items-center gap-2">
+      {/* Redesigned Toolbar: View Switch, Date Presets & Status Filters */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+        {/* Row 1: View Mode Switch & Export/Import Buttons */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           {/* View Mode Buttons */}
-          <button
-            type="button"
-            onClick={() => {
-              setViewMode('summary');
-              setSelectedEntityId(null);
-            }}
-            className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-              viewMode === 'summary'
-                ? 'bg-slate-900 text-white shadow-xs'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            Tổng hợp Công nợ
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('detail')}
-            className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-              viewMode === 'detail'
-                ? 'bg-slate-900 text-white shadow-xs'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            Chi tiết Lịch sử
-          </button>
+          <div className="grid grid-cols-2 sm:inline-flex bg-slate-100 p-1 rounded-xl w-full sm:w-auto shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setViewMode('summary');
+                setSelectedEntityId(null);
+              }}
+              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer text-center whitespace-nowrap ${
+                viewMode === 'summary'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+              }`}
+            >
+              Tổng hợp Công nợ
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('detail')}
+              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer text-center whitespace-nowrap ${
+                viewMode === 'detail'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+              }`}
+            >
+              Chi tiết Lịch sử
+            </button>
+          </div>
 
-          <div className="h-5 w-px bg-slate-200 mx-1 hidden sm:block" />
-
-          {/* Date range filter */}
-          <div className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1 rounded-xl border border-slate-200 text-xs">
-            <Calendar className="w-3.5 h-3.5 text-slate-500" />
-            <span className="font-semibold text-slate-600">Từ:</span>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="px-2 py-0.5 border border-slate-300 rounded text-xs bg-white font-medium"
-            />
-            <span className="font-semibold text-slate-600">Đến:</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="px-2 py-0.5 border border-slate-300 rounded text-xs bg-white font-medium"
-            />
-            {(startDate || endDate) && (
+          {/* Action buttons (Excel Export & Import) */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Excel Export Summary Debt */}
+            {viewMode === 'summary' && (
               <button
                 type="button"
-                onClick={() => {
-                  setStartDate('');
-                  setEndDate('');
-                }}
-                className="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
-                title="Xóa lọc ngày"
+                onClick={handleExportSummaryDebt}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white shadow-xs cursor-pointer transition-all"
+                title={`Xuất ${filteredSummaryList.length} dòng công nợ tổng hợp ra file Excel`}
               >
-                <X className="w-3.5 h-3.5" />
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Xuất Excel công nợ</span>
               </button>
             )}
+
+            {/* Excel Export Detail for current entity */}
+            {viewMode === 'detail' && selectedEntityId && (
+              <button
+                type="button"
+                onClick={() => handleExportEntityDebt(selectedEntityId)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white shadow-xs cursor-pointer transition-all"
+                title="Xuất chi tiết lịch sử công nợ của đối tượng này ra file Excel"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Xuất Excel chi tiết</span>
+              </button>
+            )}
+
+            {/* Excel Import for Debts */}
+            <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer">
+              <Upload className="w-3.5 h-3.5" />
+              <span>{activeTab === 'customer' ? 'Nhập Excel Thu nợ KH' : 'Nhập Excel Chi trả NCC'}</span>
+              <input
+                type="file"
+                accept=".xlsx, .xls"
+                onChange={handleExcelImportDebts}
+                className="hidden"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={activeTab === 'customer' ? downloadCustomerDebtTemplate : downloadSupplierDebtTemplate}
+              className="text-xs text-slate-500 hover:text-indigo-600 underline cursor-pointer"
+            >
+              Tải mẫu Excel
+            </button>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Debt Filter Pills for Summary View */}
-          {viewMode === 'summary' && (
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+        {/* Row 2: Redesigned Date Filter Strip with Presets & Range Inputs */}
+        <div className="p-3 bg-gradient-to-r from-slate-50 via-blue-50/30 to-indigo-50/20 rounded-xl border border-slate-200/80 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+          {/* Quick Presets */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 mr-1 shrink-0">
+              <Calendar className="w-4 h-4 text-blue-600" />
+              <span>Thời gian công nợ:</span>
+            </div>
+            {[
+              { id: 'all', label: 'Tất cả' },
+              { id: 'today', label: 'Hôm nay' },
+              { id: 'yesterday', label: 'Hôm qua' },
+              { id: 'last_7_days', label: '7 ngày qua' },
+              { id: 'this_month', label: 'Tháng này' },
+              { id: 'last_month', label: 'Tháng trước' },
+              { id: 'this_quarter', label: 'Quý này' },
+              { id: 'this_year', label: 'Năm nay' },
+            ].map((p) => {
+              const isSelected = activeDatePreset === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => handleApplyDatePreset(p.id)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-blue-600 text-white shadow-xs font-bold ring-2 ring-blue-500/20'
+                      : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200/80'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Exact Date Range Inputs */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between xl:justify-end gap-2 w-full xl:w-auto min-w-0">
+            <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-2 w-full sm:w-auto min-w-0">
+              <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-slate-300 shadow-2xs min-w-0">
+                <span className="text-[11px] font-bold text-slate-500 shrink-0">Từ ngày:</span>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => {
+                    setStartDate(e.target.value);
+                    setActiveDatePreset('custom');
+                  }}
+                  className="w-full min-w-0 text-xs font-semibold text-slate-800 bg-transparent focus:outline-hidden cursor-pointer"
+                  title="Chọn ngày bắt đầu"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-slate-300 shadow-2xs min-w-0">
+                <span className="text-[11px] font-bold text-slate-500 shrink-0">Đến ngày:</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => {
+                    setEndDate(e.target.value);
+                    setActiveDatePreset('custom');
+                  }}
+                  className="w-full min-w-0 text-xs font-semibold text-slate-800 bg-transparent focus:outline-hidden cursor-pointer"
+                  title="Chọn ngày kết thúc"
+                />
+                {(startDate || endDate) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStartDate('');
+                      setEndDate('');
+                      setActiveDatePreset('all');
+                    }}
+                    className="p-1 text-slate-400 hover:text-rose-600 rounded-md cursor-pointer transition-colors shrink-0"
+                    title="Xóa lọc ngày (xem tất cả)"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
+              {(startDate || endDate) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStartDate('');
+                    setEndDate('');
+                    setActiveDatePreset('all');
+                  }}
+                  className="text-xs text-rose-600 font-semibold hover:underline cursor-pointer sm:hidden"
+                >
+                  Xóa lọc ngày
+                </button>
+              )}
+              <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white border border-slate-200 text-slate-700 shadow-2xs shrink-0 ml-auto sm:ml-0">
+                <span className="text-slate-400 font-normal">Đang xem:</span>
+                <span className="text-blue-700 font-bold font-mono">{filteredSummaryList.length}</span>
+                <span className="text-slate-500 font-normal">đối tượng</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Row 3: Status Filter Pills & Search Box */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-t border-slate-100">
+          {/* Status filter (Tất cả, Chỉ còn nợ, Đã hết nợ) */}
+          {viewMode === 'summary' ? (
+            <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl text-xs font-semibold overflow-x-auto">
               <button
                 type="button"
                 onClick={() => setDebtFilterMode('all')}
-                className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer whitespace-nowrap ${
                   debtFilterMode === 'all'
                     ? 'bg-white text-slate-900 shadow-xs font-bold'
                     : 'text-slate-600 hover:text-slate-900'
@@ -829,7 +1006,7 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
               <button
                 type="button"
                 onClick={() => setDebtFilterMode('has_debt')}
-                className={`px-3 py-1 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
                   debtFilterMode === 'has_debt'
                     ? 'bg-rose-600 text-white shadow-xs font-bold'
                     : 'text-rose-700 hover:bg-rose-100/50'
@@ -841,7 +1018,7 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
               <button
                 type="button"
                 onClick={() => setDebtFilterMode('zero_debt')}
-                className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer whitespace-nowrap ${
                   debtFilterMode === 'zero_debt'
                     ? 'bg-emerald-600 text-white shadow-xs font-bold'
                     : 'text-emerald-700 hover:bg-emerald-100/50'
@@ -850,61 +1027,24 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
                 Đã hết nợ ({activeTab === 'customer' ? customerDebtCounts.zeroDebt : supplierDebtCounts.zeroDebt})
               </button>
             </div>
+          ) : (
+            <div className="text-xs font-semibold text-slate-500">
+              {selectedEntity ? (
+                <span>Đang xem lịch sử: <strong className="text-slate-800">{selectedEntity.name}</strong></span>
+              ) : (
+                <span>Chọn một khách hàng/nhà cung cấp để xem chi tiết lịch sử</span>
+              )}
+            </div>
           )}
 
-          {/* Excel Export Summary Debt */}
-          {viewMode === 'summary' && (
-            <button
-              type="button"
-              onClick={handleExportSummaryDebt}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white shadow-xs cursor-pointer transition-all"
-              title={`Xuất ${filteredSummaryList.length} dòng công nợ tổng hợp ra file Excel`}
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Xuất Excel công nợ tổng hợp</span>
-            </button>
-          )}
-
-          {/* Excel Export Detail for current entity */}
-          {viewMode === 'detail' && selectedEntityId && (
-            <button
-              type="button"
-              onClick={() => handleExportEntityDebt(selectedEntityId)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white shadow-xs cursor-pointer transition-all"
-              title="Xuất chi tiết lịch sử công nợ của đối tượng này ra file Excel"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Xuất Excel chi tiết</span>
-            </button>
-          )}
-
-          {/* Excel Import for Debts */}
-          <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer">
-            <Upload className="w-3.5 h-3.5" />
-            <span>{activeTab === 'customer' ? 'Nhập Excel Thu nợ KH' : 'Nhập Excel Chi trả NCC'}</span>
-            <input
-              type="file"
-              accept=".xlsx, .xls"
-              onChange={handleExcelImportDebts}
-              className="hidden"
-            />
-          </label>
-          <button
-            type="button"
-            onClick={activeTab === 'customer' ? downloadCustomerDebtTemplate : downloadSupplierDebtTemplate}
-            className="text-xs text-slate-500 hover:text-indigo-600 underline cursor-pointer"
-          >
-            Tải mẫu Excel
-          </button>
-
-          {/* Search */}
-          <div className="relative w-48 sm:w-60">
+          {/* Search Box */}
+          <div className="relative w-full sm:w-72">
             <input
               type="text"
               placeholder="Tìm theo Mã, Tên, MST, SĐT..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-8 pr-7 py-1.5 border border-slate-300 rounded-xl text-xs"
+              className="w-full pl-8 pr-7 py-2 border border-slate-300 rounded-xl text-xs bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all shadow-2xs"
             />
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
             {searchTerm && (

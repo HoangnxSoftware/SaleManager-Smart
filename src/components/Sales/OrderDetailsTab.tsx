@@ -344,52 +344,52 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
             </div>
 
-            {/* Date Range: Từ ngày -> Đến ngày */}
-            <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-300 shadow-2xs">
-              <div className="flex items-center gap-1.5">
-                <Calendar className="w-4 h-4 text-slate-400 ml-1" />
-                <span className="text-xs font-bold text-slate-700">Từ ngày:</span>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => {
-                    setStartDate(e.target.value);
-                    setActiveDatePreset('custom');
-                  }}
-                  className="px-2 py-1 text-xs border border-slate-300 rounded-lg bg-white font-medium focus:ring-2 focus:ring-blue-500"
-                  title="Chọn ngày bắt đầu"
-                />
-              </div>
+            {/* Date Range: Từ ngày -> Đến ngày - Responsive for mobile */}
+            <div className="w-full sm:w-auto bg-slate-50 p-2 sm:p-1.5 rounded-xl border border-slate-300 shadow-2xs">
+              <div className="grid grid-cols-1 min-[360px]:grid-cols-2 sm:flex sm:items-center gap-2 sm:gap-2">
+                <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 min-w-0">
+                  <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                  <span className="text-xs font-bold text-slate-700 shrink-0">Từ:</span>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => {
+                      setStartDate(e.target.value);
+                      setActiveDatePreset('custom');
+                    }}
+                    className="w-full min-w-0 text-xs font-medium bg-transparent focus:outline-hidden cursor-pointer"
+                    title="Chọn ngày bắt đầu"
+                  />
+                </div>
 
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-bold text-slate-700">Đến ngày:</span>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => {
-                    setEndDate(e.target.value);
-                    setActiveDatePreset('custom');
-                  }}
-                  className="px-2 py-1 text-xs border border-slate-300 rounded-lg bg-white font-medium focus:ring-2 focus:ring-blue-500"
-                  title="Chọn ngày kết thúc"
-                />
+                <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 min-w-0">
+                  <span className="text-xs font-bold text-slate-700 shrink-0">Đến:</span>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => {
+                      setEndDate(e.target.value);
+                      setActiveDatePreset('custom');
+                    }}
+                    className="w-full min-w-0 text-xs font-medium bg-transparent focus:outline-hidden cursor-pointer"
+                    title="Chọn ngày kết thúc"
+                  />
+                  {(startDate || endDate) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStartDate('');
+                        setEndDate('');
+                        setActiveDatePreset('all');
+                      }}
+                      className="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer shrink-0 transition-colors"
+                      title="Xóa lọc ngày"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
-
-              {(startDate || endDate) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStartDate('');
-                    setEndDate('');
-                    setActiveDatePreset('all');
-                  }}
-                  className="px-2 py-1 text-xs text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg cursor-pointer font-bold transition-colors ml-1"
-                  title="Xóa khoảng ngày lọc"
-                >
-                  <X className="w-3.5 h-3.5 inline mr-0.5" />
-                  <span>Đặt lại</span>
-                </button>
-              )}
             </div>
           </div>
 

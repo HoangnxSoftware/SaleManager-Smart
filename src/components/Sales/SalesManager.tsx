@@ -1129,32 +1129,53 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                 })}
               </div>
 
-              {/* Exact Date Inputs + Reset + Count indicator */}
-              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
-                <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-lg border border-slate-300 shadow-2xs">
-                  <span className="text-[11px] font-semibold text-slate-500 shrink-0">Từ ngày:</span>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => {
-                      setStartDate(e.target.value);
-                      setActiveDatePreset('custom');
-                    }}
-                    className="text-xs font-medium text-slate-800 bg-transparent focus:outline-hidden"
-                    title="Từ ngày"
-                  />
-                  <span className="text-slate-400 font-bold text-xs">➔</span>
-                  <span className="text-[11px] font-semibold text-slate-500 shrink-0">Đến ngày:</span>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => {
-                      setEndDate(e.target.value);
-                      setActiveDatePreset('custom');
-                    }}
-                    className="text-xs font-medium text-slate-800 bg-transparent focus:outline-hidden"
-                    title="Đến ngày"
-                  />
+              {/* Exact Date Inputs + Reset + Count indicator - Responsive for mobile */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 w-full min-w-0">
+                <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-2 w-full sm:w-auto min-w-0">
+                  <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-slate-300 shadow-2xs min-w-0">
+                    <span className="text-[11px] font-bold text-slate-500 shrink-0">Từ ngày:</span>
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => {
+                        setStartDate(e.target.value);
+                        setActiveDatePreset('custom');
+                      }}
+                      className="w-full min-w-0 text-xs font-semibold text-slate-800 bg-transparent focus:outline-hidden cursor-pointer"
+                      title="Chọn ngày bắt đầu"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-slate-300 shadow-2xs min-w-0">
+                    <span className="text-[11px] font-bold text-slate-500 shrink-0">Đến ngày:</span>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => {
+                        setEndDate(e.target.value);
+                        setActiveDatePreset('custom');
+                      }}
+                      className="w-full min-w-0 text-xs font-semibold text-slate-800 bg-transparent focus:outline-hidden cursor-pointer"
+                      title="Chọn ngày kết thúc"
+                    />
+                    {(startDate || endDate) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStartDate('');
+                          setEndDate('');
+                          setActiveDatePreset('all');
+                        }}
+                        className="p-1 text-slate-400 hover:text-rose-600 rounded-md cursor-pointer transition-colors shrink-0"
+                        title="Xóa lọc ngày (xem tất cả)"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
                   {(startDate || endDate) && (
                     <button
                       type="button"
@@ -1163,18 +1184,16 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                         setEndDate('');
                         setActiveDatePreset('all');
                       }}
-                      className="p-0.5 text-slate-400 hover:text-rose-600 rounded-md cursor-pointer transition-colors"
-                      title="Xóa lọc ngày (xem tất cả)"
+                      className="text-xs text-rose-600 font-semibold hover:underline sm:hidden cursor-pointer"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      Xóa lọc ngày
                     </button>
                   )}
-                </div>
-
-                <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white border border-slate-200 text-slate-700 shadow-2xs shrink-0">
-                  <span className="text-slate-400 font-normal">Đang xem:</span>
-                  <span className="text-blue-700 font-bold font-mono">{filteredOrders.length}</span>
-                  <span className="text-slate-500 font-normal">/ {uniqueOrders.length} đơn</span>
+                  <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white border border-slate-200 text-slate-700 shadow-2xs shrink-0 ml-auto sm:ml-0">
+                    <span className="text-slate-400 font-normal">Đang xem:</span>
+                    <span className="text-blue-700 font-bold font-mono">{filteredOrders.length}</span>
+                    <span className="text-slate-500 font-normal">/ {uniqueOrders.length} đơn</span>
+                  </div>
                 </div>
               </div>
             </div>

@@ -1601,41 +1601,124 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                 Hình thức thanh toán & Giảm giá đơn
               </h4>
 
-              {/* Discount inputs */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-slate-700">
-                  Chiết khấu giảm giá tổng đơn hàng:
-                </label>
-                <div className="flex items-center gap-2">
-                  <div className="flex rounded-lg border border-slate-300 overflow-hidden bg-white">
-                    <button
-                      type="button"
-                      onClick={() => setDiscountType('amount')}
-                      className={`px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
-                        discountType === 'amount' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      Số tiền (VNĐ)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDiscountType('percent')}
-                      className={`px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
-                        discountType === 'percent' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      % Phần trăm
-                    </button>
+              {/* Discount inputs - Redesigned for mobile clarity */}
+              <div className="bg-white p-3 rounded-xl border border-slate-200/90 shadow-2xs space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <Percent className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                    <span>Chiết khấu giảm giá tổng đơn hàng:</span>
+                  </label>
+                  {totals.finalOrderDiscount > 0 && (
+                    <span className="text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full shrink-0">
+                      -{formatCurrency(totals.finalOrderDiscount)}
+                    </span>
+                  )}
+                </div>
+
+                {/* 2 Tab chọn loại chiết khấu: Rõ ràng, to bản, không co chữ trên điện thoại */}
+                <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200/80">
+                  <button
+                    type="button"
+                    onClick={() => setDiscountType('amount')}
+                    className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                      discountType === 'amount'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+                    }`}
+                  >
+                    <Banknote className="w-3.5 h-3.5 shrink-0" />
+                    <span>Số tiền (VNĐ)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDiscountType('percent');
+                      if (orderDiscountInput > 100) {
+                        setOrderDiscountInput(0);
+                      }
+                    }}
+                    className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                      discountType === 'percent'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+                    }`}
+                  >
+                    <Percent className="w-3.5 h-3.5 shrink-0" />
+                    <span>% Phần trăm</span>
+                  </button>
+                </div>
+
+                {/* Ô nhập số tiền / % nằm ở dòng riêng rộng 100% với nhãn đơn vị rõ ràng */}
+                <div className="space-y-1.5">
+                  <div className="relative flex items-center">
+                    <input
+                      type="number"
+                      min="0"
+                      max={discountType === 'percent' ? 100 : undefined}
+                      step="any"
+                      value={orderDiscountInput === 0 ? '' : orderDiscountInput}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setOrderDiscountInput(isNaN(val) ? 0 : Math.max(0, val));
+                      }}
+                      placeholder={
+                        discountType === 'percent'
+                          ? 'Nhập số % giảm (ví dụ: 5, 10...)'
+                          : 'Nhập số tiền giảm giá (VNĐ)'
+                      }
+                      className="w-full pl-3 pr-14 py-2.5 bg-slate-50 hover:bg-white focus:bg-white border border-slate-300 rounded-xl text-sm font-bold text-right text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all shadow-2xs"
+                    />
+                    <div className="absolute right-2.5 px-2 py-1 rounded-md text-xs font-black bg-slate-200/90 text-slate-700 pointer-events-none select-none border border-slate-300/70">
+                      {discountType === 'percent' ? '%' : 'VNĐ'}
+                    </div>
                   </div>
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={orderDiscountInput}
-                    onChange={(e) => setOrderDiscountInput(parseFloat(e.target.value) || 0)}
-                    placeholder={discountType === 'percent' ? '% giảm giá' : 'Số tiền giảm'}
-                    className="flex-1 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-sm text-right font-medium"
-                  />
+
+                  {/* Thanh chọn nhanh mức % hoặc xem số tiền quy đổi */}
+                  {discountType === 'percent' ? (
+                    <div className="flex items-center justify-between gap-1 flex-wrap pt-0.5">
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <span className="text-[11px] text-slate-500 font-medium">Gợi ý nhanh:</span>
+                        {[5, 10, 15, 20].map((pct) => (
+                          <button
+                            key={pct}
+                            type="button"
+                            onClick={() => setOrderDiscountInput(pct)}
+                            className={`text-[11px] px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer border ${
+                              orderDiscountInput === pct
+                                ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                            }`}
+                          >
+                            {pct}%
+                          </button>
+                        ))}
+                      </div>
+                      {orderDiscountInput > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setOrderDiscountInput(0)}
+                          className="text-[11px] font-semibold text-rose-600 hover:underline cursor-pointer ml-auto"
+                        >
+                          Xóa giảm giá
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    orderDiscountInput > 0 && (
+                      <div className="flex items-center justify-between text-[11px] pt-0.5">
+                        <span className="text-slate-600">
+                          Bằng chữ: <strong className="text-rose-600 font-mono">{formatCurrency(orderDiscountInput)}</strong>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setOrderDiscountInput(0)}
+                          className="text-[11px] font-semibold text-rose-600 hover:underline cursor-pointer"
+                        >
+                          Xóa giảm giá
+                        </button>
+                      </div>
+                    )
+                  )}
                 </div>
               </div>
 
