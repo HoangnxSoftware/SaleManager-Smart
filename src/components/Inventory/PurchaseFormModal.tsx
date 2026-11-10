@@ -160,8 +160,22 @@ export const PurchaseFormModal: React.FC<PurchaseFormModalProps> = ({
     };
   }, []);
 
+  const initializedSessionKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      initializedSessionKeyRef.current = null;
+    }
+  }, [isOpen]);
+
   useEffect(() => {
     if (!isOpen) return;
+
+    const currentSessionKey = initialBill ? `edit_${initialBill.id}` : 'create_new';
+    if (initializedSessionKeyRef.current === currentSessionKey) {
+      return;
+    }
+    initializedSessionKeyRef.current = currentSessionKey;
 
     if (initialBill) {
       setBillNo(initialBill.billNo);

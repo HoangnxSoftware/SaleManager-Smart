@@ -147,11 +147,36 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
 
   const salePriceDecimals = settings.salePriceDecimals ?? 2;
 
-  // Initialize or reset form
+  // Session ref to prevent re-initialization on background sync/poll intervals
+  const initializedSessionKeyRef = useRef<string | null>(null);
+  const [hasRestoredDraft, setHasRestoredDraft] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
+  const draftStorageKey = `salemanager_order_draft_${currentUser.id || 'default'}`;
+
+  // Reset session key when modal is closed
+  useEffect(() => {
+    if (!isOpen) {
+      initializedSessionKeyRef.current = null;
+      setHasRestoredDraft(false);
+      setDraftSavedAt(null);
+    }
+  }, [isOpen]);
+
+  // Initialize or reset form ONLY ONCE when modal is opened for a given order or create mode
   useEffect(() => {
     if (!isOpen) return;
 
+    const currentSessionKey = initialOrder ? `edit_${initialOrder.id}` : 'create_new';
+    if (initializedSessionKeyRef.current === currentSessionKey) {
+      // Already initialized for this modal opening.
+      // Prevent background polling, active sessions sync, or prop array reference changes from wiping data!
+      return;
+    }
+    initializedSessionKeyRef.current = currentSessionKey;
+
     if (initialOrder) {
+      setHasRestoredDraft(false);
+      setDraftSavedAt(null);
       const matched = matchOrderToRule(initialOrder, rulesList);
       const activeRuleId =
         initialOrder.orderCodeRuleId ||
@@ -209,39 +234,186 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
         setOrderDiscountInput(initialOrder.orderDiscount);
       }
     } else {
-      const defaultRule =
-        rulesList.find((r) => r.id === settings.defaultOrderCodeRuleId) ||
-        rulesList.find((r) => r.isDefault) ||
-        rulesList[0];
-      const activeRuleId = defaultRule?.id || '';
-      setSelectedRuleId(activeRuleId);
+      // Create mode: Check for existing un-submitted draft first
+      let draftRestored = false;
+      try {
+        const rawDraft = localStorage.getItem(draftStorageKey);
+        if (rawDraft) {
+          const draft = JSON.parse(rawDraft);
+          const hasDraftItems = Array.isArray(draft.items) && draft.items.length > 0;
+          const hasDraftCustomer = Boolean(draft.customer);
+          const hasDraftNotes = Boolean(draft.notes && draft.notes.trim() !== '');
 
-      const today = new Date().toISOString().slice(0, 10);
-      setOrderDate(today);
-
-      if (defaultRule) {
-        const nextCode = generateNextOrderCode(defaultRule, today, allOrders);
-        setOrderCode(nextCode);
-      } else {
-        const datePart = today.replace(/-/g, '');
-        const countToday = allOrders.filter((o) => o.orderDate === today).length + 1;
-        setOrderCode(`DH-${datePart}-${String(countToday).padStart(3, '0')}`);
+          if (hasDraftItems || hasDraftCustomer || hasDraftNotes) {
+            setSelectedRuleId(draft.selectedRuleId || settings.defaultOrderCodeRuleId || rulesList[0]?.id || '');
+            setOrderCode(draft.orderCode || '');
+            setOrderDate(draft.orderDate || new Date().toISOString().slice(0, 10));
+            setSelectedCustomer(draft.customer || null);
+            setCustomerSearchTerm(
+              draft.customerSearchTerm ||
+                (draft.customer ? `${draft.customer.name} (${draft.customer.code})` : '')
+            );
+            setItems(hasDraftItems ? draft.items : []);
+            setDiscountType(draft.discountType || 'amount');
+            setOrderDiscountInput(draft.orderDiscountInput || 0);
+            setPaymentMethod(draft.paymentMethod || 'cash');
+            setPaidAmount(draft.paidAmount || 0);
+            setDeliveryStatus(draft.deliveryStatus || 'pending');
+            setSelectedUserId(draft.selectedUserId || currentUser.id);
+            setCreatedByName(draft.createdByName || currentUser.fullName || '');
+            setNotes(draft.notes || '');
+            setHasRestoredDraft(true);
+            setDraftSavedAt(draft.savedAt || null);
+            draftRestored = true;
+          }
+        }
+      } catch (err) {
+        console.warn('Could not read order draft from localStorage:', err);
       }
 
-      // REQUIREMENT: Bỏ trống thông tin khách hàng mặc định khi tạo mới để tìm kiếm nhanh
-      setSelectedCustomer(null);
-      setCustomerSearchTerm('');
-      setItems([]);
-      setDiscountType('amount');
-      setOrderDiscountInput(0);
-      setPaymentMethod('cash');
-      setPaidAmount(0);
-      setDeliveryStatus('pending'); // Default "Chờ giao"
-      setSelectedUserId(currentUser.id);
-      setCreatedByName(currentUser.fullName || '');
-      setNotes('');
+      if (!draftRestored) {
+        setHasRestoredDraft(false);
+        setDraftSavedAt(null);
+        const defaultRule =
+          rulesList.find((r) => r.id === settings.defaultOrderCodeRuleId) ||
+          rulesList.find((r) => r.isDefault) ||
+          rulesList[0];
+        const activeRuleId = defaultRule?.id || '';
+        setSelectedRuleId(activeRuleId);
+
+        const today = new Date().toISOString().slice(0, 10);
+        setOrderDate(today);
+
+        if (defaultRule) {
+          const nextCode = generateNextOrderCode(defaultRule, today, allOrders);
+          setOrderCode(nextCode);
+        } else {
+          const datePart = today.replace(/-/g, '');
+          const countToday = allOrders.filter((o) => o.orderDate === today).length + 1;
+          setOrderCode(`DH-${datePart}-${String(countToday).padStart(3, '0')}`);
+        }
+
+        // Bỏ trống thông tin khách hàng mặc định khi tạo mới để tìm kiếm nhanh
+        setSelectedCustomer(null);
+        setCustomerSearchTerm('');
+        setItems([]);
+        setDiscountType('amount');
+        setOrderDiscountInput(0);
+        setPaymentMethod('cash');
+        setPaidAmount(0);
+        setDeliveryStatus('pending'); // Default "Chờ giao"
+        setSelectedUserId(currentUser.id);
+        setCreatedByName(currentUser.fullName || '');
+        setNotes('');
+      }
     }
-  }, [isOpen, initialOrder, customers, allOrders, currentUser, rulesList, settings.defaultOrderCodeRuleId, users]);
+  }, [isOpen, initialOrder, customers, allOrders, currentUser, rulesList, settings.defaultOrderCodeRuleId, users, draftStorageKey]);
+
+  // Auto-save draft whenever user enters or changes data in create mode
+  useEffect(() => {
+    if (!isOpen || initialOrder) return;
+    if (initializedSessionKeyRef.current !== 'create_new') return;
+
+    const hasData = items.length > 0 || selectedCustomer || (notes && notes.trim() !== '');
+    if (hasData) {
+      try {
+        const nowStr = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+        const draftData = {
+          orderCode,
+          orderDate,
+          selectedRuleId,
+          customer: selectedCustomer,
+          customerSearchTerm,
+          items,
+          discountType,
+          orderDiscountInput,
+          paymentMethod,
+          paidAmount,
+          deliveryStatus,
+          selectedUserId,
+          createdByName,
+          notes,
+          savedAt: nowStr,
+        };
+        localStorage.setItem(draftStorageKey, JSON.stringify(draftData));
+      } catch (err) {
+        console.warn('Error saving order draft:', err);
+      }
+    }
+  }, [
+    isOpen,
+    initialOrder,
+    orderCode,
+    orderDate,
+    selectedRuleId,
+    selectedCustomer,
+    customerSearchTerm,
+    items,
+    discountType,
+    orderDiscountInput,
+    paymentMethod,
+    paidAmount,
+    deliveryStatus,
+    selectedUserId,
+    createdByName,
+    notes,
+    draftStorageKey,
+  ]);
+
+  // Clear draft to start completely blank
+  const handleClearDraft = async () => {
+    const ok = await confirm({
+      title: 'Xóa bản nháp và làm mới?',
+      message: 'Bạn có chắc chắn muốn xóa toàn bộ thông tin khách hàng và mặt hàng đang tạo để bắt đầu đơn hàng mới?',
+      confirmText: 'Xóa bản nháp',
+      cancelText: 'Giữ lại',
+      type: 'danger',
+    });
+    if (!ok) return;
+
+    try {
+      localStorage.removeItem(draftStorageKey);
+    } catch {
+      // ignore
+    }
+
+    setHasRestoredDraft(false);
+    setDraftSavedAt(null);
+    setSelectedCustomer(null);
+    setCustomerSearchTerm('');
+    setItems([]);
+    setDiscountType('amount');
+    setOrderDiscountInput(0);
+    setPaymentMethod('cash');
+    setPaidAmount(0);
+    setDeliveryStatus('pending');
+    setNotes('');
+
+    const defaultRule =
+      rulesList.find((r) => r.id === settings.defaultOrderCodeRuleId) ||
+      rulesList.find((r) => r.isDefault) ||
+      rulesList[0];
+    const today = new Date().toISOString().slice(0, 10);
+    setOrderDate(today);
+    if (defaultRule) {
+      setOrderCode(generateNextOrderCode(defaultRule, today, allOrders));
+    }
+  };
+
+  // Safe close handler that warns if there are unsaved items
+  const handleClose = async () => {
+    if (!initialOrder && (items.length > 0 || selectedCustomer)) {
+      const ok = await confirm({
+        title: 'Đóng đơn hàng đang tạo?',
+        message: 'Bạn đang có thông tin đơn hàng chưa lưu. Dữ liệu đã được lưu thành bản nháp an toàn, bạn có thể quay lại tiếp tục bất cứ lúc nào.',
+        confirmText: 'Đóng (giữ bản nháp)',
+        cancelText: 'Tiếp tục soạn',
+        type: 'info',
+      });
+      if (!ok) return;
+    }
+    onClose();
+  };
 
   // Filter customers by Name, Short name, Tax code, Phone, Code
   const filteredCustomers = useMemo(() => {
@@ -626,6 +798,14 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
       updatedAt: new Date().toISOString(),
     };
 
+    try {
+      localStorage.removeItem(draftStorageKey);
+    } catch {
+      // ignore
+    }
+    setHasRestoredDraft(false);
+    setDraftSavedAt(null);
+
     onSave(newOrder);
     onClose();
   };
@@ -649,7 +829,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             type="button"
             className="p-2 -mr-1 rounded-xl text-blue-200 hover:text-white hover:bg-white/10 active:bg-white/20 transition-colors cursor-pointer shrink-0"
             aria-label="Đóng cửa sổ"
@@ -657,6 +837,27 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
             <X className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
         </div>
+
+        {/* Restored Draft Notice Banner */}
+        {hasRestoredDraft && (
+          <div className="bg-amber-50 border-b border-amber-200 px-3.5 py-2.5 flex items-center justify-between gap-2 shrink-0">
+            <div className="flex items-center gap-2 text-xs text-amber-900 font-medium min-w-0">
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-200 text-amber-900 font-bold shrink-0 text-[11px]">
+                i
+              </span>
+              <span className="truncate">
+                Đã tự động khôi phục dữ liệu đơn hàng đang soạn dở{draftSavedAt ? ` (lưu lúc ${draftSavedAt})` : ''}.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleClearDraft}
+              className="px-2.5 py-1 text-xs font-semibold text-rose-700 bg-white hover:bg-rose-50 border border-rose-300 rounded-lg transition-colors cursor-pointer shrink-0 shadow-2xs"
+            >
+              Xóa bản nháp này
+            </button>
+          </div>
+        )}
 
         {/* Scrollable Body */}
         <div className="p-3 sm:p-6 overflow-y-auto overflow-x-hidden space-y-4 sm:space-y-6 flex-1 overscroll-contain">
@@ -1910,7 +2111,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
         <div className="p-3 sm:p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2 shrink-0 rounded-none sm:rounded-b-2xl z-20">
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-semibold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 rounded-xl border border-slate-300 transition-colors cursor-pointer shrink-0"
           >
             Đóng / Hủy
