@@ -45,7 +45,7 @@ export const UserManager: React.FC<UserManagerProps> = ({
     setRole(u.role);
     setPhone(u.phone || '');
     setEmail(u.email || '');
-    setPassword(u.password || '123');
+    setPassword(u.password || '');
     setIsModalOpen(true);
   };
 

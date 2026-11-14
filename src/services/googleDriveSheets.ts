@@ -11,7 +11,7 @@ import {
   DebtPayment,
 } from '../types';
 import { DEFAULT_ORDER_CODE_RULES, ensureOrdersHaveRootCode, mergeOrdersByRootCode, deduplicateOrders } from './orderCodeService';
-import { INITIAL_USERS, DEFAULT_SETTINGS } from './storage';
+import { createDefaultOfficialAdminUser, DEFAULT_SETTINGS } from './storage';
 
 // Initialize Firebase if not already initialized
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
@@ -1065,7 +1065,7 @@ export async function loadDataFromGoogleSheets(
       orders: deduplicateOrders(parsedSheetOrders),
       purchases: parsedSheetPurchases,
       debtPayments: parsedSheetDebts,
-      users: INITIAL_USERS,
+      users: [createDefaultOfficialAdminUser()],
       isDemo: false,
       spreadsheetId: targetId,
       syncSource: 'google_drive',

@@ -312,6 +312,16 @@ export default function App() {
     setData(loaded);
   };
 
+  // Users updated handler (e.g. after resetting official Admin password from LoginModal)
+  const handleUsersUpdatedFromLogin = (updatedUsers: AppUser[], dbId: string) => {
+    setData((prev) => {
+      if (prev.databaseId === dbId || selectedDbId === dbId) {
+        return { ...prev, users: updatedUsers };
+      }
+      return prev;
+    });
+  };
+
   // Order Handlers
   const handleSaveOrder = (newOrder: Order) => {
     setData((prev) => {
@@ -1168,6 +1178,7 @@ export default function App() {
           onSelectDatabase={handleSelectDatabase}
           onLogin={handleLoginSuccess}
           onDatabaseCreated={handleDatabaseCreated}
+          onUsersUpdated={handleUsersUpdatedFromLogin}
         />
       </div>
     );
@@ -1393,6 +1404,7 @@ export default function App() {
           onSelectDatabase={handleSelectDatabase}
           onLogin={handleLoginSuccess}
           onDatabaseCreated={handleDatabaseCreated}
+          onUsersUpdated={handleUsersUpdatedFromLogin}
           onClose={() => setIsLoginModalOpen(false)}
         />
       )}

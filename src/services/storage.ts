@@ -21,6 +21,22 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultOrderCodeRuleId: 'rule-dh',
 };
 
+export const DEFAULT_OFFICIAL_ADMIN_PASSWORD = 'Joeblack0107@';
+export const DEFAULT_DEMO_PASSWORD = '123';
+
+export function createDefaultOfficialAdminUser(): AppUser {
+  return {
+    id: `u-admin-${Date.now()}`,
+    username: 'admin',
+    fullName: 'Quản Trị Viên (Admin)',
+    role: 'admin',
+    phone: '',
+    email: '',
+    isActive: true,
+    password: DEFAULT_OFFICIAL_ADMIN_PASSWORD,
+  };
+}
+
 export const INITIAL_USERS: AppUser[] = [
   {
     id: 'u-1',
@@ -30,7 +46,7 @@ export const INITIAL_USERS: AppUser[] = [
     phone: '0988123456',
     email: 'admin@salemanager.vn',
     isActive: true,
-    password: '123',
+    password: DEFAULT_DEMO_PASSWORD,
   },
   {
     id: 'u-2',
@@ -40,7 +56,7 @@ export const INITIAL_USERS: AppUser[] = [
     phone: '0912345678',
     email: 'quanly@salemanager.vn',
     isActive: true,
-    password: '123',
+    password: DEFAULT_DEMO_PASSWORD,
   },
   {
     id: 'u-3',
@@ -50,7 +66,7 @@ export const INITIAL_USERS: AppUser[] = [
     phone: '0977889900',
     email: 'banhang@salemanager.vn',
     isActive: true,
-    password: '123',
+    password: DEFAULT_DEMO_PASSWORD,
   },
 ];
 
@@ -695,7 +711,7 @@ export function getEmptyData(
     phone: '',
     email: '',
     isActive: true,
-    password: '123',
+    password: DEFAULT_OFFICIAL_ADMIN_PASSWORD,
   };
 
   return {
@@ -813,11 +829,53 @@ function normalizeAppData(data: AppData, targetId: string): AppData {
     data.settings.defaultOrderCodeRuleId = 'rule-dh';
   }
   if (!data.users || data.users.length === 0) {
-    data.users = INITIAL_USERS;
+    data.users = targetId === DEMO_DATABASE_ID ? INITIAL_USERS : [createDefaultOfficialAdminUser()];
   }
   data.isDemo = targetId === DEMO_DATABASE_ID;
   data.databaseId = targetId;
   return data;
+}
+
+/**
+ * Resets the official database admin password back to the software's default initial password.
+ */
+export async function resetOfficialAdminPassword(databaseId: string): Promise<AppUser[]> {
+  const currentData = await loadDataAsync(databaseId);
+  const targetDefaultPass =
+    databaseId === DEMO_DATABASE_ID ? DEFAULT_DEMO_PASSWORD : DEFAULT_OFFICIAL_ADMIN_PASSWORD;
+
+  const existingUsers = currentData.users || [];
+  const hasUsernameAdmin = existingUsers.some((u) => u.username.toLowerCase() === 'admin');
+  const firstAdminRoleIdx = existingUsers.findIndex((u) => u.role === 'admin');
+
+  let updatedUsers: AppUser[];
+  if (hasUsernameAdmin) {
+    updatedUsers = existingUsers.map((u) =>
+      u.username.toLowerCase() === 'admin'
+        ? { ...u, password: targetDefaultPass, isActive: true }
+        : u
+    );
+  } else if (firstAdminRoleIdx >= 0) {
+    updatedUsers = existingUsers.map((u, idx) =>
+      idx === firstAdminRoleIdx
+        ? { ...u, password: targetDefaultPass, isActive: true }
+        : u
+    );
+  } else {
+    updatedUsers = [
+      databaseId === DEMO_DATABASE_ID
+        ? INITIAL_USERS[0]
+        : createDefaultOfficialAdminUser(),
+      ...existingUsers,
+    ];
+  }
+
+  const updatedData: AppData = {
+    ...currentData,
+    users: updatedUsers,
+  };
+  saveData(updatedData, databaseId);
+  return updatedUsers;
 }
 
 /**

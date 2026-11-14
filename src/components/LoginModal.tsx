@@ -8,6 +8,9 @@ import {
   createNewDatabase,
   deleteDatabaseProfile,
   DEMO_DATABASE_ID,
+  DEFAULT_OFFICIAL_ADMIN_PASSWORD,
+  DEFAULT_DEMO_PASSWORD,
+  resetOfficialAdminPassword,
   saveData,
 } from '../services/storage';
 import {
@@ -45,7 +48,10 @@ import {
   ShieldCheck,
   UserCheck,
   Building2,
-  Info
+  Info,
+  KeyRound,
+  Phone,
+  MessageCircle,
 } from 'lucide-react';
 
 interface LoginModalProps {
@@ -55,6 +61,7 @@ interface LoginModalProps {
   onSelectDatabase: (databaseId: string) => void;
   onLogin: (user: AppUser, databaseId: string) => void;
   onDatabaseCreated: (newProfile: DatabaseProfile) => void;
+  onUsersUpdated?: (updatedUsers: AppUser[], databaseId: string) => void;
   onClose?: () => void;
 }
 
@@ -65,6 +72,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   onSelectDatabase,
   onLogin,
   onDatabaseCreated,
+  onUsersUpdated,
   onClose,
 }) => {
   const confirm = useConfirm();
@@ -74,11 +82,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     return currentDatabaseId || getLastUsedDatabaseId();
   });
 
-  // Login form fields (NO quick role picker: role is determined strictly by account from the database!)
+  // Login form fields (NO quick role picker & NEVER auto-fill password)
   const [selectedAccountUsername, setSelectedAccountUsername] = useState<string>('admin');
-  const [passwordInput, setPasswordInput] = useState('123');
+  const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [resetNotice, setResetNotice] = useState<string | null>(null);
+  const [isResettingAdminPass, setIsResettingAdminPass] = useState(false);
 
   // New database modal state
   const [showCreateDbModal, setShowCreateDbModal] = useState(false);
@@ -103,7 +113,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
   // Active selected profile
   const activeProfile = profiles.find((p) => p.id === selectedDbId) || profiles[0];
-  const isSelectedDbDemo = activeProfile?.isDemo ?? false;
+  const isSelectedDbDemo = activeProfile?.isDemo ?? (selectedDbId === DEMO_DATABASE_ID);
 
   // Sync selected account when active database changes
   useEffect(() => {
@@ -113,30 +123,64 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         setSelectedAccountUsername(users[0].username);
       }
     }
-  }, [users]);
+  }, [users, selectedAccountUsername]);
 
   // Sync selected DB change
   const handleDbChange = (id: string) => {
     setSelectedDbId(id);
     setLastUsedDatabaseId(id);
     onSelectDatabase(id);
+    setPasswordInput('');
     setLoginError(null);
+    setResetNotice(null);
+  };
+
+  // Reset official admin password to software default and show support message
+  const handleResetAdminPassword = async () => {
+    if (isSelectedDbDemo) return;
+    const ok = await confirm({
+      title: 'Reset mật khẩu Admin về mặc định?',
+      message:
+        'Bạn có chắc muốn đặt lại mật khẩu tài khoản Admin của cơ sở dữ liệu này về mật khẩu mặc định ban đầu của phần mềm?\n\nLiên hệ tới Mr. Hoàng; số điện thoại/Zalo: 0943.970.656 để được giải quyết!',
+      confirmText: 'Reset mật khẩu mặc định',
+      cancelText: 'Hủy',
+      type: 'warning',
+    });
+    if (!ok) return;
+
+    try {
+      setIsResettingAdminPass(true);
+      const updatedUsers = await resetOfficialAdminPassword(selectedDbId);
+      onUsersUpdated?.(updatedUsers, selectedDbId);
+      setPasswordInput('');
+      setLoginError(null);
+      setResetNotice(
+        'Đã reset mật khẩu tài khoản Admin về mật khẩu mặc định! Liên hệ tới Mr. Hoàng; số điện thoại/Zalo: 0943.970.656 để được giải quyết!'
+      );
+    } finally {
+      setIsResettingAdminPass(false);
+    }
   };
 
   // Submit login
   const handleFormLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
+    setResetNotice(null);
 
     const trimmedUser = selectedAccountUsername.trim().toLowerCase();
     const trimmedPass = passwordInput.trim();
 
     // Check against accounts configured in this database
-    const matched = users.find(
-      (u) =>
-        u.username.toLowerCase() === trimmedUser &&
-        (u.password ? u.password === trimmedPass : trimmedPass === '123')
-    );
+    const matched = users.find((u) => {
+      if (u.username.toLowerCase() !== trimmedUser) return false;
+      if (u.password) {
+        return u.password === trimmedPass;
+      }
+      return u.role === 'admin' && !isSelectedDbDemo
+        ? trimmedPass === DEFAULT_OFFICIAL_ADMIN_PASSWORD
+        : trimmedPass === DEFAULT_DEMO_PASSWORD;
+    });
 
     if (matched) {
       if (!matched.isActive) {
@@ -147,9 +191,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       setLastUsedDatabaseId(selectedDbId);
       onLogin(matched, selectedDbId);
     } else {
-      setLoginError(
-        'Mật khẩu không chính xác cho tài khoản này trong cơ sở dữ liệu đã chọn. (Mật khẩu mặc định: 123)'
-      );
+      if (isSelectedDbDemo) {
+        setLoginError(
+          'Mật khẩu không chính xác cho tài khoản này trong dữ liệu Demo. (Mật khẩu Admin dữ liệu Demo: 123)'
+        );
+      } else {
+        setLoginError(
+          'Mật khẩu không chính xác cho tài khoản này trong cơ sở dữ liệu đã chọn. Nếu quên mật khẩu Admin, hãy bấm "Reset về mật khẩu mặc định" hoặc liên hệ Mr. Hoàng (SĐT/Zalo: 0943.970.656).'
+        );
+      }
     }
   };
 
@@ -549,6 +599,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   • Để đảm bảo an toàn, HỆ THỐNG KHÓA HOÀN TOÀN CHỨC NĂNG ĐỒNG BỘ LÊN GOOGLE SHEETS khi đang ở chế độ Dữ liệu mẫu Demo, tránh ghi đè làm mất dữ liệu kinh doanh thật của bạn!
                 </p>
                 <p className="leading-relaxed text-rose-900">
+                  • Mật khẩu tài khoản <strong>Admin</strong> của Dữ liệu Demo là: <span className="font-mono font-bold px-1.5 py-0.5 bg-white border border-rose-200 rounded text-rose-700">123</span>
+                </p>
+                <p className="leading-relaxed text-rose-900">
                   👉 Để làm việc thực tế: Vui lòng bấm vào nút <strong>"+ Tạo CSDL mới trống"</strong> ở trên để nhập thông tin đơn vị và tạo kho dữ liệu riêng, hoặc chọn <strong>"Quét Drive"</strong> để nạp file của bạn.
                 </p>
               </div>
@@ -625,6 +678,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </div>
             )}
 
+            {resetNotice && (
+              <div className="p-3.5 text-xs text-amber-950 bg-amber-50 rounded-xl border-2 border-amber-300 flex items-start gap-2.5 shadow-xs">
+                <KeyRound className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold text-amber-900">{resetNotice}</p>
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Account Selector from configured users in database */}
               <div>
@@ -634,7 +696,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 <div className="relative">
                   <select
                     value={selectedAccountUsername}
-                    onChange={(e) => setSelectedAccountUsername(e.target.value)}
+                    onChange={(e) => {
+                      setSelectedAccountUsername(e.target.value);
+                      setPasswordInput('');
+                      setLoginError(null);
+                    }}
                     className="w-full pl-9 pr-3 py-2.5 border border-slate-300 rounded-xl text-xs sm:text-sm font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 bg-white cursor-pointer"
                   >
                     {users.map((u) => (
@@ -656,9 +722,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
+                    autoComplete="off"
                     value={passwordInput}
                     onChange={(e) => setPasswordInput(e.target.value)}
-                    placeholder="Mật khẩu mặc định: 123"
+                    placeholder="Nhập mật khẩu tài khoản..."
                     className="w-full pl-9 pr-10 py-2.5 border border-slate-300 rounded-xl text-xs sm:text-sm font-mono focus:ring-2 focus:ring-blue-500"
                   />
                   <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
@@ -672,6 +739,27 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* Official DB Admin Forgot Password Notice */}
+            {!isSelectedDbDemo && (
+              <div className="p-3 bg-amber-50/70 rounded-xl border border-amber-200 text-[11px] text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-start gap-2">
+                  <KeyRound className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <span>
+                    Trường hợp tài khoản <strong>Admin</strong> của dữ liệu chính thức quên mật khẩu, bấm <strong>Reset về mật khẩu mặc định</strong> và liên hệ tới <strong>Mr. Hoàng</strong> (SĐT/Zalo: <strong>0943.970.656</strong>) để được giải quyết.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  disabled={isResettingAdminPass}
+                  onClick={handleResetAdminPassword}
+                  className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-amber-100 text-amber-800 border border-amber-300 font-bold text-[11px] shrink-0 cursor-pointer shadow-2xs transition-colors disabled:opacity-50"
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>{isResettingAdminPass ? 'Đang reset...' : 'Reset mật khẩu Admin'}</span>
+                </button>
+              </div>
+            )}
 
             {/* Explanatory notice regarding strict role enforcement */}
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-[11px] text-slate-600 flex items-start gap-2">
@@ -689,6 +777,42 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               <LogIn className="w-5 h-5" />
               <span>XÁC NHẬN ĐĂNG NHẬP & BẮT ĐẦU LÀM VIỆC</span>
             </button>
+
+            {/* Support Contact Information */}
+            <div className="p-3.5 bg-indigo-50/70 rounded-2xl border border-indigo-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+              <div className="flex items-center gap-2.5 text-indigo-950">
+                <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <Phone className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold text-indigo-700 uppercase tracking-wide">
+                    Thông tin liên hệ & Hỗ trợ
+                  </div>
+                  <div className="font-bold text-slate-900">
+                    Mr. Hoàng <span className="text-slate-400 font-normal mx-1">•</span> Số điện thoại / Zalo:{' '}
+                    <span className="font-mono text-indigo-700">0943.970.656</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href="tel:0943970656"
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[11px] transition-colors"
+                >
+                  <Phone className="w-3.5 h-3.5" />
+                  <span>Gọi ngay</span>
+                </a>
+                <a
+                  href="https://zalo.me/0943970656"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-[11px] transition-colors shadow-2xs"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>Nhắn Zalo</span>
+                </a>
+              </div>
+            </div>
           </form>
         </div>
       </div>
