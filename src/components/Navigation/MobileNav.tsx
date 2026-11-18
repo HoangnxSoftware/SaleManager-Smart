@@ -29,6 +29,8 @@ interface MobileNavProps {
   onOpenLoginModal?: () => void;
   onLogout?: () => void;
   onOpenAuditLog?: () => void;
+  isGoogleConnected?: boolean;
+  isDemo?: boolean;
 }
 
 export const MobileNav: React.FC<MobileNavProps> = ({
@@ -41,6 +43,8 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   onOpenLoginModal,
   onLogout,
   onOpenAuditLog,
+  isGoogleConnected = false,
+  isDemo = false,
 }) => {
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
 
@@ -175,13 +179,21 @@ export const MobileNav: React.FC<MobileNavProps> = ({
                       setIsMoreMenuOpen(false);
                       onOpenSyncModal();
                     }}
-                    className="flex items-center justify-between p-2.5 rounded-xl bg-blue-50/70 hover:bg-blue-100 text-blue-800 font-semibold text-xs cursor-pointer"
+                    className={`flex items-center justify-between p-2.5 rounded-xl font-semibold text-xs cursor-pointer transition-colors ${
+                      !isDemo && !isGoogleConnected
+                        ? 'bg-yellow-100 hover:bg-yellow-200 border border-yellow-400 text-yellow-900'
+                        : 'bg-blue-50/70 hover:bg-blue-100 text-blue-800'
+                    }`}
                   >
                     <div className="flex items-center gap-2.5">
-                      <Cloud className="w-4 h-4 text-blue-600 shrink-0" />
-                      <span>Đồng bộ Google Drive & Sheets</span>
+                      <Cloud className={`w-4 h-4 shrink-0 ${!isDemo && !isGoogleConnected ? 'text-amber-700' : 'text-blue-600'}`} />
+                      <span>
+                        {!isDemo && !isGoogleConnected
+                          ? 'Đồng bộ Google Drive & Sheets (Chưa kết nối)'
+                          : 'Đồng bộ Google Drive & Sheets'}
+                      </span>
                     </div>
-                    <ChevronRight className="w-4 h-4 text-blue-400" />
+                    <ChevronRight className={`w-4 h-4 ${!isDemo && !isGoogleConnected ? 'text-amber-600' : 'text-blue-400'}`} />
                   </button>
                 )}
 

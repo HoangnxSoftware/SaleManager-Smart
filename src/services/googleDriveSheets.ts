@@ -23,6 +23,29 @@ provider.addScope('https://www.googleapis.com/auth/spreadsheets');
 
 let cachedAccessToken: string | null = null;
 let isSigningIn = false;
+const authStateListeners = new Set<(hasToken: boolean) => void>();
+
+function notifyAuthStateListeners() {
+  const hasToken = Boolean(cachedAccessToken);
+  authStateListeners.forEach((listener) => {
+    try {
+      listener(hasToken);
+    } catch (err) {
+      console.error('Auth state listener error:', err);
+    }
+  });
+}
+
+export const hasGoogleAccessToken = (): boolean => Boolean(cachedAccessToken);
+
+export const subscribeGoogleAuthState = (
+  listener: (hasToken: boolean) => void
+): (() => void) => {
+  authStateListeners.add(listener);
+  return () => {
+    authStateListeners.delete(listener);
+  };
+};
 
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
@@ -30,9 +53,13 @@ export const initAuth = (
 ) => {
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user && cachedAccessToken) {
+      notifyAuthStateListeners();
       if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
     } else {
-      cachedAccessToken = null;
+      if (!isSigningIn) {
+        cachedAccessToken = null;
+        notifyAuthStateListeners();
+      }
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -47,6 +74,7 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
       throw new Error('Không lấy được access token từ Google Auth.');
     }
     cachedAccessToken = credential.accessToken;
+    notifyAuthStateListeners();
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Google sign in error:', error);
@@ -63,6 +91,7 @@ export const getAccessToken = async (): Promise<string | null> => {
 export const googleSignOut = async () => {
   await signOut(auth);
   cachedAccessToken = null;
+  notifyAuthStateListeners();
 };
 
 export const DRIVE_FOLDER_NAME = 'SaleManager-Smart';

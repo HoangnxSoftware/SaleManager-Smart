@@ -31,6 +31,8 @@ import {
   fetchSpreadsheetMetadata,
   getAccessToken,
   googleSignIn,
+  hasGoogleAccessToken,
+  subscribeGoogleAuthState,
 } from './services/googleDriveSheets';
 import { Navbar } from './components/Navigation/Navbar';
 import { Sidebar, MainTab } from './components/Navigation/Sidebar';
@@ -95,6 +97,15 @@ export default function App() {
   const [deviceConflictSession, setDeviceConflictSession] = useState<DeviceSession | null>(null);
   const [hasDismissedConflict, setHasDismissedConflict] = useState(false);
   const [currentDeviceNameState, setCurrentDeviceNameState] = useState(() => getCurrentDeviceName());
+  const [hasGoogleToken, setHasGoogleToken] = useState<boolean>(() => hasGoogleAccessToken());
+
+  useEffect(() => {
+    setHasGoogleToken(hasGoogleAccessToken());
+    const unsubscribe = subscribeGoogleAuthState((hasToken) => {
+      setHasGoogleToken(hasToken);
+    });
+    return unsubscribe;
+  }, []);
 
   // Helper log hành động người dùng theo thời gian thực
   const logUserAction = useCallback(
@@ -1224,6 +1235,8 @@ export default function App() {
         onOpenAuditLog={() => setIsAuditLogOpen(true)}
         currentDeviceName={currentDeviceNameState}
         onChangeDeviceName={handleChangeDeviceName}
+        isGoogleAuthenticated={hasGoogleToken}
+        isSpreadsheetLinked={Boolean(data.spreadsheetId)}
       />
 
       {/* Global alert banner */}
@@ -1489,6 +1502,8 @@ export default function App() {
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
         onLogout={handleOpenExitConfirm}
         onOpenAuditLog={() => setIsAuditLogOpen(true)}
+        isGoogleConnected={hasGoogleToken && Boolean(data.spreadsheetId)}
+        isDemo={data.isDemo}
       />
     </div>
   );
