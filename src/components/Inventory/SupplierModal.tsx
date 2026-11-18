@@ -22,6 +22,8 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [shortName, setShortName] = useState('');
+  const [softwareCode, setSoftwareCode] = useState('');
+  const [reconciliationName, setReconciliationName] = useState('');
   const [taxCode, setTaxCode] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
@@ -41,6 +43,8 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
       setCode(initialSupplier.code);
       setName(initialSupplier.name.toUpperCase());
       setShortName(initialSupplier.shortName.toUpperCase());
+      setSoftwareCode(initialSupplier.softwareCode || '');
+      setReconciliationName(initialSupplier.reconciliationName || '');
       setTaxCode(initialSupplier.taxCode);
       setPhone(initialSupplier.phone);
       setAddress(initialSupplier.address);
@@ -52,6 +56,8 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
       setCode(`NCC${String(existingCount + 1).padStart(3, '0')}`);
       setName('');
       setShortName('');
+      setSoftwareCode('');
+      setReconciliationName('');
       setTaxCode('');
       setPhone('');
       setAddress('');
@@ -81,6 +87,8 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
     setCode(existing.code);
     setName(existing.name.toUpperCase());
     setShortName((existing.shortName || existing.name).toUpperCase());
+    setSoftwareCode(existing.softwareCode || '');
+    setReconciliationName(existing.reconciliationName || '');
     setTaxCode(existing.taxCode || '');
     setPhone(existing.phone || '');
     setAddress(existing.address || '');
@@ -121,6 +129,8 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
       code: trimmedCode,
       name: upperName,
       shortName: upperShortName,
+      softwareCode: softwareCode.trim(),
+      reconciliationName: reconciliationName.trim(),
       taxCode: taxCode.trim(),
       phone: phone.trim(),
       address: address.trim(),
@@ -133,10 +143,10 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/80 backdrop-blur-xs overflow-y-auto">
-      <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-6">
+    <div className="fixed inset-0 z-50 flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 bg-slate-900/80 backdrop-blur-xs overflow-hidden sm:overflow-y-auto">
+      <div className="relative w-full h-[100dvh] sm:h-auto sm:max-h-[92vh] max-w-full sm:max-w-lg bg-white rounded-none sm:rounded-2xl shadow-2xl border-0 sm:border border-slate-200 overflow-hidden my-0 sm:my-6 flex flex-col">
         {/* Header */}
-        <div className="bg-gradient-to-r from-teal-700 to-emerald-700 p-5 text-white flex items-center justify-between">
+        <div className="bg-gradient-to-r from-teal-700 to-emerald-700 p-4 sm:p-5 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-xl bg-white/20">
               <Building2 className="w-5 h-5 text-white" />
@@ -181,7 +191,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
         )}
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 overscroll-contain">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -250,6 +260,33 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="VD: 0243888999"
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-teal-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Mã Phần Mềm
+              </label>
+              <input
+                type="text"
+                value={softwareCode}
+                onChange={(e) => setSoftwareCode(e.target.value)}
+                placeholder="VD: PM-NCC001"
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-mono focus:ring-2 focus:ring-teal-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Tên Đối Chiếu
+              </label>
+              <input
+                type="text"
+                value={reconciliationName}
+                onChange={(e) => setReconciliationName(e.target.value)}
+                placeholder="Tên đối chiếu công nợ / sổ sách"
                 className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-teal-500"
               />
             </div>

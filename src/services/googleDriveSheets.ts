@@ -392,17 +392,17 @@ export async function syncDataToGoogleSheets(
 
   // 2. Customers
   const customerRows: string[][] = [
-    ['Mã KH', 'Tên khách hàng', 'Tên gợi nhớ', 'Mã số thuế', 'Số điện thoại', 'Địa chỉ', 'Loại KH', 'Số CCCD', 'Ghi chú', 'Ngày tạo'],
+    ['Mã KH', 'Tên khách hàng', 'Tên gợi nhớ', 'Mã số thuế', 'Số điện thoại', 'Địa chỉ', 'Loại KH', 'Số CCCD', 'Ghi chú', 'Ngày tạo', 'Mã Phần Mềm', 'Tên Đối Chiếu'],
     ...data.customers.map(c => [
-      c.code, c.name, c.shortName, c.taxCode, c.phone, c.address, c.type, c.idCard, c.notes, c.createdAt
+      c.code, c.name, c.shortName, c.taxCode, c.phone, c.address, c.type, c.idCard, c.notes, c.createdAt, c.softwareCode || '', c.reconciliationName || ''
     ])
   ];
 
   // 3. Suppliers
   const supplierRows: string[][] = [
-    ['Mã NCC', 'Tên nhà cung cấp', 'Tên gợi nhớ', 'Mã số thuế', 'Số điện thoại', 'Địa chỉ', 'Ghi chú', 'Ngày tạo'],
+    ['Mã NCC', 'Tên nhà cung cấp', 'Tên gợi nhớ', 'Mã số thuế', 'Số điện thoại', 'Địa chỉ', 'Ghi chú', 'Ngày tạo', 'Mã Phần Mềm', 'Tên Đối Chiếu'],
     ...data.suppliers.map(s => [
-      s.code, s.name, s.shortName, s.taxCode, s.phone, s.address, s.notes, s.createdAt
+      s.code, s.name, s.shortName, s.taxCode, s.phone, s.address, s.notes, s.createdAt, s.softwareCode || '', s.reconciliationName || ''
     ])
   ];
 
@@ -892,6 +892,8 @@ export async function loadDataFromGoogleSheets(
         code,
         name: String(r[1] || code).toUpperCase(),
         shortName: String(r[2] || ''),
+        softwareCode: String(r[10] || ''),
+        reconciliationName: String(r[11] || ''),
         taxCode: String(r[3] || ''),
         phone: String(r[4] || ''),
         address: String(r[5] || ''),
@@ -916,6 +918,8 @@ export async function loadDataFromGoogleSheets(
         code,
         name: String(r[1] || code).toUpperCase(),
         shortName: String(r[2] || ''),
+        softwareCode: String(r[8] || ''),
+        reconciliationName: String(r[9] || ''),
         taxCode: String(r[3] || ''),
         phone: String(r[4] || ''),
         address: String(r[5] || ''),

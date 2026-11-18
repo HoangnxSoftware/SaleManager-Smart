@@ -424,6 +424,8 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
         c.name.toLowerCase().includes(q) ||
         c.shortName.toLowerCase().includes(q) ||
         c.code.toLowerCase().includes(q) ||
+        (c.softwareCode && c.softwareCode.toLowerCase().includes(q)) ||
+        (c.reconciliationName && c.reconciliationName.toLowerCase().includes(q)) ||
         c.taxCode.toLowerCase().includes(q) ||
         c.phone.toLowerCase().includes(q)
     ).slice(0, 8);
@@ -1039,8 +1041,14 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                               <span className="text-slate-500 font-normal">({cust.shortName})</span>
                             )}
                           </div>
-                          <div className="text-[11px] text-slate-500 flex items-center gap-3 mt-0.5">
+                          <div className="text-[11px] text-slate-500 flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
                             <span className="font-mono text-blue-600">{cust.code}</span>
+                            {cust.softwareCode && (
+                              <span className="font-mono text-indigo-600">Mã PM: {cust.softwareCode}</span>
+                            )}
+                            {cust.reconciliationName && (
+                              <span>Đ/C tên: {cust.reconciliationName}</span>
+                            )}
                             {cust.phone && <span>SĐT: {cust.phone}</span>}
                             {cust.taxCode && <span>MST: {cust.taxCode}</span>}
                           </div>

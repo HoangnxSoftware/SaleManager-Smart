@@ -42,7 +42,7 @@ function generateOrderPrintHtml(orders: Order[], settings: AppSettings): string 
         (item, idx) => `
       <tr>
         <td style="border: 1px solid #cbd5e1; padding: 4.5px 3px; text-align: center; color: #64748b; font-size: 11px;">${idx + 1}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 4.5px 4px; font-family: monospace; font-size: 10px; word-break: break-all;">${item.productCode}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 4.5px 4px; font-family: 'Inter', 'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif; font-variant-numeric: tabular-nums; font-size: 10px; word-break: break-all;">${item.productCode}</td>
         <td style="border: 1px solid #cbd5e1; padding: 4.5px 4px; font-weight: 500; word-break: break-word; font-size: 11px; line-height: 1.35;">${item.productName}</td>
         <td style="border: 1px solid #cbd5e1; padding: 4.5px 3px; text-align: center; white-space: nowrap; font-size: 11px;">${item.saleUnit}</td>
         <td style="border: 1px solid #cbd5e1; padding: 4.5px 4px; text-align: right; font-weight: 500; white-space: nowrap; font-size: 11px;">${formatNumber(item.quantity)}</td>
@@ -110,7 +110,7 @@ function generateOrderPrintHtml(orders: Order[], settings: AppSettings): string 
             </div>
           </div>
           <div style="text-align: right;">
-            <div style="display: inline-block; padding: 3px 10px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px; font-family: monospace; font-size: 13px; font-weight: bold; color: #1e293b;">
+            <div style="display: inline-block; padding: 3px 10px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px; font-family: 'Inter', 'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif; font-variant-numeric: tabular-nums; font-size: 13px; font-weight: bold; color: #1e293b;">
               ${order.orderCode}
             </div>
             <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
@@ -121,7 +121,7 @@ function generateOrderPrintHtml(orders: Order[], settings: AppSettings): string 
 
         <!-- Title -->
         <div style="text-align: center; margin: 14px 0 16px 0;">
-          <h1 style="font-size: 19px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; margin: 0; color: #0f172a;">HÓA ĐƠN BÁN HÀNG</h1>
+          <h1 style="font-family: 'Plus Jakarta Sans', 'Inter', 'Segoe UI', Arial, sans-serif; font-size: 19px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin: 0; color: #0f172a;">HÓA ĐƠN BÁN HÀNG</h1>
           <div style="font-size: 10.5px; color: #64748b; margin-top: 2px;">(Liên 1: Lưu nội bộ - Liên 2: Giao cho khách hàng)</div>
         </div>
 
@@ -129,7 +129,7 @@ function generateOrderPrintHtml(orders: Order[], settings: AppSettings): string 
         <div style="display: flex; justify-content: space-between; gap: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 11.5px;">
           <div style="flex: 1; line-height: 1.55;">
             <div><strong>Khách hàng:</strong> ${order.customerName}</div>
-            <div><strong>Mã KH:</strong> <span style="font-family: monospace; color: #1d4ed8; font-weight: bold;">${order.customerCode}</span></div>
+            <div><strong>Mã KH:</strong> <span style="font-family: 'Inter', 'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif; font-variant-numeric: tabular-nums; color: #1d4ed8; font-weight: bold;">${order.customerCode}</span></div>
             <div><strong>MST / CCCD:</strong> ${order.customerTaxCode || order.customerIdCard || 'Chưa cung cấp'}</div>
           </div>
           <div style="flex: 1; line-height: 1.55;">
@@ -258,9 +258,9 @@ function generateOrderPrintHtml(orders: Order[], settings: AppSettings): string 
 <head>
   <meta charset="UTF-8">
   <title>Bản In Hóa Đơn - ${orders.map((o) => o.orderCode).join(', ')}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
   <style>
     @page {
       size: A4 portrait;
@@ -268,11 +268,15 @@ function generateOrderPrintHtml(orders: Order[], settings: AppSettings): string 
     }
     * {
       box-sizing: border-box;
+      font-family: 'Inter', 'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
     }
+    h1, h2, h3 {
+      font-family: 'Plus Jakarta Sans', 'Inter', 'Segoe UI', Arial, sans-serif;
+    }
     body {
-      font-family: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-family: 'Inter', 'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif;
       font-size: 11.5px;
       color: #0f172a;
       background: #ffffff;

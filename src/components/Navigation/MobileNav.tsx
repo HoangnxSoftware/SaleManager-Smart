@@ -76,19 +76,19 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   const moreTabs = [
     {
       id: 'reports' as MainTab,
-      label: '3.5 Báo cáo & Lợi nhuận',
+      label: 'Báo cáo',
       icon: BarChart3,
       allowed: currentUser.role !== 'salesperson',
     },
     {
       id: 'users' as MainTab,
-      label: '3.6 Phân quyền & Người dùng',
+      label: 'Phân quyền & Người dùng',
       icon: Users,
       allowed: currentUser.role === 'admin',
     },
     {
       id: 'settings' as MainTab,
-      label: '3.7 Cài đặt & Sao lưu Drive',
+      label: 'Cài đặt & Drive/Sheets',
       icon: Settings,
       allowed: currentUser.role === 'admin' || currentUser.role === 'manager',
     },

@@ -407,6 +407,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           s.name.toLowerCase().includes(q) ||
           s.code.toLowerCase().includes(q) ||
           s.shortName.toLowerCase().includes(q) ||
+          (s.softwareCode && s.softwareCode.toLowerCase().includes(q)) ||
+          (s.reconciliationName && s.reconciliationName.toLowerCase().includes(q)) ||
           s.taxCode.toLowerCase().includes(q) ||
           s.phone.toLowerCase().includes(q)
       );
@@ -492,6 +494,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
         const sName = rawName.toUpperCase();
         const rawShort = String(r['Tên gợi nhớ'] || sName).trim();
         const sShort = rawShort.toUpperCase();
+        const sSoftwareCode = String(r['Mã Phần Mềm'] || r['Mã phần mềm'] || r['Mã PM'] || '').trim();
+        const sReconciliationName = String(r['Tên Đối Chiếu'] || r['Tên đối chiếu'] || '').trim();
         const sTax = String(r['Mã Số Thuế'] || r['MST'] || '').trim();
         const sPhone = String(r['Số điện thoại'] || r['SĐT'] || '').trim();
         const sAddr = String(r['Địa chỉ'] || '').trim();
@@ -502,6 +506,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           code: sCode,
           name: sName,
           shortName: sShort,
+          softwareCode: sSoftwareCode,
+          reconciliationName: sReconciliationName,
           taxCode: sTax,
           phone: sPhone,
           address: sAddr,
@@ -1620,6 +1626,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                     </th>
                     <th className="p-3 text-left">Tên đơn vị cung cấp</th>
                     <th className="p-3 text-left">Tên gợi nhớ</th>
+                    <th className="p-3 text-left">Mã Phần Mềm</th>
+                    <th className="p-3 text-left">Tên Đối Chiếu</th>
                     <th
                       onClick={() => handleSupplierSort('taxCode')}
                       className="p-3 text-left cursor-pointer select-none hover:bg-slate-200 transition-colors group"
@@ -1647,7 +1655,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {filteredSuppliers.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="p-10 text-center text-slate-500">
+                      <td colSpan={11} className="p-10 text-center text-slate-500">
                         <div className="flex flex-col items-center justify-center gap-2">
                           <Building2 className="w-8 h-8 text-slate-300" />
                           <p className="font-semibold text-slate-600">
@@ -1683,6 +1691,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
                           <td className="p-3 font-mono font-bold text-teal-800">{sup.code}</td>
                           <td className="p-3 font-semibold text-slate-900">{sup.name}</td>
                           <td className="p-3 text-slate-600">{sup.shortName}</td>
+                          <td className="p-3 font-mono text-indigo-700">{sup.softwareCode || '—'}</td>
+                          <td className="p-3 text-slate-700">{sup.reconciliationName || '—'}</td>
                           <td className="p-3">
                             {isDupTax ? (
                               <span className="inline-flex items-center gap-1 font-mono font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded border border-rose-300">

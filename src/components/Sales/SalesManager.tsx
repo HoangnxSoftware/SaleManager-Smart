@@ -313,6 +313,8 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           c.name.toLowerCase().includes(q) ||
           c.shortName.toLowerCase().includes(q) ||
           c.code.toLowerCase().includes(q) ||
+          (c.softwareCode && c.softwareCode.toLowerCase().includes(q)) ||
+          (c.reconciliationName && c.reconciliationName.toLowerCase().includes(q)) ||
           c.taxCode.toLowerCase().includes(q) ||
           c.phone.toLowerCase().includes(q)
       );
@@ -395,6 +397,8 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         const cName = rawName.toUpperCase();
         const rawShort = String(r['Tên gợi nhớ'] || cName).trim();
         const cShort = rawShort.toUpperCase();
+        const cSoftwareCode = String(r['Mã Phần Mềm'] || r['Mã phần mềm'] || r['Mã PM'] || '').trim();
+        const cReconciliationName = String(r['Tên Đối Chiếu'] || r['Tên đối chiếu'] || '').trim();
         const cTax = String(r['Mã số thuế'] || r['MST'] || '').trim();
         const cPhone = String(r['Số điện thoại'] || r['SĐT'] || '').trim();
         const cAddr = String(r['Địa chỉ'] || '').trim();
@@ -408,6 +412,8 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           code: cCode,
           name: cName,
           shortName: cShort,
+          softwareCode: cSoftwareCode,
+          reconciliationName: cReconciliationName,
           taxCode: cTax,
           phone: cPhone,
           address: cAddr,
@@ -1855,6 +1861,8 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                     </th>
                     <th className="p-3 text-left">Tên khách hàng</th>
                     <th className="p-3 text-left">Tên gợi nhớ</th>
+                    <th className="p-3 text-left">Mã Phần Mềm</th>
+                    <th className="p-3 text-left">Tên Đối Chiếu</th>
                     <th
                       onClick={() => handleCustomerSort('taxCode')}
                       className="p-3 text-left cursor-pointer select-none hover:bg-slate-200 transition-colors group"
@@ -1900,7 +1908,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {filteredCustomers.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="p-10 text-center text-slate-500">
+                      <td colSpan={12} className="p-10 text-center text-slate-500">
                         <div className="flex flex-col items-center justify-center gap-2">
                           <Users className="w-8 h-8 text-slate-300" />
                           <p className="font-semibold text-slate-600">
@@ -1936,6 +1944,8 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                           <td className="p-3 font-mono font-bold text-blue-700">{cust.code}</td>
                           <td className="p-3 font-semibold text-slate-900">{cust.name}</td>
                           <td className="p-3 text-slate-600">{cust.shortName}</td>
+                          <td className="p-3 font-mono text-indigo-700">{cust.softwareCode || '—'}</td>
+                          <td className="p-3 text-slate-700">{cust.reconciliationName || '—'}</td>
                           <td className="p-3">
                             {isDupTax ? (
                               <span className="inline-flex items-center gap-1 font-mono font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded border border-rose-300">

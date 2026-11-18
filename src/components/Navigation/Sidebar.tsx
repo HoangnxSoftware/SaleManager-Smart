@@ -38,7 +38,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItems = [
     {
       id: 'sales' as MainTab,
-      label: '3.1 Bán hàng',
+      label: 'Bán hàng',
       sublabel: 'Tạo đơn & Quản lý đơn hàng',
       icon: ShoppingCart,
       badge: ordersCount > 0 ? ordersCount : undefined,
@@ -46,7 +46,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'inventory' as MainTab,
-      label: '3.2 Kho hàng',
+      label: 'Kho hàng',
       sublabel: 'Nhập hàng & Nhà cung cấp',
       icon: Package,
       badge: purchasesCount > 0 ? purchasesCount : undefined,
@@ -54,35 +54,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'products' as MainTab,
-      label: '3.3 Danh mục sản phẩm',
+      label: 'Danh mục sản phẩm',
       sublabel: 'Hàng hóa, ĐVT, Tỷ suất LN',
       icon: Boxes,
       allowed: true,
     },
     {
       id: 'debts' as MainTab,
-      label: '3.4 Công nợ',
+      label: 'Công nợ',
       sublabel: 'Khách hàng & Nhà cung cấp',
       icon: Wallet,
       allowed: currentUser.role !== 'salesperson',
     },
     {
       id: 'reports' as MainTab,
-      label: '3.5 Báo cáo',
+      label: 'Báo cáo',
       sublabel: 'Xuất nhập kho & Lợi nhuận FIFO',
       icon: BarChart3,
       allowed: currentUser.role !== 'salesperson',
     },
     {
       id: 'users' as MainTab,
-      label: '3.6 Phân quyền & Người dùng',
+      label: 'Phân quyền & Người dùng',
       sublabel: 'Admin, Quản lý, Bán hàng',
       icon: Users,
       allowed: currentUser.role === 'admin',
     },
     {
       id: 'settings' as MainTab,
-      label: '3.7 Cài đặt & Drive / Sheets',
+      label: 'Cài đặt & Drive/Sheets',
       sublabel: 'Số thập phân & Sao lưu',
       icon: Settings,
       allowed: currentUser.role === 'admin' || currentUser.role === 'manager',

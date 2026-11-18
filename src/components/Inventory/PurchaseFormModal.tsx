@@ -226,6 +226,8 @@ export const PurchaseFormModal: React.FC<PurchaseFormModalProps> = ({
         s.name.toLowerCase().includes(q) ||
         s.shortName.toLowerCase().includes(q) ||
         s.code.toLowerCase().includes(q) ||
+        (s.softwareCode && s.softwareCode.toLowerCase().includes(q)) ||
+        (s.reconciliationName && s.reconciliationName.toLowerCase().includes(q)) ||
         s.taxCode.toLowerCase().includes(q)
     ).slice(0, 8);
   }, [suppliers, supplierSearch]);
@@ -515,6 +517,12 @@ export const PurchaseFormModal: React.FC<PurchaseFormModalProps> = ({
                           </div>
                           <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5">
                             <span className="font-mono text-teal-700 font-medium">Mã: {s.code}</span>
+                            {s.softwareCode && (
+                              <span className="font-mono text-indigo-700 font-medium">Mã PM: {s.softwareCode}</span>
+                            )}
+                            {s.reconciliationName && (
+                              <span>Đ/C tên: {s.reconciliationName}</span>
+                            )}
                             <span>MST: {s.taxCode || '—'}</span>
                             {s.phone && <span>SĐT: {s.phone}</span>}
                           </div>

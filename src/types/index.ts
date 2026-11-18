@@ -18,6 +18,8 @@ export interface Customer {
   code: string; // Mã khách hàng
   name: string; // Tên khách hàng
   shortName: string; // Tên gợi nhớ
+  softwareCode?: string; // Mã Phần Mềm
+  reconciliationName?: string; // Tên Đối Chiếu
   taxCode: string; // Mã số thuế
   phone: string; // Số điện thoại
   address: string; // Địa chỉ
@@ -32,6 +34,8 @@ export interface Supplier {
   code: string; // Mã đơn vị CC
   name: string; // Tên đơn vị cung cấp
   shortName: string; // Tên gợi nhớ
+  softwareCode?: string; // Mã Phần Mềm
+  reconciliationName?: string; // Tên Đối Chiếu
   taxCode: string; // Mã số thuế
   phone: string; // Số điện thoại
   address: string; // Địa chỉ

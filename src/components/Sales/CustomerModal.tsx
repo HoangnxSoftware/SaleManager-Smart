@@ -22,6 +22,8 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [shortName, setShortName] = useState('');
+  const [softwareCode, setSoftwareCode] = useState('');
+  const [reconciliationName, setReconciliationName] = useState('');
   const [taxCode, setTaxCode] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
@@ -43,6 +45,8 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
       setCode(initialCustomer.code);
       setName(initialCustomer.name.toUpperCase());
       setShortName(initialCustomer.shortName.toUpperCase());
+      setSoftwareCode(initialCustomer.softwareCode || '');
+      setReconciliationName(initialCustomer.reconciliationName || '');
       setTaxCode(initialCustomer.taxCode);
       setPhone(initialCustomer.phone);
       setAddress(initialCustomer.address);
@@ -57,6 +61,8 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
       setCode(`KH${String(nextNum).padStart(3, '0')}`);
       setName('');
       setShortName('');
+      setSoftwareCode('');
+      setReconciliationName('');
       setTaxCode('');
       setPhone('');
       setAddress('');
@@ -88,6 +94,8 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
     setCode(existing.code);
     setName(existing.name.toUpperCase());
     setShortName((existing.shortName || existing.name).toUpperCase());
+    setSoftwareCode(existing.softwareCode || '');
+    setReconciliationName(existing.reconciliationName || '');
     setTaxCode(existing.taxCode || '');
     setPhone(existing.phone || '');
     setAddress(existing.address || '');
@@ -147,6 +155,8 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
       code: trimmedCode,
       name: upperName,
       shortName: upperShortName,
+      softwareCode: softwareCode.trim(),
+      reconciliationName: reconciliationName.trim(),
       taxCode: taxCode.trim(),
       phone: phone.trim(),
       address: address.trim(),
@@ -300,6 +310,33 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="VD: 0988123456"
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Mã Phần Mềm
+              </label>
+              <input
+                type="text"
+                value={softwareCode}
+                onChange={(e) => setSoftwareCode(e.target.value)}
+                placeholder="VD: PM-KH001"
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-mono focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Tên Đối Chiếu
+              </label>
+              <input
+                type="text"
+                value={reconciliationName}
+                onChange={(e) => setReconciliationName(e.target.value)}
+                placeholder="Tên đối chiếu công nợ / sổ sách"
                 className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500"
               />
             </div>
