@@ -670,9 +670,43 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
         let totalVat = 0;
 
         const checkedItems: ParsedItemCheck[] = itemsList.map((row: any, idx: number) => {
-          const pCode = String(row['Mã HH'] || row['Mã hàng hóa'] || 'PROD').trim().toUpperCase();
-          const pName = String(row['Tên Hàng Hóa'] || row['Tên HH'] || row['Tên hàng hóa'] || pCode).trim();
-          const pUnit = String(row['ĐVT_Mua'] || row['Đơn vị tính'] || row['ĐVT'] || 'Cái').trim();
+          const pCode =
+            String(row['Mã HH'] ?? row['Mã hàng hóa'] ?? row['Mã hàng'] ?? '')
+              .trim()
+              .toUpperCase() || 'PROD';
+
+          // Check if product code exists in software's catalog (báo đỏ nếu chưa có)
+          const matchedProd = existingProductMap.get(pCode);
+          const finalProductCode = matchedProd ? matchedProd.code : pCode;
+          const isUncataloged = !matchedProd;
+
+          const autoFilledFields: string[] = [];
+
+          const rawName = String(
+            row['Tên Hàng Hóa'] ?? row['Tên HH'] ?? row['Tên hàng hóa'] ?? row['Tên hàng'] ?? ''
+          ).trim();
+          let pName = rawName;
+          if (!pName && matchedProd?.name?.trim()) {
+            pName = matchedProd.name.trim();
+            autoFilledFields.push('Tên HH');
+          } else if (!pName) {
+            pName = finalProductCode;
+          }
+
+          const rawUnit = String(
+            row['ĐVT_Mua'] ?? row['Đơn vị tính'] ?? row['ĐVT'] ?? ''
+          ).trim();
+          let pUnit = rawUnit;
+          if (!pUnit && matchedProd) {
+            const catalogUnit = (matchedProd.purchaseUnit || matchedProd.saleUnit || '').trim();
+            if (catalogUnit) {
+              pUnit = catalogUnit;
+              autoFilledFields.push('ĐVT');
+            }
+          }
+          if (!pUnit) {
+            pUnit = 'Cái';
+          }
 
           const rawQty =
             row['Số lượng'] !== undefined && row['Số lượng'] !== '' && row['Số lượng'] !== null
@@ -686,7 +720,17 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
               : 0;
           const amt = isNaN(rawAmt) ? 0 : rawAmt;
 
-          const vat = Number(row['Thuế suất (%)'] ?? row['Thuế suất'] ?? row['VAT'] ?? 0) || 0;
+          const rawVat = row['Thuế suất (%)'] ?? row['Thuế suất'] ?? row['VAT'];
+          const isVatBlank = rawVat === undefined || rawVat === null || String(rawVat).trim() === '';
+          let vat = 0;
+          if (isVatBlank && matchedProd && typeof matchedProd.vatRate === 'number' && !isNaN(matchedProd.vatRate)) {
+            vat = matchedProd.vatRate;
+            autoFilledFields.push('Thuế %');
+          } else {
+            const parsedVat = Number(rawVat);
+            vat = isNaN(parsedVat) ? 0 : parsedVat;
+          }
+
           const rawUnitPrice = row['Đơn giá nhập'] ?? row['Đơn giá'] ?? (qty > 0 ? amt / qty : 0);
           const uPrice = qty > 0 ? Number((amt / qty).toFixed(purchaseDecimals)) : (Number(rawUnitPrice) || 0);
           const vatAmt = (amt * vat) / 100;
@@ -694,13 +738,9 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           subtotal += amt;
           totalVat += vatAmt;
 
-          // Check if product code exists in software's catalog (báo đỏ nếu chưa có)
-          const matchedProd = existingProductMap.get(pCode);
-          const isUncataloged = !matchedProd;
-
           return {
             id: `pi-imp-${Date.now()}-${idx}-${Math.random()}`,
-            productCode: pCode,
+            productCode: finalProductCode,
             productName: pName,
             purchaseUnit: pUnit,
             quantity: qty,
@@ -711,6 +751,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
             totalAmount: amt + vatAmt,
             isUncataloged,
             matchedProduct: matchedProd,
+            autoFilledFields: autoFilledFields.length > 0 ? autoFilledFields : undefined,
           };
         });
 

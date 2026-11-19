@@ -29,6 +29,7 @@ export interface ParsedItemCheck {
   totalAmount: number;
   isUncataloged: boolean; // Mã hàng hóa KHÔNG có trong danh mục sản phẩm (báo đỏ)
   matchedProduct?: Product;
+  autoFilledFields?: string[]; // Các trường (Tên HH, ĐVT, Thuế %) tự động bổ sung từ danh mục
 }
 
 export interface ParsedBillCheck {
@@ -174,6 +175,14 @@ export const PurchaseExcelSyncModal: React.FC<PurchaseExcelSyncModalProps> = ({
   // Total items count
   const totalItemCount = useMemo(() => {
     return parsedBills.reduce((sum, b) => sum + b.items.length, 0);
+  }, [parsedBills]);
+
+  // Auto-filled items count from catalog
+  const autoFilledItemsCount = useMemo(() => {
+    return parsedBills.reduce(
+      (sum, b) => sum + b.items.filter((it) => it.autoFilledFields && it.autoFilledFields.length > 0).length,
+      0
+    );
   }, [parsedBills]);
 
   // Filtered bills for display
@@ -373,6 +382,16 @@ export const PurchaseExcelSyncModal: React.FC<PurchaseExcelSyncModalProps> = ({
               <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
               <div className="text-xs font-semibold">
                 Toàn bộ mã hàng hóa trong file Excel đều đã khớp chính xác với Danh mục sản phẩm trên phần mềm!
+              </div>
+            </div>
+          )}
+
+          {autoFilledItemsCount > 0 && (
+            <div className="p-3.5 rounded-2xl bg-sky-50 border border-sky-300 flex items-center gap-3 text-sky-900 shadow-2xs">
+              <RefreshCw className="w-4 h-4 text-sky-600 shrink-0" />
+              <div className="text-xs font-semibold">
+                Đã tự động đối chiếu Danh mục sản phẩm và bổ sung thông tin còn thiếu (Tên hàng hóa, ĐVT, Thuế %) cho{' '}
+                <strong className="font-black text-sky-700">{autoFilledItemsCount} dòng hàng hóa</strong> có mã trùng khớp với phần mềm.
               </div>
             </div>
           )}
@@ -722,7 +741,7 @@ export const PurchaseExcelSyncModal: React.FC<PurchaseExcelSyncModalProps> = ({
           )}
 
           {/* TAB CONTENT: BILLS LIST (ALL OR UNCATALOGED) */}
-          {(activeTab === 'all' || activeTab === 'uncataloged' || activeTab === 'duplicates') && (
+          {(activeTab === 'all' || activeTab === 'uncataloged' || activeTab === 'duplicates' || activeTab === 'new_supplier_bills') && (
             <div className="space-y-3.5">
               {displayedBills.length === 0 ? (
                 <div className="p-10 text-center bg-white rounded-2xl border border-slate-200 text-slate-400">
@@ -851,15 +870,51 @@ export const PurchaseExcelSyncModal: React.FC<PurchaseExcelSyncModalProps> = ({
                                 )}
                               </td>
 
-                              <td className="p-2 font-medium text-slate-800">{item.productName}</td>
-                              <td className="p-2 text-center text-slate-600">{item.purchaseUnit}</td>
+                              <td className="p-2 font-medium text-slate-800">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span>{item.productName}</span>
+                                  {item.autoFilledFields?.includes('Tên HH') && (
+                                    <span
+                                      className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 border border-sky-300 text-[9px] font-bold"
+                                      title="Tên hàng hóa được tự động bổ sung từ Danh mục sản phẩm"
+                                    >
+                                      Từ DM
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="p-2 text-center text-slate-600">
+                                <div className="inline-flex items-center gap-1">
+                                  <span>{item.purchaseUnit}</span>
+                                  {item.autoFilledFields?.includes('ĐVT') && (
+                                    <span
+                                      className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 border border-sky-300 text-[9px] font-bold"
+                                      title="ĐVT được tự động bổ sung từ Danh mục sản phẩm"
+                                    >
+                                      Từ DM
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
                               <td className="p-2 text-right font-bold text-slate-900">
                                 {formatNumber(item.quantity)}
                               </td>
                               <td className="p-2 text-right text-slate-700">
                                 {formatCurrency(item.unitPrice)}
                               </td>
-                              <td className="p-2 text-center text-indigo-700 font-semibold">{item.vatRate}%</td>
+                              <td className="p-2 text-center text-indigo-700 font-semibold">
+                                <div className="inline-flex items-center gap-1">
+                                  <span>{item.vatRate}%</span>
+                                  {item.autoFilledFields?.includes('Thuế %') && (
+                                    <span
+                                      className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 border border-sky-300 text-[9px] font-bold"
+                                      title="Thuế suất được tự động bổ sung từ Danh mục sản phẩm"
+                                    >
+                                      Từ DM
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
                               <td className="p-2 text-right font-bold text-slate-900">
                                 {formatCurrency(item.totalAmount)}
                               </td>
@@ -876,6 +931,15 @@ export const PurchaseExcelSyncModal: React.FC<PurchaseExcelSyncModalProps> = ({
                                       ❌ BÁO ĐỎ: Thiếu mã
                                     </span>
                                   )
+                                ) : item.autoFilledFields && item.autoFilledFields.length > 0 ? (
+                                  <div className="flex flex-col items-center gap-1">
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                      ✓ Hợp lệ
+                                    </span>
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-300">
+                                      Bổ sung: {item.autoFilledFields.join(', ')}
+                                    </span>
+                                  </div>
                                 ) : (
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-700">
                                     ✓ Hợp lệ
