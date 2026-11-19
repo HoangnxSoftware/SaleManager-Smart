@@ -273,6 +273,12 @@ export default function App() {
           const freshData = await loadDataFromGoogleSheets(token, targetSpreadsheetId);
           if (freshData) {
             const mergedDeleted = mergeDeletedOrders(loaded.deletedOrders, freshData.deletedOrders);
+            const hasUnpushedDeletes =
+              (loaded.deletedOrders?.length || 0) > 0 &&
+              mergedDeleted.length > (freshData.deletedOrders?.length || 0);
+            if (hasUnpushedDeletes) {
+              immediateSyncRequestedRef.current = true;
+            }
             const reconciledOrders = reconcileRemoteOrdersWithLocal(
               loaded.orders,
               freshData.orders,
@@ -391,9 +397,11 @@ export default function App() {
   const handleSaveOrder = (newOrder: Order) => {
     const existingOrder = data.orders.find(
       (o) =>
-        (newOrder.rootCode && o.rootCode && o.rootCode.trim().toUpperCase() === newOrder.rootCode.trim().toUpperCase()) ||
         o.id === newOrder.id ||
-        (newOrder.orderCode && o.orderCode && o.orderCode.trim().toLowerCase() === newOrder.orderCode.trim().toLowerCase())
+        ((!o.id || !newOrder.id) &&
+          newOrder.rootCode &&
+          o.rootCode &&
+          o.rootCode.trim().toUpperCase() === newOrder.rootCode.trim().toUpperCase())
     );
 
     const isAdmin = currentUser?.role === 'admin';
@@ -416,25 +424,36 @@ export default function App() {
     }
 
     setData((prev) => {
-      // Tìm xem đơn hàng đã tồn tại hay chưa theo rootCode, orderCode hoặc id
+      const deletedList = prev.deletedOrders || [];
+      // Chỉ khớp đơn đã có theo đúng ID (tránh trường hợp trùng rootCode ghi đè nhầm đơn khác)
       const existingIdx = prev.orders.findIndex(
         (o) =>
-          (newOrder.rootCode && o.rootCode && o.rootCode.trim().toUpperCase() === newOrder.rootCode.trim().toUpperCase()) ||
           o.id === newOrder.id ||
-          (newOrder.orderCode && o.orderCode && o.orderCode.trim().toLowerCase() === newOrder.orderCode.trim().toLowerCase())
+          ((!o.id || !newOrder.id) &&
+            newOrder.rootCode &&
+            o.rootCode &&
+            o.rootCode.trim().toUpperCase() === newOrder.rootCode.trim().toUpperCase())
       );
 
       let orderToSave = newOrder;
-      if (existingIdx === -1) {
-        const deletedRootSet = new Set(
-          (prev.deletedOrders || []).map((d) => d.rootCode?.trim().toUpperCase()).filter(Boolean) as string[]
-        );
-        if (!orderToSave.rootCode || deletedRootSet.has(orderToSave.rootCode.trim().toUpperCase())) {
-          orderToSave = {
-            ...orderToSave,
-            rootCode: generateNextRootCode(prev.orders, prev.deletedOrders || []),
-          };
-        }
+      const usedRootSet = new Set<string>([
+        ...(deletedList.map((d) => d.rootCode?.trim().toUpperCase()).filter(Boolean) as string[]),
+        ...(prev.orders
+          .filter((_, idx) => idx !== existingIdx)
+          .map((o) => o.rootCode?.trim().toUpperCase())
+          .filter(Boolean) as string[]),
+      ]);
+
+      const currentRootUpper = orderToSave.rootCode?.trim().toUpperCase();
+      if (!currentRootUpper || (existingIdx === -1 && usedRootSet.has(currentRootUpper))) {
+        orderToSave = {
+          ...orderToSave,
+          rootCode: generateNextRootCode(
+            prev.orders,
+            deletedList,
+            orderToSave.createdAt || orderToSave.orderDate
+          ),
+        };
       }
 
       let updatedOrders: Order[];
@@ -447,7 +466,10 @@ export default function App() {
       }
 
       // Khử trùng tuyệt đối: 1 mã gốc chỉ có duy nhất 1 đơn hàng
-      const cleanOrders = deduplicateOrders(ensureOrdersHaveRootCode(updatedOrders));
+      const cleanOrders = deduplicateOrders(
+        ensureOrdersHaveRootCode(updatedOrders, deletedList),
+        deletedList
+      );
 
       return {
         ...prev,
@@ -486,8 +508,36 @@ export default function App() {
     }
 
     setData((prev) => {
-      const combined = [...allowedOrders, ...prev.orders];
-      const cleanOrders = deduplicateOrders(combined);
+      const deletedList = prev.deletedOrders || [];
+      const existingIdSet = new Set(prev.orders.map((o) => o.id));
+      const usedRootSet = new Set<string>([
+        ...(deletedList.map((d) => d.rootCode?.trim().toUpperCase()).filter(Boolean) as string[]),
+        ...(prev.orders.map((o) => o.rootCode?.trim().toUpperCase()).filter(Boolean) as string[]),
+      ]);
+
+      const normalizedIncoming: Order[] = [];
+      for (const incoming of allowedOrders) {
+        const isExisting = existingIdSet.has(incoming.id);
+        const incRootUpper = incoming.rootCode?.trim().toUpperCase();
+        if (!isExisting && (!incRootUpper || usedRootSet.has(incRootUpper))) {
+          const freshRoot = generateNextRootCode(
+            [...prev.orders, ...normalizedIncoming],
+            deletedList,
+            incoming.createdAt || incoming.orderDate
+          );
+          usedRootSet.add(freshRoot.toUpperCase());
+          normalizedIncoming.push({ ...incoming, rootCode: freshRoot });
+        } else {
+          if (incRootUpper) usedRootSet.add(incRootUpper);
+          normalizedIncoming.push(incoming);
+        }
+      }
+
+      const combined = [...normalizedIncoming, ...prev.orders];
+      const cleanOrders = deduplicateOrders(
+        ensureOrdersHaveRootCode(combined, deletedList),
+        deletedList
+      );
 
       return {
         ...prev,
@@ -519,7 +569,7 @@ export default function App() {
     immediateSyncRequestedRef.current = true;
 
     setData((prev) => {
-      const ensuredPrev = ensureOrdersHaveRootCode(prev.orders);
+      const ensuredPrev = ensureOrdersHaveRootCode(prev.orders, prev.deletedOrders || []);
       const targetOrder = ensuredPrev.find((o) => o.id === orderId) || deletedOrder;
       const newTombstone: DeletedOrderRecord | null = targetOrder
         ? {
@@ -552,7 +602,7 @@ export default function App() {
       const resequenced = resequenceOrders(remaining, rules);
       return {
         ...prev,
-        orders: deduplicateOrders(resequenced),
+        orders: deduplicateOrders(resequenced, mergedDeleted),
         deletedOrders: mergedDeleted,
       };
     });
@@ -581,7 +631,7 @@ export default function App() {
     immediateSyncRequestedRef.current = true;
 
     setData((prev) => {
-      const ensuredPrev = ensureOrdersHaveRootCode(prev.orders);
+      const ensuredPrev = ensureOrdersHaveRootCode(prev.orders, prev.deletedOrders || []);
       const targetIdSet = new Set(orderIds);
       const newTombstones: DeletedOrderRecord[] = ensuredPrev
         .filter((o) => targetIdSet.has(o.id))
@@ -606,7 +656,7 @@ export default function App() {
       const resequenced = resequenceOrders(remaining, rules);
       return {
         ...prev,
-        orders: deduplicateOrders(resequenced),
+        orders: deduplicateOrders(resequenced, mergedDeleted),
         deletedOrders: mergedDeleted,
       };
     });
@@ -1000,7 +1050,7 @@ export default function App() {
         setData((prev) => ({
           ...prev,
           spreadsheetId: res.spreadsheetId,
-          lastSyncedAt: new Date().toISOString(),
+          lastSyncedAt: res.lastSyncedAt,
           syncSource: 'google_drive',
         }));
       } catch (err: any) {
@@ -1166,13 +1216,20 @@ export default function App() {
 
       const res = await syncDataToGoogleSheets(data, token, data.spreadsheetId);
       if (res && res.spreadsheetId) {
-        const now = new Date().toISOString();
+        const now = res.lastSyncedAt || new Date().toISOString();
+        const syncedData: AppData = {
+          ...data,
+          spreadsheetId: res.spreadsheetId,
+          lastSyncedAt: now,
+          syncSource: 'google_drive',
+        };
         setData((prev) => ({
           ...prev,
+          spreadsheetId: res.spreadsheetId,
           lastSyncedAt: now,
           syncSource: 'google_drive',
         }));
-        saveData({ ...data, lastSyncedAt: now }, selectedDbId);
+        saveData(syncedData, selectedDbId);
         setGlobalBanner({
           type: 'success',
           message: '✓ Đã đẩy và sao lưu dữ liệu toàn vẹn lên Google Sheets thành công! Các máy khác đã có thể xem được dữ liệu mới.',
@@ -1305,9 +1362,10 @@ export default function App() {
       // Step B: Push back
       const res = await syncDataToGoogleSheets(combinedData, token, data.spreadsheetId);
       if (res && res.spreadsheetId) {
-        const now = new Date().toISOString();
+        const now = res.lastSyncedAt || new Date().toISOString();
         const finalData: AppData = {
           ...combinedData,
+          spreadsheetId: res.spreadsheetId,
           lastSyncedAt: now,
           syncSource: 'google_drive',
         };
@@ -1459,6 +1517,7 @@ export default function App() {
           {currentTab === 'sales' && (
             <SalesManager
               orders={data.orders}
+              deletedOrders={data.deletedOrders}
               customers={data.customers}
               products={data.products}
               purchases={data.purchases}
@@ -1583,6 +1642,7 @@ export default function App() {
           products={data.products}
           purchases={data.purchases}
           allOrders={data.orders}
+          deletedOrders={data.deletedOrders}
           debtPayments={data.debtPayments}
           currentUser={currentUser}
           settings={data.settings}
@@ -1650,13 +1710,18 @@ export default function App() {
           mode={syncModalMode}
           data={data}
           onClose={() => setSyncModalMode(null)}
-          onSuccessPush={(spreadsheetId, webUrl) => {
-            setData((prev) => ({
-              ...prev,
-              spreadsheetId,
-              lastSyncedAt: new Date().toISOString(),
-              syncSource: 'google_drive',
-            }));
+          onSuccessPush={(spreadsheetId, webUrl, syncedAt) => {
+            const now = syncedAt || new Date().toISOString();
+            setData((prev) => {
+              const updated: AppData = {
+                ...prev,
+                spreadsheetId,
+                lastSyncedAt: now,
+                syncSource: 'google_drive',
+              };
+              saveData(updated, selectedDbId);
+              return updated;
+            });
             setGlobalBanner({
               type: 'success',
               message: '✓ Đã đồng bộ dữ liệu toàn vẹn dạng text lên Google Sheets thành công!',

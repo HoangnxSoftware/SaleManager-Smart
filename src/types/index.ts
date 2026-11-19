@@ -79,7 +79,7 @@ export type DeliveryStatus = 'pending' | 'delivering' | 'completed' | 'cancelled
 
 export interface Order {
   id: string;
-  rootCode?: string; // Mã gốc quy chiếu đồng bộ (tự sinh tăng dần: DH-ROOT-00001, DH-ROOT-00002... Bất biến khi đổi mã đơn, thêm, sửa, xóa)
+  rootCode?: string; // Mã gốc quy chiếu đồng bộ (tự sinh theo ngày tạo: ROOT-20261119-00001... Bất biến khi đổi mã đơn, thêm, sửa, xóa)
   orderCode: string; // Mã đơn hiển thị
   orderDate: string; // Ngày tháng (YYYY-MM-DD)
   customerId: string; // ID khách hàng

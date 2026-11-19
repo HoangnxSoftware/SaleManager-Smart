@@ -4,6 +4,7 @@ import firebaseConfig from '../../firebase-applet-config.json' with { type: 'jso
 import {
   AppData,
   Order,
+  DeletedOrderRecord,
   Customer,
   Supplier,
   Product,
@@ -369,6 +370,105 @@ function toTextRow(row: any[]): string[] {
   });
 }
 
+function getColumnLetter(colIndex: number): string {
+  let temp = colIndex;
+  let letter = '';
+  while (temp > 0) {
+    const mod = (temp - 1) % 26;
+    letter = String.fromCharCode(65 + mod) + letter;
+    temp = Math.floor((temp - mod) / 26);
+  }
+  return letter || 'A';
+}
+
+function getSheetRange(tabName: string, rows: (string | number)[][], minRows = 1): string {
+  const colCount = Math.max(1, rows[0]?.length || 1);
+  const colLetter = getColumnLetter(colCount);
+  const rowCount = Math.max(minRows, rows.length);
+  const escapedTab = tabName.replace(/'/g, "''");
+  return `'${escapedTab}'!A1:${colLetter}${rowCount}`;
+}
+
+function fitDeletedOrdersJson(deletedOrders: DeletedOrderRecord[], maxChars = 40000): string {
+  if (!deletedOrders || deletedOrders.length === 0) return '[]';
+  let limit = deletedOrders.length;
+  while (limit > 0) {
+    const candidate = JSON.stringify(deletedOrders.slice(0, limit));
+    if (candidate.length <= maxChars) return candidate;
+    limit = Math.floor(limit * 0.75);
+  }
+  return '[]';
+}
+
+interface SheetGridInfo {
+  sheetId?: number;
+  title: string;
+  rowCount: number;
+  columnCount: number;
+}
+
+const SHADOW_ENTITY_TAB_REGEX =
+  /order|đơn hàng|don hang|donhang|bán hàng|ban hang|bán|danh sách đơn|meta|customer|khách hàng|khach hang|khachhang|supplier|nhà cung cấp|nha cung cap|nhacungcap|product|hàng hóa|hang hoa|hanghoa|san pham|sản phẩm|sanpham|purchase|nhập kho|nhap kho|nhapkho|debt|công nợ|cong no|congno/i;
+
+/**
+ * Clears all cells across target tabs using their exact grid limits so Google Sheets
+ * never rejects batchClear with "exceeds grid limits", and verifies success.
+ */
+async function clearTabsOnSpreadsheet(
+  accessToken: string,
+  spreadsheetId: string,
+  tabs: SheetGridInfo[],
+  requiredTabSet: Set<string>
+): Promise<void> {
+  if (tabs.length === 0) return;
+
+  const ranges = tabs.map((tab) => {
+    const escapedTab = tab.title.replace(/'/g, "''");
+    const lastCol = getColumnLetter(Math.max(1, tab.columnCount || 26));
+    const lastRow = Math.max(1, tab.rowCount || 1000);
+    return `'${escapedTab}'!A1:${lastCol}${lastRow}`;
+  });
+
+  const clearRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ranges }),
+    }
+  );
+
+  if (clearRes.ok) {
+    return;
+  }
+
+  const batchErrText = await clearRes.text();
+  console.warn('values:batchClear fallback to per-tab clear:', batchErrText);
+
+  // Fallback: clear each tab individually using bare tab title (valid for entire sheet)
+  for (const tab of tabs) {
+    const escapedTab = `'${tab.title.replace(/'/g, "''")}'`;
+    const singleRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(escapedTab)}:clear`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      }
+    );
+    if (!singleRes.ok && requiredTabSet.has(tab.title)) {
+      const singleErr = await singleRes.text();
+      throw new Error(`Không thể xóa dữ liệu cũ trên sheet '${tab.title}': ${singleErr}`);
+    }
+  }
+}
+
 /**
  * Backup / Sync local AppData to Google Sheets inside 'SaleManager-Smart'
  * All data is formatted as Text to prevent losing leading zeros or precision.
@@ -378,7 +478,7 @@ export async function syncDataToGoogleSheets(
   data: AppData,
   accessToken: string,
   targetSpreadsheetId?: string
-): Promise<{ spreadsheetId: string; webUrl: string }> {
+): Promise<{ spreadsheetId: string; webUrl: string; lastSyncedAt: string }> {
   // Requirement: "nếu sử dụng dữ liệu mẫu thì không cho phép đồng bộ dữ liệu lên google sheet"
   if (data.isDemo) {
     throw new Error(
@@ -396,12 +496,14 @@ export async function syncDataToGoogleSheets(
   // Chunk serialized JSON backup (max 40,000 chars per chunk) to stay well under Google Sheets 50,000 character limit
   const cleanDeletedOrders = mergeDeletedOrders(data.deletedOrders || [], []);
   const cleanOrdersForSync = deduplicateOrders(
-    ensureOrdersHaveRootCode(filterDeletedOrders(data.orders || [], cleanDeletedOrders))
+    ensureOrdersHaveRootCode(filterDeletedOrders(data.orders || [], cleanDeletedOrders), cleanDeletedOrders),
+    cleanDeletedOrders
   );
   const dataToSerialize: AppData = {
     ...data,
     orders: cleanOrdersForSync,
     deletedOrders: cleanDeletedOrders,
+    lastSyncedAt: now,
   };
   const serialized = JSON.stringify(dataToSerialize);
   const CHUNK_SIZE = 40000;
@@ -410,7 +512,7 @@ export async function syncDataToGoogleSheets(
     backupChunks.push(serialized.substring(i, i + CHUNK_SIZE));
   }
 
-  const deletedOrdersCompact = JSON.stringify(cleanDeletedOrders.slice(0, 200));
+  const deletedOrdersCompact = fitDeletedOrdersJson(cleanDeletedOrders, 40000);
 
   // 1. Metadata
   const metadataRows: string[][] = [
@@ -429,7 +531,7 @@ export async function syncDataToGoogleSheets(
     ['totalOrders', String(cleanOrdersForSync.length), 'Số đơn hàng'],
     ['totalPurchases', String(data.purchases.length), 'Số phiếu nhập'],
     ['totalDebtPayments', String(data.debtPayments.length), 'Số phiếu thu chi nợ'],
-    ['deletedOrdersJson', deletedOrdersCompact.length <= 45000 ? deletedOrdersCompact : '[]', 'Danh sách đơn hàng đã xóa'],
+    ['deletedOrdersJson', deletedOrdersCompact, 'Danh sách đơn hàng đã xóa'],
     ['serializedBackupChunks', String(backupChunks.length), 'Số phần lưu trữ JSON backup'],
     ...backupChunks.map((chunk, idx) => [
       `serializedBackup_${idx}`,
@@ -530,81 +632,142 @@ export async function syncDataToGoogleSheets(
     ])
   ];
 
-function getColumnLetter(colIndex: number): string {
-  let temp = colIndex;
-  let letter = '';
-  while (temp > 0) {
-    const mod = (temp - 1) % 26;
-    letter = String.fromCharCode(65 + mod) + letter;
-    temp = Math.floor((temp - mod) / 26);
-  }
-  return letter || 'A';
-}
+  // Ensure all required sheet tabs exist, resize if needed, and clear ALL stale rows before writing
+  const tabPayloads: Array<{ title: string; rows: string[][] }> = [
+    { title: 'Metadata', rows: metadataRows },
+    { title: 'Customers', rows: customerRows },
+    { title: 'Suppliers', rows: supplierRows },
+    { title: 'Products', rows: productRows },
+    { title: 'Orders', rows: orderRows },
+    { title: 'Purchases', rows: purchaseRows },
+    { title: 'DebtPayments', rows: debtRows },
+  ];
+  const requiredTabs = tabPayloads.map((t) => t.title);
+  const requiredTabSet = new Set(requiredTabs);
 
-function getSheetRange(tabName: string, rows: (string | number)[][], minRows = 100): string {
-  const colCount = Math.max(1, rows[0]?.length || 1);
-  const colLetter = getColumnLetter(colCount);
-  const rowCount = Math.max(minRows, rows.length + 5);
-  return `'${tabName}'!A1:${colLetter}${rowCount}`;
-}
-
-  // Ensure all required sheet tabs exist and clear stale rows (especially deleted orders) before writing
-  const requiredTabs = ['Metadata', 'Customers', 'Suppliers', 'Products', 'Orders', 'Purchases', 'DebtPayments'];
-  try {
-    const metaRes = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`,
-      {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }
-    );
-    if (metaRes.ok) {
-      const metaJson = await metaRes.json();
-      const existingTitles: string[] = (metaJson.sheets || [])
-        .map((s: any) => s.properties?.title)
-        .filter(Boolean);
-      const missingTabs = requiredTabs.filter((t) => !existingTitles.includes(t));
-      if (missingTabs.length > 0) {
-        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            requests: missingTabs.map((title) => ({ addSheet: { properties: { title } } })),
-          }),
-        });
-      }
+  const metaRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title,gridProperties(rowCount,columnCount))`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
     }
+  );
+  if (!metaRes.ok) {
+    const metaErr = await metaRes.text();
+    throw new Error(`Lỗi đọc cấu trúc bảng tính Google Sheets: ${metaErr}`);
+  }
 
-    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`, {
+  const metaJson = await metaRes.json();
+  const sheetMap = new Map<string, SheetGridInfo>();
+  for (const s of metaJson.sheets || []) {
+    const props = s.properties;
+    if (props?.title) {
+      sheetMap.set(props.title, {
+        sheetId: props.sheetId,
+        title: props.title,
+        rowCount: props.gridProperties?.rowCount || 1000,
+        columnCount: props.gridProperties?.columnCount || 26,
+      });
+    }
+  }
+
+  const missingTabs = tabPayloads.filter((t) => !sheetMap.has(t.title));
+  if (missingTabs.length > 0) {
+    const addRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        ranges: requiredTabs.map((t) => `'${t}'!A:Z`),
+        requests: missingTabs.map((t) => ({
+          addSheet: {
+            properties: {
+              title: t.title,
+              gridProperties: {
+                rowCount: Math.max(1000, t.rows.length + 50),
+                columnCount: Math.max(26, t.rows[0]?.length || 1),
+              },
+            },
+          },
+        })),
       }),
     });
-  } catch (clearErr) {
-    console.debug('Pre-sync tab ensure/clear warning:', clearErr);
+    if (!addRes.ok) {
+      const addErr = await addRes.text();
+      throw new Error(`Lỗi khởi tạo sheet mới trên Google Sheets: ${addErr}`);
+    }
+    const addJson = await addRes.json();
+    (addJson.replies || []).forEach((reply: any, idx: number) => {
+      const addedProps = reply?.addSheet?.properties;
+      const fallbackTitle = missingTabs[idx]?.title;
+      const tName = addedProps?.title || fallbackTitle;
+      if (tName) {
+        sheetMap.set(tName, {
+          sheetId: addedProps?.sheetId,
+          title: tName,
+          rowCount: addedProps?.gridProperties?.rowCount || Math.max(1000, missingTabs[idx].rows.length + 50),
+          columnCount: addedProps?.gridProperties?.columnCount || Math.max(26, missingTabs[idx].rows[0]?.length || 1),
+        });
+      }
+    });
   }
 
+  // Auto-expand any required sheet whose grid size is smaller than the data to write
+  const resizeRequests: any[] = [];
+  for (const tp of tabPayloads) {
+    const info = sheetMap.get(tp.title);
+    if (!info || info.sheetId === undefined) continue;
+    const neededRows = Math.max(info.rowCount, tp.rows.length + 10);
+    const neededCols = Math.max(info.columnCount, tp.rows[0]?.length || 1);
+    if (neededRows > info.rowCount || neededCols > info.columnCount) {
+      resizeRequests.push({
+        updateSheetProperties: {
+          properties: {
+            sheetId: info.sheetId,
+            gridProperties: {
+              rowCount: neededRows,
+              columnCount: neededCols,
+            },
+          },
+          fields: 'gridProperties(rowCount,columnCount)',
+        },
+      });
+      info.rowCount = neededRows;
+      info.columnCount = neededCols;
+    }
+  }
+  if (resizeRequests.length > 0) {
+    const resizeRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ requests: resizeRequests }),
+    });
+    if (!resizeRes.ok) {
+      const resizeErr = await resizeRes.text();
+      throw new Error(`Lỗi mở rộng vùng lưu trữ trên Google Sheets: ${resizeErr}`);
+    }
+  }
+
+  // Clear ALL required tabs AND any shadow/localized entity tabs (e.g. 'Đơn hàng') so deleted orders can never linger
+  const tabsToClear: SheetGridInfo[] = [];
+  for (const [tTitle, info] of sheetMap.entries()) {
+    if (requiredTabSet.has(tTitle) || SHADOW_ENTITY_TAB_REGEX.test(tTitle)) {
+      tabsToClear.push(info);
+    }
+  }
+  await clearTabsOnSpreadsheet(accessToken, spreadsheetId, tabsToClear, requiredTabSet);
+
   // Send batch write to spreadsheet formatted entirely as text
-  // Dynamically compute exact range for each tab (e.g. Orders has 21 columns -> A1:U...)
-  // to avoid Google Sheets 400 error: 'Requested writing within range, but tried writing to column'
+  // Range uses exact rows.length (guaranteed cleared above) to stay strictly inside grid bounds
   const payload = {
     valueInputOption: 'RAW',
-    data: [
-      { range: getSheetRange('Metadata', metadataRows, 100), values: metadataRows.map(toTextRow) },
-      { range: getSheetRange('Customers', customerRows, 500), values: customerRows.map(toTextRow) },
-      { range: getSheetRange('Suppliers', supplierRows, 500), values: supplierRows.map(toTextRow) },
-      { range: getSheetRange('Products', productRows, 500), values: productRows.map(toTextRow) },
-      { range: getSheetRange('Orders', orderRows, 1000), values: orderRows.map(toTextRow) },
-      { range: getSheetRange('Purchases', purchaseRows, 1000), values: purchaseRows.map(toTextRow) },
-      { range: getSheetRange('DebtPayments', debtRows, 1000), values: debtRows.map(toTextRow) },
-    ],
+    data: tabPayloads.map((tp) => ({
+      range: getSheetRange(tp.title, tp.rows, tp.rows.length),
+      values: tp.rows.map(toTextRow),
+    })),
   };
 
   const updateRes = await fetch(
@@ -625,7 +788,7 @@ function getSheetRange(tabName: string, rows: (string | number)[][], minRows = 1
   }
 
   const webUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
-  return { spreadsheetId, webUrl };
+  return { spreadsheetId, webUrl, lastSyncedAt: now };
 }
 
 /**
@@ -670,11 +833,12 @@ export async function loadDataFromGoogleSheets(
     targetId = await getOrCreateSpreadsheet(accessToken, folderId);
   }
 
-  // 1. Inspect sheet tabs to locate available sheets
+  // 1. Inspect sheet tabs & exact gridProperties to avoid 400 grid limit errors on batchGet
   let sheetTitles: string[] = [];
+  const sheetGridMap = new Map<string, { rowCount: number; columnCount: number }>();
   try {
     const sheetMetaRes = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${targetId}?fields=sheets.properties.title`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${targetId}?fields=sheets.properties(title,gridProperties(rowCount,columnCount))`,
       {
         headers: { Authorization: `Bearer ${accessToken}` },
       }
@@ -682,7 +846,16 @@ export async function loadDataFromGoogleSheets(
     if (sheetMetaRes.ok) {
       const sJson = await sheetMetaRes.json();
       if (sJson.sheets && Array.isArray(sJson.sheets)) {
-        sheetTitles = sJson.sheets.map((s: any) => s.properties?.title).filter(Boolean);
+        for (const s of sJson.sheets) {
+          const t = s.properties?.title;
+          if (t) {
+            sheetTitles.push(t);
+            sheetGridMap.set(t, {
+              rowCount: s.properties?.gridProperties?.rowCount || 5000,
+              columnCount: s.properties?.gridProperties?.columnCount || 26,
+            });
+          }
+        }
       }
     }
   } catch (err) {
@@ -693,13 +866,25 @@ export async function loadDataFromGoogleSheets(
     return sheetTitles.find((t) => regex.test(t)) || null;
   };
 
-  const metaTab = findTab(/meta/i) || (sheetTitles.includes('Metadata') ? 'Metadata' : null);
-  let ordersTab = findTab(/order|đơn hàng|don hang|donhang|bán hàng|ban hang|bán|danh sách đơn/i);
-  const customersTab = findTab(/customer|khách hàng|khach hang|khachhang/i) || (sheetTitles.includes('Customers') ? 'Customers' : null);
-  const suppliersTab = findTab(/supplier|nhà cung cấp|nha cung cap|nhacungcap/i) || (sheetTitles.includes('Suppliers') ? 'Suppliers' : null);
-  const productsTab = findTab(/product|hàng hóa|hang hoa|hanghoa|san pham|sản phẩm|sanpham/i) || (sheetTitles.includes('Products') ? 'Products' : null);
-  const purchasesTab = findTab(/purchase|nhập kho|nhap kho|nhapkho/i) || (sheetTitles.includes('Purchases') ? 'Purchases' : null);
-  const debtsTab = findTab(/debt|công nợ|cong no|congno/i) || (sheetTitles.includes('DebtPayments') ? 'DebtPayments' : null);
+  const metaTab = sheetTitles.includes('Metadata') ? 'Metadata' : findTab(/meta/i);
+  let ordersTab = sheetTitles.includes('Orders')
+    ? 'Orders'
+    : findTab(/order|đơn hàng|don hang|donhang|bán hàng|ban hang|bán|danh sách đơn/i);
+  const customersTab = sheetTitles.includes('Customers')
+    ? 'Customers'
+    : findTab(/customer|khách hàng|khach hang|khachhang/i);
+  const suppliersTab = sheetTitles.includes('Suppliers')
+    ? 'Suppliers'
+    : findTab(/supplier|nhà cung cấp|nha cung cap|nhacungcap/i);
+  const productsTab = sheetTitles.includes('Products')
+    ? 'Products'
+    : findTab(/product|hàng hóa|hang hoa|hanghoa|san pham|sản phẩm|sanpham/i);
+  const purchasesTab = sheetTitles.includes('Purchases')
+    ? 'Purchases'
+    : findTab(/purchase|nhập kho|nhap kho|nhapkho/i);
+  const debtsTab = sheetTitles.includes('DebtPayments')
+    ? 'DebtPayments'
+    : findTab(/debt|công nợ|cong no|congno/i);
 
   // If ordersTab not found but sheet has a non-meta sheet, pick it
   if (!ordersTab && sheetTitles.length > 0) {
@@ -709,15 +894,22 @@ export async function loadDataFromGoogleSheets(
     ordersTab = 'Orders';
   }
 
-  // 2. Query tabs safely: only query existing tabs to prevent 400 Bad Request
+  const getReadRange = (tabTitle: string, defaultCols: number, maxRows: number): string => {
+    const grid = sheetGridMap.get(tabTitle);
+    const cols = Math.max(1, grid ? grid.columnCount : defaultCols);
+    const rows = Math.max(1, Math.min(grid ? grid.rowCount : maxRows, maxRows));
+    return `A1:${getColumnLetter(cols)}${rows}`;
+  };
+
+  // 2. Query tabs safely using each tab's actual grid bounds
   const tabQueries: Array<{ key: string; title: string; range: string }> = [];
-  if (metaTab) tabQueries.push({ key: 'meta', title: metaTab, range: 'A1:C300' });
-  if (ordersTab) tabQueries.push({ key: 'orders', title: ordersTab, range: 'A1:Z5000' });
-  if (customersTab) tabQueries.push({ key: 'customers', title: customersTab, range: 'A1:Z2000' });
-  if (suppliersTab) tabQueries.push({ key: 'suppliers', title: suppliersTab, range: 'A1:Z2000' });
-  if (productsTab) tabQueries.push({ key: 'products', title: productsTab, range: 'A1:Z2000' });
-  if (purchasesTab) tabQueries.push({ key: 'purchases', title: purchasesTab, range: 'A1:Z5000' });
-  if (debtsTab) tabQueries.push({ key: 'debts', title: debtsTab, range: 'A1:Z2000' });
+  if (metaTab) tabQueries.push({ key: 'meta', title: metaTab, range: getReadRange(metaTab, 3, 2000) });
+  if (ordersTab) tabQueries.push({ key: 'orders', title: ordersTab, range: getReadRange(ordersTab, 21, 20000) });
+  if (customersTab) tabQueries.push({ key: 'customers', title: customersTab, range: getReadRange(customersTab, 12, 5000) });
+  if (suppliersTab) tabQueries.push({ key: 'suppliers', title: suppliersTab, range: getReadRange(suppliersTab, 10, 5000) });
+  if (productsTab) tabQueries.push({ key: 'products', title: productsTab, range: getReadRange(productsTab, 10, 5000) });
+  if (purchasesTab) tabQueries.push({ key: 'purchases', title: purchasesTab, range: getReadRange(purchasesTab, 11, 10000) });
+  if (debtsTab) tabQueries.push({ key: 'debts', title: debtsTab, range: getReadRange(debtsTab, 8, 5000) });
 
   let metaRows: string[][] = [];
   let orderRows: string[][] = [];
@@ -761,8 +953,8 @@ export async function loadDataFromGoogleSheets(
   // Fallback: If batchGet failed, fetch individual tabs safely
   if (!batchSucceeded) {
     const queriesToRun = tabQueries.length > 0 ? tabQueries : [
-      { key: 'orders', title: ordersTab, range: 'A1:Z5000' },
-      { key: 'meta', title: 'Metadata', range: 'A1:C300' },
+      { key: 'orders', title: ordersTab, range: 'A1:U5000' },
+      { key: 'meta', title: 'Metadata', range: 'A1:C2000' },
     ];
     const results = await Promise.all(
       queriesToRun.map(async (q) => ({
@@ -784,7 +976,7 @@ export async function loadDataFromGoogleSheets(
   // 3. Parse Metadata Key-Value pairs
   const metaObj: Record<string, string> = {};
   for (const row of metaRows) {
-    if (row && row[0] && row[1]) {
+    if (row && row[0] && row[1] !== undefined) {
       metaObj[row[0].trim()] = String(row[1]).trim();
     }
   }
@@ -795,14 +987,15 @@ export async function loadDataFromGoogleSheets(
   if (totalChunks > 0) {
     const chunkMap = new Map<number, string>();
     for (const row of metaRows) {
-      if (row[0] && row[0].startsWith('serializedBackup_') && row[1]) {
+      if (row[0] && row[0].startsWith('serializedBackup_') && row[1] !== undefined) {
         const idx = parseInt(row[0].replace('serializedBackup_', ''), 10);
         if (!isNaN(idx)) {
           chunkMap.set(idx, row[1]);
         }
       }
     }
-    if (chunkMap.size > 0) {
+    const hasAllChunks = Array.from({ length: totalChunks }, (_, i) => i).every((i) => chunkMap.has(i));
+    if (hasAllChunks) {
       let combined = '';
       for (let i = 0; i < totalChunks; i++) {
         combined += chunkMap.get(i) || '';
@@ -1135,12 +1328,15 @@ export async function loadDataFromGoogleSheets(
 
     const hasAuthoritativeJsonOrders =
       Array.isArray(finalResult.orders) &&
-      (finalResult.orders.length > 0 || metaObj['totalOrders'] === '0');
+      (finalResult.orders.length > 0 ||
+        metaObj['totalOrders'] === '0' ||
+        metaObj['serializedBackupChunks'] !== undefined);
 
     if (hasAuthoritativeJsonOrders) {
       // Tin cậy danh sách orders trong JSON backup (đồng bộ cùng lúc với Metadata) để không hồi sinh dòng cũ còn sót trên sheet
       finalResult.orders = deduplicateOrders(
-        ensureOrdersHaveRootCode(filterDeletedOrders(finalResult.orders || [], combinedDeleted))
+        ensureOrdersHaveRootCode(filterDeletedOrders(finalResult.orders || [], combinedDeleted), combinedDeleted),
+        combinedDeleted
       );
     } else if (parsedSheetOrders.length > 0) {
       finalResult.orders = mergeOrdersByRootCode(
@@ -1150,7 +1346,8 @@ export async function loadDataFromGoogleSheets(
       );
     } else {
       finalResult.orders = ensureOrdersHaveRootCode(
-        filterDeletedOrders(finalResult.orders || [], combinedDeleted)
+        filterDeletedOrders(finalResult.orders || [], combinedDeleted),
+        combinedDeleted
       );
     }
     // Also merge other entities if sheet tab has rows but backup was empty
@@ -1186,7 +1383,7 @@ export async function loadDataFromGoogleSheets(
       customers: parsedSheetCustomers,
       suppliers: parsedSheetSuppliers,
       products: parsedSheetProducts,
-      orders: deduplicateOrders(filteredOrders),
+      orders: deduplicateOrders(ensureOrdersHaveRootCode(filteredOrders, metaDeletedOrders), metaDeletedOrders),
       deletedOrders: metaDeletedOrders,
       purchases: parsedSheetPurchases,
       debtPayments: parsedSheetDebts,
@@ -1200,7 +1397,11 @@ export async function loadDataFromGoogleSheets(
 
   finalResult.deletedOrders = mergeDeletedOrders(finalResult.deletedOrders || [], metaDeletedOrders);
   finalResult.orders = deduplicateOrders(
-    filterDeletedOrders(finalResult.orders || [], finalResult.deletedOrders)
+    ensureOrdersHaveRootCode(
+      filterDeletedOrders(finalResult.orders || [], finalResult.deletedOrders),
+      finalResult.deletedOrders
+    ),
+    finalResult.deletedOrders
   );
   finalResult.lastSyncedAt = metaObj['lastSyncedAt'] || new Date().toISOString();
   finalResult.syncSource = 'google_drive';

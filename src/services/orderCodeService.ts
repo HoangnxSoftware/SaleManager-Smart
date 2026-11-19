@@ -292,66 +292,131 @@ export function resequenceOrders(orders: Order[], rules: OrderCodeRule[]): Order
 }
 
 /**
- * Sinh mã gốc quy chiếu tự tăng dần cho đơn hàng mới: DH-ROOT-00001, DH-ROOT-00002...
- * Mã này là bất biến khi thêm, sửa, xóa, đánh số lại mã đơn hiển thị.
+ * Chuẩn hóa ngày tạo thành chuỗi YYYYMMDD theo lịch địa phương để sinh mã gốc ROOT-YYYYMMDD-STT
  */
-export function generateNextRootCode(
-  allOrders: Order[] = [],
-  deletedOrders: DeletedOrderRecord[] = []
-): string {
-  let maxNum = 0;
-  for (const o of allOrders) {
-    if (o.rootCode) {
-      const match = o.rootCode.match(/(\d+)$/);
-      if (match) {
-        const n = parseInt(match[1], 10);
-        if (!isNaN(n) && n > maxNum) {
-          maxNum = n;
-        }
-      }
+export function formatRootDatePart(referenceDate?: string): string {
+  if (referenceDate) {
+    const trimmed = referenceDate.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed.replace(/-/g, '');
+    }
+    if (/^\d{8}$/.test(trimmed)) {
+      return trimmed;
+    }
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) {
+      const y = parsed.getFullYear();
+      const m = String(parsed.getMonth() + 1).padStart(2, '0');
+      const d = String(parsed.getDate()).padStart(2, '0');
+      return `${y}${m}${d}`;
     }
   }
-  for (const d of deletedOrders) {
-    if (d.rootCode) {
-      const match = d.rootCode.match(/(\d+)$/);
-      if (match) {
-        const n = parseInt(match[1], 10);
-        if (!isNaN(n) && n > maxNum) {
-          maxNum = n;
-        }
-      }
-    }
-  }
-  const nextNum = maxNum + 1;
-  return `DH-ROOT-${String(nextNum).padStart(5, '0')}`;
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}${m}${d}`;
 }
 
 /**
- * Đảm bảo mọi đơn hàng đều có mã gốc quy chiếu để đồng bộ chuẩn xác
+ * Sinh mã gốc quy chiếu tự tăng dần theo ngày tạo cho đơn hàng mới:
+ * ROOT-[ngày tạo]-[STT], ví dụ: ROOT-20261119-00001
+ * Mã này là bất biến khi thêm, sửa, xóa, đánh số lại mã đơn hiển thị và không bao giờ trùng lại mã đã xóa.
  */
-export function ensureOrdersHaveRootCode(orders: Order[] = []): Order[] {
-  let nextNum = 0;
-  // Tìm số max hiện có
-  for (const o of orders) {
-    if (o.rootCode) {
-      const match = o.rootCode.match(/(\d+)$/);
-      if (match) {
-        const n = parseInt(match[1], 10);
-        if (!isNaN(n) && n > nextNum) {
-          nextNum = n;
-        }
+export function generateNextRootCode(
+  allOrders: Order[] = [],
+  deletedOrders: DeletedOrderRecord[] = [],
+  referenceDate?: string
+): string {
+  const datePart = formatRootDatePart(referenceDate);
+  const pattern = new RegExp(`^ROOT-${datePart}-(\\d+)$`, 'i');
+  const usedRoots = new Set<string>();
+  let maxNum = 0;
+
+  const inspectRoot = (raw?: string) => {
+    if (!raw || !raw.trim()) return;
+    const upper = raw.trim().toUpperCase();
+    usedRoots.add(upper);
+    const match = upper.match(pattern);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (!isNaN(n) && n > maxNum) {
+        maxNum = n;
       }
     }
+  };
+
+  for (const o of allOrders) {
+    inspectRoot(o?.rootCode);
+  }
+  for (const d of deletedOrders) {
+    inspectRoot(d?.rootCode);
+  }
+
+  let nextNum = maxNum + 1;
+  let candidate = `ROOT-${datePart}-${String(nextNum).padStart(5, '0')}`;
+  while (usedRoots.has(candidate)) {
+    nextNum += 1;
+    candidate = `ROOT-${datePart}-${String(nextNum).padStart(5, '0')}`;
+  }
+  return candidate;
+}
+
+/**
+ * Đảm bảo mọi đơn hàng đều có mã gốc quy chiếu duy nhất (ROOT-YYYYMMDD-STT) để đồng bộ chuẩn xác
+ */
+export function ensureOrdersHaveRootCode(
+  orders: Order[] = [],
+  deletedOrders: DeletedOrderRecord[] = []
+): Order[] {
+  if (!orders || orders.length === 0) return [];
+
+  const usedRoots = new Set<string>();
+  const dateMaxMap = new Map<string, number>();
+
+  const registerExisting = (raw?: string) => {
+    if (!raw || !raw.trim()) return;
+    const upper = raw.trim().toUpperCase();
+    const match = upper.match(/^ROOT-(\d{8})-(\d+)$/);
+    if (match) {
+      const dPart = match[1];
+      const n = parseInt(match[2], 10);
+      if (!isNaN(n)) {
+        dateMaxMap.set(dPart, Math.max(dateMaxMap.get(dPart) || 0, n));
+      }
+    }
+  };
+
+  for (const d of deletedOrders) {
+    if (d?.rootCode && d.rootCode.trim()) {
+      usedRoots.add(d.rootCode.trim().toUpperCase());
+      registerExisting(d.rootCode);
+    }
+  }
+  for (const o of orders) {
+    registerExisting(o?.rootCode);
   }
 
   return orders.map((ord) => {
-    if (ord.rootCode && ord.rootCode.trim()) {
+    const existingUpper = ord.rootCode?.trim().toUpperCase();
+    if (existingUpper && !usedRoots.has(existingUpper)) {
+      usedRoots.add(existingUpper);
       return ord;
     }
-    nextNum += 1;
+
+    const datePart = formatRootDatePart(ord.createdAt || ord.orderDate);
+    let nextNum = (dateMaxMap.get(datePart) || 0) + 1;
+    let candidate = `ROOT-${datePart}-${String(nextNum).padStart(5, '0')}`;
+    while (usedRoots.has(candidate)) {
+      nextNum += 1;
+      candidate = `ROOT-${datePart}-${String(nextNum).padStart(5, '0')}`;
+    }
+    dateMaxMap.set(datePart, nextNum);
+    usedRoots.add(candidate);
+
     return {
       ...ord,
-      rootCode: `DH-ROOT-${String(nextNum).padStart(5, '0')}`,
+      rootCode: candidate,
     };
   });
 }
@@ -424,11 +489,32 @@ function mergeTwoOrderRecords(existing: Order, incoming: Order): Order {
 }
 
 /**
+ * Kiểm tra xem 2 bản ghi trùng rootCode có thực sự là 2 đơn hàng khác nhau
+ * bị trùng STT do tạo ngoại tuyến trên 2 thiết bị cùng ngày hay không.
+ */
+function isDistinctOrderRootCollision(a: Order, b: Order): boolean {
+  if (!a.id || !b.id || a.id === b.id) return false;
+  const isSheetSynthetic = (ord: Order) =>
+    ord.id === `ord-${ord.orderCode}` || !/^ord-(?:imp-)?\d{10,}/.test(ord.id);
+  if (isSheetSynthetic(a) || isSheetSynthetic(b)) return false;
+
+  const createdA = new Date(a.createdAt || 0).getTime();
+  const createdB = new Date(b.createdAt || 0).getTime();
+  const diffCreated = Math.abs(createdA - createdB) > 5000;
+  const diffCustomer =
+    Boolean(a.customerCode && b.customerCode && a.customerCode !== b.customerCode);
+  return diffCreated && (diffCustomer || a.totalAmount !== b.totalAmount);
+}
+
+/**
  * Khử trùng đơn hàng tuyệt đối:
  * Không cho phép 2 đơn hàng có cùng Mã gốc (rootCode) hoặc cùng Mã đơn (orderCode) cùng tồn tại.
- * Nếu phát hiện trùng, hợp nhất thông minh thành 1 đơn duy nhất.
+ * Nếu phát hiện trùng do tạo cùng lúc trên 2 thiết bị: cấp lại rootCode mới để không mất đơn.
  */
-export function deduplicateOrders(orders: Order[] = []): Order[] {
+export function deduplicateOrders(
+  orders: Order[] = [],
+  deletedOrders: DeletedOrderRecord[] = []
+): Order[] {
   if (!orders || orders.length === 0) return [];
 
   const result: Order[] = [];
@@ -437,24 +523,44 @@ export function deduplicateOrders(orders: Order[] = []): Order[] {
     if (!ord) continue;
 
     // Tìm xem đã có đơn nào trong result trùng:
-    // 1. rootCode (nếu cả 2 đều có rootCode)
-    // 2. orderCode (không phân biệt hoa thường)
-    // 3. id
+    // 1. id
+    // 2. rootCode (nếu không phải 2 đơn tạo độc lập bị trùng STT trên 2 máy)
+    // 3. orderCode (nếu không khác rootCode)
     const matchIdx = result.findIndex((item) => {
       const ordRoot = ord.rootCode?.trim().toUpperCase();
       const itemRoot = item.rootCode?.trim().toUpperCase();
-      const matchRoot = Boolean(ordRoot && itemRoot && ordRoot === itemRoot);
-      const differentRoots = Boolean(ordRoot && itemRoot && ordRoot !== itemRoot);
-      const matchCode =
-        Boolean(ord.orderCode && item.orderCode && ord.orderCode.trim().toLowerCase() === item.orderCode.trim().toLowerCase());
       const matchId = Boolean(ord.id && item.id && ord.id === item.id);
-      return matchRoot || matchId || (!differentRoots && matchCode);
+      if (matchId) return true;
+
+      const matchRoot = Boolean(ordRoot && itemRoot && ordRoot === itemRoot);
+      if (matchRoot) {
+        return !isDistinctOrderRootCollision(item, ord);
+      }
+
+      const differentRoots = Boolean(ordRoot && itemRoot && ordRoot !== itemRoot);
+      const matchCode = Boolean(
+        ord.orderCode &&
+          item.orderCode &&
+          ord.orderCode.trim().toLowerCase() === item.orderCode.trim().toLowerCase()
+      );
+      return !differentRoots && matchCode;
     });
 
     if (matchIdx === -1) {
-      result.push({ ...ord });
+      const ordRoot = ord.rootCode?.trim().toUpperCase();
+      const hasRootCollision =
+        Boolean(ordRoot) &&
+        result.some((item) => item.rootCode?.trim().toUpperCase() === ordRoot);
+      if (hasRootCollision) {
+        result.push({
+          ...ord,
+          rootCode: generateNextRootCode(result, deletedOrders, ord.createdAt || ord.orderDate),
+        });
+      } else {
+        result.push({ ...ord });
+      }
     } else {
-      // Đã có bản ghi trùng -> Hợp nhất ngay thành 1 đơn duy nhất
+      // Đã có bản ghi trùng -> Hợp nhất thành 1 đơn duy nhất
       result[matchIdx] = mergeTwoOrderRecords(result[matchIdx], ord);
     }
   }
@@ -565,15 +671,15 @@ export function mergeOrdersByRootCode(
   const activeRemote = filterDeletedOrders(remoteOrders, deletedOrders);
 
   // 2. Khử trùng nội bộ từng danh sách trước
-  const cleanLocal = deduplicateOrders(activeLocal);
-  const cleanRemote = deduplicateOrders(activeRemote);
+  const cleanLocal = deduplicateOrders(activeLocal, deletedOrders);
+  const cleanRemote = deduplicateOrders(activeRemote, deletedOrders);
 
   // 3. Gộp 2 danh sách và khử trùng toàn diện
-  const merged = deduplicateOrders([...cleanLocal, ...cleanRemote]);
+  const merged = deduplicateOrders([...cleanLocal, ...cleanRemote], deletedOrders);
 
-  // 4. Đảm bảo mọi đơn đều có rootCode và sắp xếp theo ngày mới nhất
-  const ensured = ensureOrdersHaveRootCode(merged);
-  return deduplicateOrders(ensured).sort(
+  // 4. Đảm bảo mọi đơn đều có rootCode duy nhất và sắp xếp theo ngày mới nhất
+  const ensured = ensureOrdersHaveRootCode(merged, deletedOrders);
+  return deduplicateOrders(ensured, deletedOrders).sort(
     (a, b) => b.orderDate.localeCompare(a.orderDate) || b.createdAt.localeCompare(a.createdAt)
   );
 }

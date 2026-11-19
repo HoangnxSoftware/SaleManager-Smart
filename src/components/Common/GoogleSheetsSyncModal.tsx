@@ -36,7 +36,7 @@ interface GoogleSheetsSyncModalProps {
   mode: 'push' | 'pull';
   data: AppData;
   onClose: () => void;
-  onSuccessPush?: (spreadsheetId: string, webUrl: string) => void;
+  onSuccessPush?: (spreadsheetId: string, webUrl: string, lastSyncedAt?: string) => void;
   onSuccessPull?: (restoredData: AppData) => void;
   onDatabaseCreated?: (profile: DatabaseProfile) => void;
 }
@@ -209,7 +209,7 @@ export const GoogleSheetsSyncModal: React.FC<GoogleSheetsSyncModalProps> = ({
         `Đã sinh ra một cơ sở dữ liệu mới hoàn toàn trên Google Sheets (${created.spreadsheetId}) để bảo toàn dữ liệu thành công!`
       );
       if (onSuccessPush) {
-        onSuccessPush(created.spreadsheetId, created.webUrl);
+        onSuccessPush(created.spreadsheetId, created.webUrl, synced.lastSyncedAt);
       }
       setTimeout(() => {
         onClose();
@@ -246,7 +246,7 @@ export const GoogleSheetsSyncModal: React.FC<GoogleSheetsSyncModalProps> = ({
         'Đã đẩy và sao lưu dữ liệu toàn vẹn dạng text lên Google Sheets thành công!'
       );
       if (onSuccessPush) {
-        onSuccessPush(res.spreadsheetId, res.webUrl);
+        onSuccessPush(res.spreadsheetId, res.webUrl, res.lastSyncedAt);
       }
       setTimeout(() => {
         onClose();

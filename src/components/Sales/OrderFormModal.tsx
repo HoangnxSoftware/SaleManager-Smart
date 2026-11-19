@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Customer, Order, OrderItem, Product, PaymentMethod, DeliveryStatus, AppUser, AppSettings, DebtPayment, PurchaseBill } from '../../types';
+import { Customer, Order, OrderItem, Product, PaymentMethod, DeliveryStatus, AppUser, AppSettings, DebtPayment, PurchaseBill, DeletedOrderRecord } from '../../types';
 import { formatCurrency, formatDate, formatNumber } from '../../utils/formatters';
 import { CustomerModal } from './CustomerModal';
 import { useConfirm } from '../../context/ConfirmContext';
@@ -38,6 +38,7 @@ interface OrderFormModalProps {
   products: Product[];
   purchases?: PurchaseBill[];
   allOrders: Order[];
+  deletedOrders?: DeletedOrderRecord[];
   debtPayments: DebtPayment[];
   currentUser: AppUser;
   settings: AppSettings;
@@ -54,6 +55,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
   products,
   purchases = [],
   allOrders,
+  deletedOrders = [],
   debtPayments,
   currentUser,
   settings,
@@ -778,8 +780,11 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
       return;
     }
 
-    // 1. Mã gốc quy chiếu (rootCode): Bất biến khi thêm, sửa, xóa
-    const finalRootCode = initialOrder?.rootCode || generateNextRootCode(allOrders);
+    // 1. Mã gốc quy chiếu (rootCode): ROOT-[ngày tạo]-[STT], bất biến khi thêm, sửa, xóa
+    const nowIso = new Date().toISOString();
+    const creationRef = initialOrder?.createdAt || nowIso;
+    const finalRootCode =
+      initialOrder?.rootCode || generateNextRootCode(allOrders, deletedOrders, creationRef);
 
     // 2. Bảo toàn vẹn toàn Người tạo đơn gốc ban đầu
     let finalCreatedById = initialOrder?.createdById;
@@ -804,7 +809,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
     }
 
     const newOrder: Order = {
-      id: initialOrder ? initialOrder.id : `ord-${Date.now()}`,
+      id: initialOrder ? initialOrder.id : `ord-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
       rootCode: finalRootCode,
       orderCode: orderCode.trim() || `DH-${Date.now()}`,
       orderDate,

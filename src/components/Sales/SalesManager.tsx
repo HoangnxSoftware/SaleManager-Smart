@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Customer, Order, Product, PurchaseBill, AppUser, AppSettings, DebtPayment, DeliveryStatus } from '../../types';
+import { Customer, Order, Product, PurchaseBill, AppUser, AppSettings, DebtPayment, DeliveryStatus, DeletedOrderRecord } from '../../types';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import {
   exportOrdersToExcel,
@@ -60,6 +60,7 @@ import {
 
 interface SalesManagerProps {
   orders: Order[];
+  deletedOrders?: DeletedOrderRecord[];
   customers: Customer[];
   products: Product[];
   purchases: PurchaseBill[];
@@ -93,6 +94,7 @@ interface SalesManagerProps {
 
 export const SalesManager: React.FC<SalesManagerProps> = ({
   orders,
+  deletedOrders = [],
   customers,
   products,
   purchases,
@@ -540,10 +542,11 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
     const datePart = today.replace(/-/g, '');
     const newCode = `DH-${datePart}-${Math.floor(100 + Math.random() * 900)}`;
 
+    const nowIso = new Date().toISOString();
     const copied: Order = {
       ...src,
-      id: `ord-${Date.now()}`,
-      rootCode: generateNextRootCode(orders),
+      id: `ord-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
+      rootCode: generateNextRootCode(orders, deletedOrders, nowIso),
       orderCode: newCode,
       orderDate: today,
       deliveryStatus: 'pending', // Mặc định: Chờ giao
@@ -551,8 +554,8 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
       debtAmount: src.totalAmount,
       createdById: currentUser.id,
       createdByName: currentUser.fullName,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: nowIso,
+      updatedAt: nowIso,
     };
 
     onSaveOrder(copied);
@@ -617,14 +620,15 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
     const today = new Date().toISOString().slice(0, 10);
     const datePart = today.replace(/-/g, '');
 
+    const nowIso = new Date().toISOString();
     const newOrders: Order[] = [];
     selectedOrderIds.forEach((id, idx) => {
       const src = orders.find((o) => o.id === id);
       if (src) {
         newOrders.push({
           ...src,
-          id: `ord-${Date.now()}-${idx}`,
-          rootCode: generateNextRootCode([...orders, ...newOrders]),
+          id: `ord-${Date.now()}-${idx}-${Math.floor(100 + Math.random() * 900)}`,
+          rootCode: generateNextRootCode([...orders, ...newOrders], deletedOrders, nowIso),
           orderCode: `DH-${datePart}-${Math.floor(100 + Math.random() * 900)}`,
           orderDate: today,
           deliveryStatus: 'pending',
@@ -632,8 +636,8 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           debtAmount: src.totalAmount,
           createdById: currentUser.id,
           createdByName: currentUser.fullName,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          createdAt: nowIso,
+          updatedAt: nowIso,
         });
       }
     });
@@ -969,9 +973,10 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           }
         }
 
+        const nowIso = new Date().toISOString();
         newOrdersList.push({
-          id: `ord-imp-${Date.now()}-${Math.random()}`,
-          rootCode: generateNextRootCode([...orders, ...newOrdersList]),
+          id: `ord-imp-${Date.now()}-${Math.floor(100 + Math.random() * 900)}-${newOrdersList.length}`,
+          rootCode: generateNextRootCode([...orders, ...newOrdersList], deletedOrders, nowIso),
           orderCode: code,
           orderDate: first['Ngày (YYYY-MM-DD)'] || new Date().toISOString().slice(0, 10),
           customerId: cust?.id || `cust-imp-${syncedCustCode}`,
@@ -994,8 +999,8 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           notes: String(first['Ghi chú'] || 'Nhập từ file Excel'),
           createdById: impCreatedById,
           createdByName: impCreatedByName,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          createdAt: nowIso,
+          updatedAt: nowIso,
         });
       }
 
@@ -2221,6 +2226,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           products={products}
           purchases={purchases}
           allOrders={uniqueOrders}
+          deletedOrders={deletedOrders}
           debtPayments={debtPayments}
           currentUser={currentUser}
           settings={settings}

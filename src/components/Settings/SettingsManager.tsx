@@ -329,8 +329,14 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
         throw new Error('Vui lòng kết nối tài khoản Google để thực hiện sao lưu.');
       }
 
-      const res = await syncDataToGoogleSheets(data, token);
+      const res = await syncDataToGoogleSheets(data, token, data.spreadsheetId);
       setSheetsWebUrl(res.webUrl);
+      onRestoreFromSheets({
+        ...data,
+        spreadsheetId: res.spreadsheetId,
+        lastSyncedAt: res.lastSyncedAt,
+        syncSource: 'google_drive',
+      });
       setSyncSuccessMsg(
         `Đã sao lưu thành công vào thư mục 'SaleManager-Smart' trên Google Drive và lưu trữ toàn bộ dữ liệu dưới dạng text trên Google Sheets!`
       );
@@ -369,7 +375,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
         throw new Error('Vui lòng kết nối tài khoản Google để tải dữ liệu.');
       }
 
-      const restored = await loadDataFromGoogleSheets(token);
+      const restored = await loadDataFromGoogleSheets(token, data.spreadsheetId);
       if (restored) {
         onRestoreFromSheets(restored);
         setSyncSuccessMsg('Đã nạp và khôi phục dữ liệu từ Google Sheets thành công không mất định dạng!');
