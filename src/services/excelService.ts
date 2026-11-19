@@ -158,6 +158,7 @@ export function exportProductsToExcel(
     return {
       'STT': idx + 1,
       'Mã HH': p.code,
+      'Mã đối chiếu': p.reconciliationCode || '',
       'Tên HH': p.name,
       'ĐVT_Mua': p.purchaseUnit,
       'Thuế suất (%)': p.vatRate,
@@ -378,6 +379,7 @@ export function downloadProductTemplate() {
   const sample = [
     {
       'Mã HH': 'LED-RD-18W',
+      'Mã đối chiếu': 'DC-LED-18W',
       'Tên HH': 'Đèn LED âm trần Rạng Đông 18W Tròn Ánh sáng Trắng',
       'ĐVT_Mua': 'Hộp',
       'Thuế suất (%)': 10,
@@ -391,6 +393,7 @@ export function downloadProductTemplate() {
     },
     {
       'Mã HH': 'DAY-CAD-2X2.5',
+      'Mã đối chiếu': 'DC-DAY-2X25',
       'Tên HH': 'Dây điện đôi Cadivi 2x2.5mm² đồng bọc PVC',
       'ĐVT_Mua': 'Cuộn',
       'Thuế suất (%)': 10,

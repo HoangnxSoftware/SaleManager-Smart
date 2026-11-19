@@ -239,6 +239,7 @@ export const PurchaseFormModal: React.FC<PurchaseFormModalProps> = ({
       (p) =>
         p.name.toLowerCase().includes(q) ||
         p.code.toLowerCase().includes(q) ||
+        (p.reconciliationCode && p.reconciliationCode.toLowerCase().includes(q)) ||
         p.category.toLowerCase().includes(q)
     ).slice(0, 8);
   }, [products, productSearch]);

@@ -22,6 +22,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   isReadOnly = false,
 }) => {
   const [code, setCode] = useState('');
+  const [reconciliationCode, setReconciliationCode] = useState('');
   const [name, setName] = useState('');
   const [purchaseUnit, setPurchaseUnit] = useState('Thùng');
   const [vatRate, setVatRate] = useState<number>(10);
@@ -54,6 +55,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       setTargetProductId(initialProduct.id);
       setIsEditMode(true);
       setCode(initialProduct.code);
+      setReconciliationCode(initialProduct.reconciliationCode || '');
       setName(initialProduct.name);
       setPurchaseUnit(initialProduct.purchaseUnit);
       setVatRate(initialProduct.vatRate);
@@ -69,6 +71,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       setTargetProductId(null);
       setIsEditMode(false);
       setCode(`HH${String(existingCount + 1).padStart(3, '0')}`);
+      setReconciliationCode('');
       setName('');
       setPurchaseUnit('Thùng');
       setVatRate(10);
@@ -103,6 +106,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     setTargetProductId(existing.id);
     setIsEditMode(true);
     setCode(existing.code);
+    setReconciliationCode(existing.reconciliationCode || '');
     setName(existing.name);
     setPurchaseUnit(existing.purchaseUnit);
     setVatRate(existing.vatRate);
@@ -150,6 +154,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     const prod: Product = {
       id: targetProductId || `prod-${Date.now()}`,
       code: trimmedCode,
+      reconciliationCode: reconciliationCode.trim(),
       name: name.trim(),
       purchaseUnit: purchaseUnit.trim() || 'Cái',
       vatRate,
@@ -226,37 +231,49 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           <fieldset disabled={isReadOnly} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Mã HH <span className="text-rose-500">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                value={code}
-                onChange={(e) => handleCodeChange(e.target.value)}
-                placeholder="VD: LED-RD-18W"
-                className={`w-full px-3 py-2 border rounded-xl text-sm font-mono uppercase focus:ring-2 ${
-                  duplicateWarning
-                    ? 'border-rose-400 bg-rose-50/50 text-rose-900 focus:ring-rose-500'
-                    : 'border-slate-300 focus:ring-indigo-500'
-                }`}
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Mã HH <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={code}
+                  onChange={(e) => handleCodeChange(e.target.value)}
+                  placeholder="VD: LED-RD-18W"
+                  className={`w-full px-3 py-2 border rounded-xl text-sm font-mono uppercase focus:ring-2 ${
+                    duplicateWarning
+                      ? 'border-rose-400 bg-rose-50/50 text-rose-900 focus:ring-rose-500'
+                      : 'border-slate-300 focus:ring-indigo-500'
+                  }`}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Mã đối chiếu
+                </label>
+                <input
+                  type="text"
+                  value={reconciliationCode}
+                  onChange={(e) => setReconciliationCode(e.target.value)}
+                  placeholder="VD: SP-DC-001"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-mono focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Nhóm / Loại HH
+                </label>
+                <input
+                  type="text"
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  placeholder="VD: Chiếu sáng, Dây cáp..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Nhóm / Loại HH
-              </label>
-              <input
-                type="text"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                placeholder="VD: Chiếu sáng, Dây cáp..."
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-          </div>
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">

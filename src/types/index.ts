@@ -46,6 +46,7 @@ export interface Supplier {
 export interface Product {
   id: string;
   code: string; // Mã HH
+  reconciliationCode?: string; // Mã đối chiếu
   name: string; // Tên HH
   purchaseUnit: string; // ĐVT_Mua
   vatRate: number; // Thuế suất (%)

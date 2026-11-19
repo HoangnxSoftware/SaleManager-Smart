@@ -91,6 +91,7 @@ export const ChangeProductModal: React.FC<ChangeProductModalProps> = ({
       result = result.filter(
         (p) =>
           p.code.toLowerCase().includes(q) ||
+          (p.reconciliationCode && p.reconciliationCode.toLowerCase().includes(q)) ||
           p.name.toLowerCase().includes(q) ||
           (p.category && p.category.toLowerCase().includes(q)) ||
           p.saleUnit.toLowerCase().includes(q)

@@ -437,9 +437,9 @@ export async function syncDataToGoogleSheets(
 
   // 4. Products
   const productRows: string[][] = [
-    ['Mã HH', 'Tên hàng hóa', 'ĐVT Mua', 'Thuế suất (%)', 'SL quy đổi', 'ĐVT Bán', 'Nhóm hàng', 'Tỷ suất lợi nhuận (%)', 'Ghi chú'],
+    ['Mã HH', 'Tên hàng hóa', 'ĐVT Mua', 'Thuế suất (%)', 'SL quy đổi', 'ĐVT Bán', 'Nhóm hàng', 'Tỷ suất lợi nhuận (%)', 'Ghi chú', 'Mã đối chiếu'],
     ...data.products.map(p => [
-      p.code, p.name, p.purchaseUnit, String(p.vatRate), String(p.conversionRate), p.saleUnit, p.category, String(p.profitMargin), p.notes || ''
+      p.code, p.name, p.purchaseUnit, String(p.vatRate), String(p.conversionRate), p.saleUnit, p.category, String(p.profitMargin), p.notes || '', p.reconciliationCode || ''
     ])
   ];
 
@@ -977,6 +977,7 @@ export async function loadDataFromGoogleSheets(
         category: String(r[6] || 'Hàng hóa'),
         profitMargin: Number(r[7]) || 15,
         notes: String(r[8] || ''),
+        reconciliationCode: String(r[9] || ''),
       });
     }
   }

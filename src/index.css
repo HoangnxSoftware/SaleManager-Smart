@@ -58,6 +58,32 @@ th.text-left {
   text-align: left !important;
 }
 
+/* Visible Scrollbars for Data Tables */
+.table-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 #f1f5f9;
+}
+
+.table-scrollbar::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+.table-scrollbar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 6px;
+}
+
+.table-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #94a3b8;
+  border-radius: 6px;
+  border: 2px solid #f1f5f9;
+}
+
+.table-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #64748b;
+}
+
 /* Print Styles */
 @media print {
   @page {

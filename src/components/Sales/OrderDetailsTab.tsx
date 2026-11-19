@@ -523,7 +523,7 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
 
       {/* Main Table: 25 Columns */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto max-h-[72vh]">
+        <div className="overflow-x-auto overflow-y-auto max-h-[72vh] table-scrollbar">
           <table className="w-full text-xs text-left border-collapse min-w-[2000px]">
             <thead className="sticky top-0 z-20 bg-slate-100 text-slate-700 font-bold uppercase text-[11px] shadow-2xs">
               <tr className="border-b border-slate-200">

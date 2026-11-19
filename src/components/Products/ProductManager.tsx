@@ -70,7 +70,7 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
   const [valueMax, setValueMax] = useState<string>('');
 
   // Sorting & Reordering State (Requirement: cho phép sắp xếp theo mã hàng, tên hàng, nhóm/loại hàng hóa, cho phép di chuyển thứ tự mã hàng)
-  const [sortField, setSortField] = useState<'default' | 'code' | 'name' | 'category'>('default');
+  const [sortField, setSortField] = useState<'default' | 'code' | 'reconciliationCode' | 'name' | 'category'>('default');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   // Drag & drop state for moving product order
@@ -100,10 +100,12 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
   // Filtered and sorted products based on search, category, stock, inventory value, and sort field
   const filteredProducts = useMemo(() => {
     let list = products.filter((p) => {
+      const q = searchTerm.trim().toLowerCase();
       const matchSearch =
-        !searchTerm.trim() ||
-        p.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.name.toLowerCase().includes(searchTerm.toLowerCase());
+        !q ||
+        p.code.toLowerCase().includes(q) ||
+        (p.reconciliationCode && p.reconciliationCode.toLowerCase().includes(q)) ||
+        p.name.toLowerCase().includes(q);
 
       const matchCat = categoryFilter === 'all' || p.category === categoryFilter;
       if (!matchSearch || !matchCat) return false;
@@ -143,6 +145,9 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
         if (sortField === 'code') {
           valA = a.code || '';
           valB = b.code || '';
+        } else if (sortField === 'reconciliationCode') {
+          valA = a.reconciliationCode || '';
+          valB = b.reconciliationCode || '';
         } else if (sortField === 'name') {
           valA = a.name || '';
           valB = b.name || '';
@@ -177,7 +182,7 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
   ]);
 
   // Click handler on column headers
-  const handleHeaderSort = (field: 'code' | 'name' | 'category') => {
+  const handleHeaderSort = (field: 'code' | 'reconciliationCode' | 'name' | 'category') => {
     if (sortField === field) {
       setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
     } else {
@@ -353,6 +358,7 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
       const imported: Product[] = rows.map((r: any, idx: number) => ({
         id: `prod-imp-${Date.now()}-${idx}`,
         code: String(r['Mã HH'] || `HH${Date.now()}`).trim().toUpperCase(),
+        reconciliationCode: String(r['Mã đối chiếu'] || r['Mã Đối Chiếu'] || r['Mã ĐC'] || '').trim(),
         name: String(r['Tên HH'] || r['Tên hàng hóa'] || 'Sản phẩm mới').trim(),
         purchaseUnit: String(r['ĐVT_Mua'] || 'Cái').trim(),
         vatRate: Number(r['Thuế suất (%)'] || r['Thuế suất'] || 10),
@@ -381,8 +387,8 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
           conflicts.push({
             code: item.code,
             name: existing.name,
-            oldInfo: `Tên: ${existing.name}\nNhóm: ${existing.category} | ĐVT: ${existing.saleUnit}\nLợi nhuận: ${existing.profitMargin}% | VAT: ${existing.vatRate}%\nGiá mặc định: ${existing.defaultSalePrice ? formatNumber(existing.defaultSalePrice) + ' đ' : '—'} | Biên độ: ${existing.priceVariance ? '±' + formatNumber(existing.priceVariance) + ' đ' : '—'}`,
-            newInfo: `Tên: ${item.name}\nNhóm: ${item.category} | ĐVT: ${item.saleUnit}\nLợi nhuận: ${item.profitMargin}% | VAT: ${item.vatRate}%\nGiá mặc định: ${item.defaultSalePrice ? formatNumber(item.defaultSalePrice) + ' đ' : '—'} | Biên độ: ${item.priceVariance ? '±' + formatNumber(item.priceVariance) + ' đ' : '—'}`,
+            oldInfo: `Tên: ${existing.name}${existing.reconciliationCode ? ` | Mã ĐC: ${existing.reconciliationCode}` : ''}\nNhóm: ${existing.category} | ĐVT: ${existing.saleUnit}\nLợi nhuận: ${existing.profitMargin}% | VAT: ${existing.vatRate}%\nGiá mặc định: ${existing.defaultSalePrice ? formatNumber(existing.defaultSalePrice) + ' đ' : '—'} | Biên độ: ${existing.priceVariance ? '±' + formatNumber(existing.priceVariance) + ' đ' : '—'}`,
+            newInfo: `Tên: ${item.name}${item.reconciliationCode ? ` | Mã ĐC: ${item.reconciliationCode}` : ''}\nNhóm: ${item.category} | ĐVT: ${item.saleUnit}\nLợi nhuận: ${item.profitMargin}% | VAT: ${item.vatRate}%\nGiá mặc định: ${item.defaultSalePrice ? formatNumber(item.defaultSalePrice) + ' đ' : '—'} | Biên độ: ${item.priceVariance ? '±' + formatNumber(item.priceVariance) + ' đ' : '—'}`,
           });
         } else {
           newItems.push(item);
@@ -477,7 +483,7 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
             <div className="relative w-full sm:w-60">
               <input
                 type="text"
-                placeholder="Tìm Mã HH hoặc Tên hàng..."
+                placeholder="Tìm Mã HH, Mã đối chiếu, Tên hàng..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500"
@@ -590,6 +596,7 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
               >
                 <option value="default">Thứ tự tùy chỉnh (di chuyển)</option>
                 <option value="code">Mã hàng hóa</option>
+                <option value="reconciliationCode">Mã đối chiếu</option>
                 <option value="name">Tên hàng hóa</option>
                 <option value="category">Nhóm / Loại hàng hóa</option>
               </select>
@@ -690,9 +697,9 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
 
       {/* Products Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overflow-y-auto max-h-[68vh] table-scrollbar">
           <table className="w-full text-xs sm:text-sm text-left border-collapse">
-            <thead className="bg-slate-100 text-slate-700 uppercase font-bold text-[11px] sm:text-xs">
+            <thead className="sticky top-0 z-20 bg-slate-100 text-slate-700 uppercase font-bold text-[11px] sm:text-xs shadow-xs border-b border-slate-200">
               <tr>
                 <th className="p-3 w-10 text-center">
                   {!isReadOnly ? (
@@ -722,6 +729,24 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                   <div className="inline-flex items-center gap-1">
                     <span>Mã HH</span>
                     {sortField === 'code' ? (
+                      sortDirection === 'asc' ? (
+                        <ArrowUp className="w-3.5 h-3.5 text-indigo-600 font-bold" />
+                      ) : (
+                        <ArrowDown className="w-3.5 h-3.5 text-indigo-600 font-bold" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleHeaderSort('reconciliationCode')}
+                  className="p-3 text-left cursor-pointer hover:bg-slate-200/80 transition-colors select-none whitespace-nowrap"
+                  title="Bấm để sắp xếp theo Mã đối chiếu"
+                >
+                  <div className="inline-flex items-center gap-1">
+                    <span>Mã đối chiếu</span>
+                    {sortField === 'reconciliationCode' ? (
                       sortDirection === 'asc' ? (
                         <ArrowUp className="w-3.5 h-3.5 text-indigo-600 font-bold" />
                       ) : (
@@ -772,18 +797,18 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                 <th className="p-3 text-left">SL quy đổi</th>
                 <th className="p-3 text-left">ĐVT_Bán</th>
                 <th className="p-3 text-left">Thuế suất</th>
-                <th className="p-3 text-left bg-indigo-50/70 text-indigo-900">Tỷ suất lợi nhuận (%)</th>
-                <th className="p-3 text-left bg-blue-50/70 text-blue-900">Giá bán mặc định</th>
-                <th className="p-3 text-left bg-blue-50/70 text-blue-900">Biên độ (+/-)</th>
-                <th className="p-3 text-right bg-emerald-50/70 text-emerald-900 whitespace-nowrap">Tồn kho hiện tại</th>
-                <th className="p-3 text-right bg-emerald-100/70 text-emerald-950 whitespace-nowrap">Trị giá tồn kho hiện tại</th>
+                <th className="p-3 text-left bg-indigo-100 text-indigo-900">Tỷ suất lợi nhuận (%)</th>
+                <th className="p-3 text-left bg-blue-100 text-blue-900">Giá bán mặc định</th>
+                <th className="p-3 text-left bg-blue-100 text-blue-900">Biên độ (+/-)</th>
+                <th className="p-3 text-right bg-emerald-100 text-emerald-900 whitespace-nowrap">Tồn kho hiện tại</th>
+                <th className="p-3 text-right bg-emerald-200 text-emerald-950 whitespace-nowrap">Trị giá tồn kho hiện tại</th>
                 <th className="p-3 text-center">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={16} className="p-12 text-center text-slate-400">
+                  <td colSpan={17} className="p-12 text-center text-slate-400">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <Package className="w-8 h-8 text-slate-300" />
                       <p className="font-semibold text-slate-600">
@@ -883,6 +908,7 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                         )}
                       </td>
                       <td className={`p-3 font-mono font-bold ${stock < 0 ? 'text-red-600' : 'text-indigo-700'}`}>{p.code}</td>
+                      <td className="p-3 font-mono text-slate-700 whitespace-nowrap">{p.reconciliationCode || '—'}</td>
                       <td className={`p-3 font-semibold ${stock < 0 ? 'text-red-600' : 'text-slate-900'}`}>{p.name}</td>
                       <td className="p-3 text-slate-600">{p.category}</td>
                       <td className="p-3 text-center text-slate-700">{p.purchaseUnit}</td>
@@ -974,15 +1000,15 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
               )}
             </tbody>
             {filteredProducts.length > 0 && (
-              <tfoot className="bg-slate-100/90 font-bold text-slate-800 border-t-2 border-slate-300">
+              <tfoot className="sticky bottom-0 z-20 bg-slate-100 font-bold text-slate-800 border-t-2 border-slate-300 shadow-[0_-2px_6px_-1px_rgba(0,0,0,0.06)]">
                 <tr>
-                  <td colSpan={13} className="p-3 text-right uppercase tracking-wider text-xs font-black text-slate-700">
+                  <td colSpan={14} className="p-3 text-right uppercase tracking-wider text-xs font-black text-slate-700">
                     Tổng cộng ({filteredProducts.length} sản phẩm):
                   </td>
-                  <td className="p-3 text-right font-black text-emerald-800 whitespace-nowrap bg-emerald-100/40">
+                  <td className="p-3 text-right font-black text-emerald-800 whitespace-nowrap bg-emerald-100">
                     {formatNumber(inventoryTotals.totalStock)} (Tổng SL)
                   </td>
-                  <td className="p-3 text-right font-black text-emerald-900 whitespace-nowrap bg-emerald-100/60 text-sm">
+                  <td className="p-3 text-right font-black text-emerald-900 whitespace-nowrap bg-emerald-200 text-sm">
                     {formatCurrency(inventoryTotals.totalValue)}
                   </td>
                   <td className="p-3"></td>

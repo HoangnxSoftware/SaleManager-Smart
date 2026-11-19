@@ -462,6 +462,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
       (p) =>
         p.name.toLowerCase().includes(q) ||
         p.code.toLowerCase().includes(q) ||
+        (p.reconciliationCode && p.reconciliationCode.toLowerCase().includes(q)) ||
         (p.category && p.category.toLowerCase().includes(q))
     ).slice(0, 20);
   }, [products, productSearchTerm]);
@@ -1289,6 +1290,11 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                                 <span className="font-mono text-indigo-600 font-semibold bg-indigo-50 px-1 rounded">
                                   {p.code}
                                 </span>
+                                {p.reconciliationCode && (
+                                  <span className="font-mono text-slate-600 bg-slate-100 px-1 rounded">
+                                    ĐC: {p.reconciliationCode}
+                                  </span>
+                                )}
                                 {p.category && (
                                   <span className="text-slate-400">({p.category})</span>
                                 )}

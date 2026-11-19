@@ -1486,9 +1486,9 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
 
           {/* Orders Table */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden max-w-full">
-            <div className="overflow-x-auto max-w-full overscroll-x-contain">
+            <div className="overflow-x-auto overflow-y-auto max-h-[68vh] max-w-full overscroll-contain table-scrollbar">
               <table className="w-full text-xs sm:text-sm text-left border-collapse">
-                <thead className="bg-slate-100 text-slate-700 uppercase font-bold text-[11px] sm:text-xs tracking-wider">
+                <thead className="sticky top-0 z-20 bg-slate-100 text-slate-700 uppercase font-bold text-[11px] sm:text-xs tracking-wider shadow-xs border-b border-slate-200">
                   <tr>
                     <th className="p-3 text-left w-10">
                       <input
@@ -2020,9 +2020,9 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           )}
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto overflow-y-auto max-h-[68vh] table-scrollbar">
               <table className="w-full text-xs sm:text-sm text-left border-collapse">
-                <thead className="bg-slate-100 text-slate-700 uppercase font-bold text-[11px] sm:text-xs">
+                <thead className="sticky top-0 z-20 bg-slate-100 text-slate-700 uppercase font-bold text-[11px] sm:text-xs shadow-xs border-b border-slate-200">
                   <tr>
                     <th className="p-3 w-10 text-left">STT</th>
                     <th

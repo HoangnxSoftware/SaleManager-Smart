@@ -1073,9 +1073,9 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
       {/* Main Content Area */}
       {viewMode === 'summary' ? (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto overflow-y-auto max-h-[68vh] table-scrollbar">
             <table className="w-full text-xs sm:text-sm text-left border-collapse">
-              <thead className="bg-slate-100 text-slate-700 uppercase font-bold text-[11px] sm:text-xs">
+              <thead className="sticky top-0 z-20 bg-slate-100 text-slate-700 uppercase font-bold text-[11px] sm:text-xs shadow-xs border-b border-slate-200">
                 <tr>
                   <th className="p-3 w-10 text-center">STT</th>
                   <th className="p-3">{activeTab === 'customer' ? 'Mã KH' : 'Mã NCC'}</th>
@@ -1177,7 +1177,7 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
                 )}
               </tbody>
               {filteredSummaryList.length > 0 && (
-                <tfoot className="bg-slate-100/90 text-slate-800 font-bold border-t-2 border-slate-300">
+                <tfoot className="sticky bottom-0 z-20 bg-slate-100 text-slate-800 font-bold border-t-2 border-slate-300 shadow-[0_-2px_6px_-1px_rgba(0,0,0,0.06)]">
                   <tr>
                     <td colSpan={5} className="p-3 text-right uppercase text-xs tracking-wider font-extrabold text-slate-700">
                       Tổng cộng ({filteredSummaryList.length} {activeTab === 'customer' ? 'khách hàng' : 'nhà cung cấp'}):
@@ -1363,9 +1363,9 @@ export const DebtManager: React.FC<DebtManagerProps> = ({
                   </div>
                 )}
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto overflow-y-auto max-h-[62vh] table-scrollbar">
                 <table className="w-full text-xs sm:text-sm text-left border-collapse">
-                  <thead className="bg-slate-100 text-slate-700 uppercase font-bold text-[11px] sm:text-xs">
+                  <thead className="sticky top-0 z-20 bg-slate-100 text-slate-700 uppercase font-bold text-[11px] sm:text-xs shadow-xs border-b border-slate-200">
                     <tr>
                       <th className="p-3 w-10 text-center">#</th>
                       <th className="p-3">Ngày</th>
