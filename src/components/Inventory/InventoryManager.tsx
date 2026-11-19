@@ -11,6 +11,7 @@ import {
 import { PurchaseFormModal } from './PurchaseFormModal';
 import { SupplierModal } from './SupplierModal';
 import { ExcelDuplicateConflictModal, ConflictItem } from '../Common/ExcelDuplicateConflictModal';
+import { CatalogExcelImportModal, CatalogImportCheckItem, CatalogImportFieldDiff } from '../Common/CatalogExcelImportModal';
 import { PurchaseExcelSyncModal, ParsedBillCheck, ParsedItemCheck } from './PurchaseExcelSyncModal';
 import { useConfirm } from '../../context/ConfirmContext';
 import {
@@ -451,12 +452,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
     }
   };
 
-  // Supplier Excel Import State
-  const [supplierConflictModalOpen, setSupplierConflictModalOpen] = useState(false);
-  const [pendingSupplierConflicts, setPendingSupplierConflicts] = useState<ConflictItem[]>([]);
-  const [pendingNewSuppliers, setPendingNewSuppliers] = useState<Supplier[]>([]);
-  const [pendingOverwrittenSuppliers, setPendingOverwrittenSuppliers] = useState<Supplier[]>([]);
-  const [totalSupplierImportedCount, setTotalSupplierImportedCount] = useState(0);
+  // Supplier Excel Import Check State
+  const [supplierImportModalOpen, setSupplierImportModalOpen] = useState(false);
+  const [supplierImportCheckItems, setSupplierImportCheckItems] = useState<CatalogImportCheckItem<Supplier>[]>([]);
+  const [supplierImportFileName, setSupplierImportFileName] = useState<string>('');
 
   // Purchase Bill Excel Duplicate State
   const [purchaseConflictModalOpen, setPurchaseConflictModalOpen] = useState(false);
@@ -469,39 +468,29 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const ok = await confirm({
-      title: 'Xác nhận nhập danh mục nhà cung cấp từ Excel',
-      message: `Bạn có chắc chắn muốn tải lên và nhập danh sách nhà cung cấp từ file "${file.name}" vào hệ thống không?`,
-      confirmText: 'Xác nhận nhập',
-      type: 'info',
-    });
-    if (!ok) {
-      e.target.value = '';
-      return;
-    }
-
     try {
       const rows = await parseExcelFile(file);
       if (!rows || rows.length === 0) {
         alert('File Excel rỗng.');
+        e.target.value = '';
         return;
       }
 
-      const importedSuppliers: Supplier[] = rows.map((r: any, idx: number) => {
+      const importedByCode = new Map<string, Supplier>();
+      rows.forEach((r: any, idx: number) => {
         const sCode = String(r['Mã đơn vị CC'] || r['Mã NCC'] || r['Đơn vị CC'] || `NCC-IMP-${Date.now()}-${idx}`).trim().toUpperCase();
         const rawName = String(r['Tên đơn vị cung cấp'] || r['Tên NCC'] || r['Tên ĐVCC'] || 'NHÀ CUNG CẤP MỚI').trim();
-        // REQUIREMENT: Tên trong danh sách đơn vị cung cấp mặc định viết hoa
         const sName = rawName.toUpperCase();
         const rawShort = String(r['Tên gợi nhớ'] || sName).trim();
         const sShort = rawShort.toUpperCase();
         const sSoftwareCode = String(r['Mã Phần Mềm'] || r['Mã phần mềm'] || r['Mã PM'] || '').trim();
         const sReconciliationName = String(r['Tên Đối Chiếu'] || r['Tên đối chiếu'] || '').trim();
-        const sTax = String(r['Mã Số Thuế'] || r['MST'] || '').trim();
+        const sTax = String(r['Mã Số Thuế'] || r['Mã số thuế'] || r['MST'] || '').trim();
         const sPhone = String(r['Số điện thoại'] || r['SĐT'] || '').trim();
         const sAddr = String(r['Địa chỉ'] || '').trim();
         const sNotes = String(r['Ghi chú'] || '').trim();
 
-        return {
+        importedByCode.set(sCode, {
           id: `sup-imp-${Date.now()}-${idx}`,
           code: sCode,
           name: sName,
@@ -513,76 +502,89 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
           address: sAddr,
           notes: sNotes,
           createdAt: new Date().toISOString().slice(0, 10),
-        };
+        });
       });
 
-      // Check duplicates
-      const conflicts: ConflictItem[] = [];
-      const newItems: Supplier[] = [];
       const existingMap = new Map<string, Supplier>();
       suppliers.forEach((s) => existingMap.set(s.code.toUpperCase(), s));
 
-      importedSuppliers.forEach((item) => {
+      const checkItems: CatalogImportCheckItem<Supplier>[] = Array.from(importedByCode.values()).map((item) => {
         const existing = existingMap.get(item.code.toUpperCase());
-        if (existing) {
-          conflicts.push({
+        const previewFields = [
+          { label: 'Tên gợi nhớ', value: item.shortName || '' },
+          { label: 'MST', value: item.taxCode || '' },
+          { label: 'SĐT', value: item.phone || '' },
+          { label: 'Địa chỉ', value: item.address || '' },
+          ...(item.softwareCode ? [{ label: 'Mã PM', value: item.softwareCode }] : []),
+          ...(item.reconciliationName ? [{ label: 'Tên ĐC', value: item.reconciliationName }] : []),
+        ];
+
+        if (!existing) {
+          return {
             code: item.code,
-            name: existing.name,
-            oldInfo: `Tên: ${existing.name}\nMST: ${existing.taxCode || '—'} | SĐT: ${existing.phone || '—'}\nĐ/C: ${existing.address || '—'}`,
-            newInfo: `Tên: ${item.name}\nMST: ${item.taxCode || '—'} | SĐT: ${item.phone || '—'}\nĐ/C: ${item.address || '—'}`,
-          });
-        } else {
-          newItems.push(item);
+            name: item.name,
+            status: 'new',
+            diffs: [],
+            previewFields,
+            incomingItem: item,
+          };
         }
+
+        const fieldPairs: Array<{ label: string; oldVal: string; newVal: string }> = [
+          { label: 'Tên nhà cung cấp', oldVal: (existing.name || '').trim(), newVal: (item.name || '').trim() },
+          { label: 'Tên gợi nhớ', oldVal: (existing.shortName || '').trim(), newVal: (item.shortName || '').trim() },
+          { label: 'Mã phần mềm', oldVal: (existing.softwareCode || '').trim(), newVal: (item.softwareCode || '').trim() },
+          { label: 'Tên đối chiếu', oldVal: (existing.reconciliationName || '').trim(), newVal: (item.reconciliationName || '').trim() },
+          { label: 'MST', oldVal: (existing.taxCode || '').trim(), newVal: (item.taxCode || '').trim() },
+          { label: 'SĐT', oldVal: (existing.phone || '').trim(), newVal: (item.phone || '').trim() },
+          { label: 'Địa chỉ', oldVal: (existing.address || '').trim(), newVal: (item.address || '').trim() },
+          { label: 'Ghi chú', oldVal: (existing.notes || '').trim(), newVal: (item.notes || '').trim() },
+        ];
+
+        const diffs: CatalogImportFieldDiff[] = fieldPairs
+          .filter((fp) => fp.oldVal !== fp.newVal)
+          .map((fp) => ({ label: fp.label, oldValue: fp.oldVal, newValue: fp.newVal }));
+
+        return {
+          code: item.code,
+          name: item.name,
+          status: diffs.length > 0 ? 'changed' : 'unchanged',
+          diffs,
+          previewFields,
+          incomingItem: {
+            ...item,
+            id: existing.id,
+            createdAt: existing.createdAt,
+          },
+          existingId: existing.id,
+        };
       });
 
-      if (conflicts.length > 0) {
-        setTotalSupplierImportedCount(importedSuppliers.length);
-        setPendingSupplierConflicts(conflicts);
-        setPendingNewSuppliers(newItems);
-        // Overwrite list: existing suppliers not in excel + new excel versions
-        const merged = suppliers.map((s) => {
-          const match = importedSuppliers.find((imp) => imp.code.toUpperCase() === s.code.toUpperCase());
-          return match ? { ...match, id: s.id } : s;
-        });
-        const brandNew = newItems.filter(
-          (ni) => !merged.some((m) => m.code.toUpperCase() === ni.code.toUpperCase())
-        );
-        setPendingOverwrittenSuppliers([...merged, ...brandNew]);
-        setSupplierConflictModalOpen(true);
-      } else {
-        if (onBatchUpdateSuppliers) {
-          onBatchUpdateSuppliers([...suppliers, ...importedSuppliers]);
-        } else {
-          importedSuppliers.forEach(onSaveSupplier);
-        }
-        alert(`Đã nhập thành công ${importedSuppliers.length} nhà cung cấp từ Excel!`);
-      }
-
+      setSupplierImportFileName(file.name);
+      setSupplierImportCheckItems(checkItems);
+      setSupplierImportModalOpen(true);
       e.target.value = '';
     } catch (err: any) {
       alert(`Lỗi đọc file Excel: ${err.message}`);
+      e.target.value = '';
     }
   };
 
-  const handleSkipSupplierDuplicates = () => {
-    if (onBatchUpdateSuppliers) {
-      onBatchUpdateSuppliers([...suppliers, ...pendingNewSuppliers]);
-    } else {
-      pendingNewSuppliers.forEach(onSaveSupplier);
+  const handleConfirmSupplierImport = (selectedNew: Supplier[], selectedUpdates: Supplier[]) => {
+    const payload = [...selectedUpdates, ...selectedNew];
+    if (payload.length === 0) {
+      setSupplierImportModalOpen(false);
+      return;
     }
-    setSupplierConflictModalOpen(false);
-    alert(`Đã bỏ qua các mã trùng. Đã thêm thành công ${pendingNewSuppliers.length} nhà cung cấp mới từ Excel!`);
-  };
-
-  const handleOverwriteSupplierDuplicates = () => {
     if (onBatchUpdateSuppliers) {
-      onBatchUpdateSuppliers(pendingOverwrittenSuppliers);
+      onBatchUpdateSuppliers(payload);
     } else {
-      pendingOverwrittenSuppliers.forEach(onSaveSupplier);
+      payload.forEach(onSaveSupplier);
     }
-    setSupplierConflictModalOpen(false);
-    alert(`Đã cập nhật/thêm thành công danh mục nhà cung cấp từ Excel!`);
+    setSupplierImportModalOpen(false);
+    alert(
+      `Đã hoàn tất nhập danh mục nhà cung cấp từ Excel: thêm mới ${selectedNew.length} mã, cập nhật ${selectedUpdates.length} mã!`
+    );
   };
 
   // Skip duplicate purchase bills (keep existing, import new)
@@ -1751,17 +1753,15 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({
         </div>
       )}
 
-      {/* Supplier Excel Duplicate Conflict Modal */}
-      {supplierConflictModalOpen && (
-        <ExcelDuplicateConflictModal
-          isOpen={supplierConflictModalOpen}
+      {/* Supplier Excel Import Check Modal */}
+      {supplierImportModalOpen && (
+        <CatalogExcelImportModal
+          isOpen={supplierImportModalOpen}
           entityTitle="Nhà cung cấp"
-          totalImportedCount={totalSupplierImportedCount}
-          newItemsCount={pendingNewSuppliers.length}
-          conflicts={pendingSupplierConflicts}
-          onSkipDuplicates={handleSkipSupplierDuplicates}
-          onOverwriteDuplicates={handleOverwriteSupplierDuplicates}
-          onCancel={() => setSupplierConflictModalOpen(false)}
+          fileName={supplierImportFileName}
+          items={supplierImportCheckItems}
+          onConfirm={handleConfirmSupplierImport}
+          onCancel={() => setSupplierImportModalOpen(false)}
         />
       )}
 

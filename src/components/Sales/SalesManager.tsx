@@ -23,7 +23,7 @@ import {
 import { generateNextRootCode, deduplicateOrders } from '../../services/orderCodeService';
 import { OrderPrintModal } from '../Print/OrderPrintModal';
 import { OrderDetailsTab } from './OrderDetailsTab';
-import { ExcelDuplicateConflictModal, ConflictItem } from '../Common/ExcelDuplicateConflictModal';
+import { CatalogExcelImportModal, CatalogImportCheckItem, CatalogImportFieldDiff } from '../Common/CatalogExcelImportModal';
 import { ManualSyncBar } from '../Common/ManualSyncBar';
 import { useConfirm } from '../../context/ConfirmContext';
 import {
@@ -388,40 +388,27 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
     }
   };
 
-  // Customer Excel Import State
-  const [customerConflictModalOpen, setCustomerConflictModalOpen] = useState(false);
-  const [pendingCustomerConflicts, setPendingCustomerConflicts] = useState<ConflictItem[]>([]);
-  const [pendingNewCustomers, setPendingNewCustomers] = useState<Customer[]>([]);
-  const [pendingOverwrittenCustomers, setPendingOverwrittenCustomers] = useState<Customer[]>([]);
-  const [totalCustomerImportedCount, setTotalCustomerImportedCount] = useState(0);
+  // Customer Excel Import Check State
+  const [customerImportModalOpen, setCustomerImportModalOpen] = useState(false);
+  const [customerImportCheckItems, setCustomerImportCheckItems] = useState<CatalogImportCheckItem<Customer>[]>([]);
+  const [customerImportFileName, setCustomerImportFileName] = useState<string>('');
 
   const handleCustomerExcelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // REQUIREMENT: Khi up dữ liệu từ excel ở tất cả dữ liệu, xuất hiện thông báo xác nhận xem có thực hiện hay không
-    const ok = await confirm({
-      title: 'Xác nhận nhập danh sách khách hàng từ Excel',
-      message: `Bạn có chắc chắn muốn tải lên và nhập danh mục khách hàng từ file "${file.name}" vào hệ thống không?`,
-      confirmText: 'Xác nhận nhập',
-      type: 'info',
-    });
-    if (!ok) {
-      e.target.value = '';
-      return;
-    }
-
     try {
       const rows = await parseExcelFile(file);
       if (!rows || rows.length === 0) {
         alert('File Excel rỗng.');
+        e.target.value = '';
         return;
       }
 
-      const importedCustomers: Customer[] = rows.map((r: any, idx: number) => {
-        const cCode = String(r['Mã KH'] || `KH-IMP-${Date.now()}-${idx}`).trim().toUpperCase();
+      const importedByCode = new Map<string, Customer>();
+      rows.forEach((r: any, idx: number) => {
+        const cCode = String(r['Mã KH'] || r['Mã khách hàng'] || `KH-IMP-${Date.now()}-${idx}`).trim().toUpperCase();
         const rawName = String(r['Tên khách hàng'] || r['Tên KH'] || 'KHÁCH HÀNG MỚI').trim();
-        // REQUIREMENT: Tên trong danh sách khách hàng mặc định viết hoa
         const cName = rawName.toUpperCase();
         const rawShort = String(r['Tên gợi nhớ'] || cName).trim();
         const cShort = rawShort.toUpperCase();
@@ -435,7 +422,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         const cIdCard = String(r['Số CCCD'] || (cType === 'personal' ? cTax : '')).trim();
         const cNotes = String(r['Ghi chú'] || '').trim();
 
-        return {
+        importedByCode.set(cCode, {
           id: `cust-imp-${Date.now()}-${idx}`,
           code: cCode,
           name: cName,
@@ -449,76 +436,96 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           idCard: cIdCard,
           notes: cNotes,
           createdAt: new Date().toISOString().slice(0, 10),
-        };
+        });
       });
 
-      // Check duplicate codes
-      const conflicts: ConflictItem[] = [];
-      const newItems: Customer[] = [];
       const existingMap = new Map<string, Customer>();
       customers.forEach((c) => existingMap.set(c.code.toUpperCase(), c));
 
-      importedCustomers.forEach((item) => {
+      const checkItems: CatalogImportCheckItem<Customer>[] = Array.from(importedByCode.values()).map((item) => {
         const existing = existingMap.get(item.code.toUpperCase());
-        if (existing) {
-          conflicts.push({
+        const previewFields = [
+          { label: 'Tên gợi nhớ', value: item.shortName || '' },
+          { label: 'MST', value: item.taxCode || '' },
+          { label: 'SĐT', value: item.phone || '' },
+          { label: 'Địa chỉ', value: item.address || '' },
+          { label: 'Loại KH', value: item.type === 'organization' ? 'Tổ chức' : 'Cá nhân' },
+          ...(item.softwareCode ? [{ label: 'Mã PM', value: item.softwareCode }] : []),
+          ...(item.reconciliationName ? [{ label: 'Tên ĐC', value: item.reconciliationName }] : []),
+        ];
+
+        if (!existing) {
+          return {
             code: item.code,
-            name: existing.name,
-            oldInfo: `Tên: ${existing.name}\nMST: ${existing.taxCode || '—'} | SĐT: ${existing.phone || '—'}\nĐ/C: ${existing.address || '—'}`,
-            newInfo: `Tên: ${item.name}\nMST: ${item.taxCode || '—'} | SĐT: ${item.phone || '—'}\nĐ/C: ${item.address || '—'}`,
-          });
-        } else {
-          newItems.push(item);
+            name: item.name,
+            status: 'new',
+            diffs: [],
+            previewFields,
+            incomingItem: item,
+          };
         }
+
+        const fieldPairs: Array<{ label: string; oldVal: string; newVal: string }> = [
+          { label: 'Tên khách hàng', oldVal: (existing.name || '').trim(), newVal: (item.name || '').trim() },
+          { label: 'Tên gợi nhớ', oldVal: (existing.shortName || '').trim(), newVal: (item.shortName || '').trim() },
+          { label: 'Mã phần mềm', oldVal: (existing.softwareCode || '').trim(), newVal: (item.softwareCode || '').trim() },
+          { label: 'Tên đối chiếu', oldVal: (existing.reconciliationName || '').trim(), newVal: (item.reconciliationName || '').trim() },
+          { label: 'MST', oldVal: (existing.taxCode || '').trim(), newVal: (item.taxCode || '').trim() },
+          { label: 'Số CCCD', oldVal: (existing.idCard || '').trim(), newVal: (item.idCard || '').trim() },
+          { label: 'SĐT', oldVal: (existing.phone || '').trim(), newVal: (item.phone || '').trim() },
+          { label: 'Địa chỉ', oldVal: (existing.address || '').trim(), newVal: (item.address || '').trim() },
+          {
+            label: 'Loại KH',
+            oldVal: existing.type === 'organization' ? 'Tổ chức' : 'Cá nhân',
+            newVal: item.type === 'organization' ? 'Tổ chức' : 'Cá nhân',
+          },
+          { label: 'Ghi chú', oldVal: (existing.notes || '').trim(), newVal: (item.notes || '').trim() },
+        ];
+
+        const diffs: CatalogImportFieldDiff[] = fieldPairs
+          .filter((fp) => fp.oldVal !== fp.newVal)
+          .map((fp) => ({ label: fp.label, oldValue: fp.oldVal, newValue: fp.newVal }));
+
+        return {
+          code: item.code,
+          name: item.name,
+          status: diffs.length > 0 ? 'changed' : 'unchanged',
+          diffs,
+          previewFields,
+          incomingItem: {
+            ...item,
+            id: existing.id,
+            createdAt: existing.createdAt,
+          },
+          existingId: existing.id,
+        };
       });
 
-      if (conflicts.length > 0) {
-        setTotalCustomerImportedCount(importedCustomers.length);
-        setPendingCustomerConflicts(conflicts);
-        setPendingNewCustomers(newItems);
-        // Overwrite list: existing customers not in excel + new excel versions
-        const merged = customers.map((c) => {
-          const match = importedCustomers.find((imp) => imp.code.toUpperCase() === c.code.toUpperCase());
-          return match ? { ...match, id: c.id } : c;
-        });
-        const brandNew = newItems.filter(
-          (ni) => !merged.some((m) => m.code.toUpperCase() === ni.code.toUpperCase())
-        );
-        setPendingOverwrittenCustomers([...merged, ...brandNew]);
-        setCustomerConflictModalOpen(true);
-      } else {
-        if (onBatchUpdateCustomers) {
-          onBatchUpdateCustomers([...customers, ...importedCustomers]);
-        } else {
-          importedCustomers.forEach(onSaveCustomer);
-        }
-        alert(`Đã nhập thành công ${importedCustomers.length} khách hàng từ Excel!`);
-      }
-
+      setCustomerImportFileName(file.name);
+      setCustomerImportCheckItems(checkItems);
+      setCustomerImportModalOpen(true);
       e.target.value = '';
     } catch (err: any) {
       alert(`Lỗi đọc file Excel: ${err.message}`);
+      e.target.value = '';
     }
   };
 
-  const handleSkipCustomerDuplicates = () => {
-    if (onBatchUpdateCustomers) {
-      onBatchUpdateCustomers([...customers, ...pendingNewCustomers]);
-    } else {
-      pendingNewCustomers.forEach(onSaveCustomer);
+  const handleConfirmCustomerImport = (selectedNew: Customer[], selectedUpdates: Customer[]) => {
+    const payload = [...selectedUpdates, ...selectedNew];
+    if (payload.length === 0) {
+      setCustomerImportModalOpen(false);
+      return;
     }
-    setCustomerConflictModalOpen(false);
-    alert(`Đã bỏ qua các mã trùng. Đã thêm thành công ${pendingNewCustomers.length} khách hàng mới từ Excel!`);
-  };
-
-  const handleOverwriteCustomerDuplicates = () => {
     if (onBatchUpdateCustomers) {
-      onBatchUpdateCustomers(pendingOverwrittenCustomers);
+      onBatchUpdateCustomers(payload);
     } else {
-      pendingOverwrittenCustomers.forEach(onSaveCustomer);
+      payload.forEach(onSaveCustomer);
     }
-    setCustomerConflictModalOpen(false);
-    alert(`Đã cập nhật/thêm thành công danh mục khách hàng từ Excel!`);
+    setCustomerImportModalOpen(false);
+    alert(
+      `Đã hoàn tất nhập danh mục khách hàng từ Excel: thêm mới ${selectedNew.length} mã, cập nhật ${selectedUpdates.length} mã!`
+    );
   };
 
   // Toggle selection
@@ -2200,17 +2207,15 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         </div>
       )}
 
-      {/* Customer Excel Duplicate Conflict Modal */}
-      {customerConflictModalOpen && (
-        <ExcelDuplicateConflictModal
-          isOpen={customerConflictModalOpen}
+      {/* Customer Excel Import Check Modal */}
+      {customerImportModalOpen && (
+        <CatalogExcelImportModal
+          isOpen={customerImportModalOpen}
           entityTitle="Khách hàng"
-          totalImportedCount={totalCustomerImportedCount}
-          newItemsCount={pendingNewCustomers.length}
-          conflicts={pendingCustomerConflicts}
-          onSkipDuplicates={handleSkipCustomerDuplicates}
-          onOverwriteDuplicates={handleOverwriteCustomerDuplicates}
-          onCancel={() => setCustomerConflictModalOpen(false)}
+          fileName={customerImportFileName}
+          items={customerImportCheckItems}
+          onConfirm={handleConfirmCustomerImport}
+          onCancel={() => setCustomerImportModalOpen(false)}
         />
       )}
 
@@ -2296,19 +2301,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         />
       )}
 
-      {/* Customer Excel Duplicate Conflict Modal */}
-      {customerConflictModalOpen && (
-        <ExcelDuplicateConflictModal
-          isOpen={customerConflictModalOpen}
-          entityTitle="Khách hàng"
-          totalImportedCount={totalCustomerImportedCount}
-          newItemsCount={pendingNewCustomers.length}
-          conflicts={pendingCustomerConflicts}
-          onSkipDuplicates={handleSkipCustomerDuplicates}
-          onOverwriteDuplicates={handleOverwriteCustomerDuplicates}
-          onCancel={() => setCustomerConflictModalOpen(false)}
-        />
-      )}
+
 
       {/* Order Excel Import Check & Rule Selection Modal */}
       {isOrderImportCheckModalOpen && (

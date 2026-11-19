@@ -8,7 +8,7 @@ import {
 } from '../../services/excelService';
 import { calculateCurrentInventory } from '../../services/fifo';
 import { ProductModal } from './ProductModal';
-import { ExcelDuplicateConflictModal, ConflictItem } from '../Common/ExcelDuplicateConflictModal';
+import { CatalogExcelImportModal, CatalogImportCheckItem, CatalogImportFieldDiff } from '../Common/CatalogExcelImportModal';
 import { useConfirm } from '../../context/ConfirmContext';
 import {
   Package,
@@ -325,111 +325,188 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
     }
   };
 
-  // Excel Import State & Conflicts
-  const [conflictModalOpen, setConflictModalOpen] = useState(false);
-  const [pendingConflicts, setPendingConflicts] = useState<ConflictItem[]>([]);
-  const [pendingNewProducts, setPendingNewProducts] = useState<Product[]>([]);
-  const [pendingOverwrittenProducts, setPendingOverwrittenProducts] = useState<Product[]>([]);
-  const [totalImportedCount, setTotalImportedCount] = useState(0);
+  // Excel Import Check State
+  const [productImportModalOpen, setProductImportModalOpen] = useState(false);
+  const [productImportCheckItems, setProductImportCheckItems] = useState<CatalogImportCheckItem<Product>[]>([]);
+  const [productImportFileName, setProductImportFileName] = useState<string>('');
 
-  // Excel Import Products with duplicate code check
+  // Excel Import Products with check & field comparison modal
   const handleExcelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    const ok = await confirm({
-      title: 'Xác nhận nhập dữ liệu hàng hóa từ Excel',
-      message: `Bạn có chắc chắn muốn tải lên và nhập danh mục hàng hóa từ file "${file.name}" vào hệ thống không?`,
-      confirmText: 'Xác nhận nhập',
-      type: 'info',
-    });
-    if (!ok) {
-      e.target.value = '';
-      return;
-    }
 
     try {
       const rows = await parseExcelFile(file);
       if (!rows || rows.length === 0) {
         alert('File Excel rỗng.');
+        e.target.value = '';
         return;
       }
 
-      const imported: Product[] = rows.map((r: any, idx: number) => ({
-        id: `prod-imp-${Date.now()}-${idx}`,
-        code: String(r['Mã HH'] || `HH${Date.now()}`).trim().toUpperCase(),
-        reconciliationCode: String(r['Mã đối chiếu'] || r['Mã Đối Chiếu'] || r['Mã ĐC'] || '').trim(),
-        name: String(r['Tên HH'] || r['Tên hàng hóa'] || 'Sản phẩm mới').trim(),
-        purchaseUnit: String(r['ĐVT_Mua'] || 'Cái').trim(),
-        vatRate: Number(r['Thuế suất (%)'] || r['Thuế suất'] || 10),
-        conversionRate: Number(r['SL quy đổi'] || 1),
-        saleUnit: String(r['ĐVT_Bán'] || 'Cái').trim(),
-        category: String(r['Nhóm/loại HH'] || r['Nhóm HH'] || '').trim(),
-        profitMargin: (() => {
-          const raw = r['Tỷ suất lợi nhuận (%)'] ?? r['Tỷ suất lợi nhuận'] ?? 0;
-          const clean = typeof raw === 'string' ? parseFloat(raw.replace('%', '').trim()) : Number(raw);
-          return isNaN(clean) ? 0 : clean;
-        })(),
-        defaultSalePrice: r['Giá bán mặc định'] || r['Giá bán mặc định (Sau thuế)'] ? Number(r['Giá bán mặc định'] || r['Giá bán mặc định (Sau thuế)']) : undefined,
-        priceVariance: r['Biên độ giá'] || r['Biên độ giá (+/-)'] ? Number(r['Biên độ giá'] || r['Biên độ giá (+/-)']) : undefined,
-        notes: String(r['Ghi chú'] || ''),
-      }));
+      const importedByCode = new Map<string, Product>();
+      rows.forEach((r: any, idx: number) => {
+        const pCode = String(r['Mã HH'] || `HH${Date.now()}-${idx}`).trim().toUpperCase();
+        const rawVat = r['Thuế suất (%)'] ?? r['Thuế suất'] ?? 10;
+        const vatRate = rawVat === '' || rawVat === null || rawVat === undefined ? 10 : Number(rawVat);
+        const rawConv = r['SL quy đổi'] ?? 1;
+        const conversionRate = rawConv === '' || rawConv === null || rawConv === undefined ? 1 : Number(rawConv);
+        const rawMargin = r['Tỷ suất lợi nhuận (%)'] ?? r['Tỷ suất lợi nhuận'] ?? 0;
+        const cleanMargin =
+          typeof rawMargin === 'string'
+            ? parseFloat(rawMargin.replace('%', '').trim())
+            : Number(rawMargin);
+        const rawDefPrice = r['Giá bán mặc định'] ?? r['Giá bán mặc định (Sau thuế)'];
+        const defaultSalePrice =
+          rawDefPrice !== '' && rawDefPrice !== null && rawDefPrice !== undefined && !isNaN(Number(rawDefPrice))
+            ? Number(rawDefPrice)
+            : undefined;
+        const rawVariance = r['Biên độ giá'] ?? r['Biên độ giá (+/-)'];
+        const priceVariance =
+          rawVariance !== '' && rawVariance !== null && rawVariance !== undefined && !isNaN(Number(rawVariance))
+            ? Number(rawVariance)
+            : undefined;
 
-      // Check duplicates
-      const conflicts: ConflictItem[] = [];
-      const newItems: Product[] = [];
+        importedByCode.set(pCode, {
+          id: `prod-imp-${Date.now()}-${idx}`,
+          code: pCode,
+          reconciliationCode: String(r['Mã đối chiếu'] || r['Mã Đối Chiếu'] || r['Mã ĐC'] || '').trim(),
+          name: String(r['Tên HH'] || r['Tên hàng hóa'] || 'Sản phẩm mới').trim(),
+          purchaseUnit: String(r['ĐVT_Mua'] || 'Cái').trim(),
+          vatRate: isNaN(vatRate) ? 10 : vatRate,
+          conversionRate: isNaN(conversionRate) ? 1 : conversionRate,
+          saleUnit: String(r['ĐVT_Bán'] || 'Cái').trim(),
+          category: String(r['Nhóm/loại HH'] || r['Nhóm HH'] || '').trim(),
+          profitMargin: isNaN(cleanMargin) ? 0 : cleanMargin,
+          defaultSalePrice,
+          priceVariance,
+          notes: String(r['Ghi chú'] || '').trim(),
+        });
+      });
+
       const existingMap = new Map<string, Product>();
       products.forEach((p) => existingMap.set(p.code.toUpperCase(), p));
 
-      imported.forEach((item) => {
+      const checkItems: CatalogImportCheckItem<Product>[] = Array.from(importedByCode.values()).map((item) => {
         const existing = existingMap.get(item.code.toUpperCase());
-        if (existing) {
-          conflicts.push({
+        const previewFields = [
+          ...(item.reconciliationCode ? [{ label: 'Mã đối chiếu', value: item.reconciliationCode }] : []),
+          { label: 'ĐVT Mua/Bán', value: `${item.purchaseUnit} → ${item.saleUnit} (x${item.conversionRate})` },
+          { label: 'Nhóm', value: item.category || '—' },
+          { label: 'VAT / LN', value: `${item.vatRate}% / ${item.profitMargin}%` },
+          ...(item.defaultSalePrice !== undefined
+            ? [{ label: 'Giá mặc định', value: `${formatNumber(item.defaultSalePrice)} đ` }]
+            : []),
+        ];
+
+        if (!existing) {
+          return {
             code: item.code,
-            name: existing.name,
-            oldInfo: `Tên: ${existing.name}${existing.reconciliationCode ? ` | Mã ĐC: ${existing.reconciliationCode}` : ''}\nNhóm: ${existing.category} | ĐVT: ${existing.saleUnit}\nLợi nhuận: ${existing.profitMargin}% | VAT: ${existing.vatRate}%\nGiá mặc định: ${existing.defaultSalePrice ? formatNumber(existing.defaultSalePrice) + ' đ' : '—'} | Biên độ: ${existing.priceVariance ? '±' + formatNumber(existing.priceVariance) + ' đ' : '—'}`,
-            newInfo: `Tên: ${item.name}${item.reconciliationCode ? ` | Mã ĐC: ${item.reconciliationCode}` : ''}\nNhóm: ${item.category} | ĐVT: ${item.saleUnit}\nLợi nhuận: ${item.profitMargin}% | VAT: ${item.vatRate}%\nGiá mặc định: ${item.defaultSalePrice ? formatNumber(item.defaultSalePrice) + ' đ' : '—'} | Biên độ: ${item.priceVariance ? '±' + formatNumber(item.priceVariance) + ' đ' : '—'}`,
-          });
-        } else {
-          newItems.push(item);
+            name: item.name,
+            status: 'new',
+            diffs: [],
+            previewFields,
+            incomingItem: item,
+          };
         }
+
+        const fieldPairs: Array<{ label: string; oldVal: string; newVal: string; isChanged?: boolean }> = [
+          { label: 'Tên hàng hóa', oldVal: (existing.name || '').trim(), newVal: (item.name || '').trim() },
+          {
+            label: 'Mã đối chiếu',
+            oldVal: (existing.reconciliationCode || '').trim(),
+            newVal: (item.reconciliationCode || '').trim(),
+          },
+          {
+            label: 'ĐVT Mua',
+            oldVal: (existing.purchaseUnit || '').trim(),
+            newVal: (item.purchaseUnit || '').trim(),
+          },
+          {
+            label: 'SL quy đổi',
+            oldVal: String(existing.conversionRate),
+            newVal: String(item.conversionRate),
+            isChanged: Number(existing.conversionRate) !== Number(item.conversionRate),
+          },
+          {
+            label: 'ĐVT Bán',
+            oldVal: (existing.saleUnit || '').trim(),
+            newVal: (item.saleUnit || '').trim(),
+          },
+          {
+            label: 'Nhóm hàng',
+            oldVal: (existing.category || '').trim(),
+            newVal: (item.category || '').trim(),
+          },
+          {
+            label: 'Thuế suất (%)',
+            oldVal: `${existing.vatRate}%`,
+            newVal: `${item.vatRate}%`,
+            isChanged: Number(existing.vatRate) !== Number(item.vatRate),
+          },
+          {
+            label: 'Tỷ suất LN (%)',
+            oldVal: `${existing.profitMargin}%`,
+            newVal: `${item.profitMargin}%`,
+            isChanged: Number(existing.profitMargin) !== Number(item.profitMargin),
+          },
+          {
+            label: 'Giá bán mặc định',
+            oldVal: existing.defaultSalePrice !== undefined ? `${formatNumber(existing.defaultSalePrice)} đ` : '',
+            newVal: item.defaultSalePrice !== undefined ? `${formatNumber(item.defaultSalePrice)} đ` : '',
+            isChanged: (existing.defaultSalePrice ?? null) !== (item.defaultSalePrice ?? null),
+          },
+          {
+            label: 'Biên độ giá',
+            oldVal: existing.priceVariance !== undefined ? `±${formatNumber(existing.priceVariance)} đ` : '',
+            newVal: item.priceVariance !== undefined ? `±${formatNumber(item.priceVariance)} đ` : '',
+            isChanged: (existing.priceVariance ?? null) !== (item.priceVariance ?? null),
+          },
+          {
+            label: 'Ghi chú',
+            oldVal: (existing.notes || '').trim(),
+            newVal: (item.notes || '').trim(),
+          },
+        ];
+
+        const diffs: CatalogImportFieldDiff[] = fieldPairs
+          .filter((fp) => (fp.isChanged !== undefined ? fp.isChanged : fp.oldVal !== fp.newVal))
+          .map((fp) => ({ label: fp.label, oldValue: fp.oldVal, newValue: fp.newVal }));
+
+        return {
+          code: item.code,
+          name: item.name,
+          status: diffs.length > 0 ? 'changed' : 'unchanged',
+          diffs,
+          previewFields,
+          incomingItem: {
+            ...item,
+            id: existing.id,
+          },
+          existingId: existing.id,
+        };
       });
 
-      if (conflicts.length > 0) {
-        setTotalImportedCount(imported.length);
-        setPendingConflicts(conflicts);
-        setPendingNewProducts(newItems);
-        // Overwrite list: existing products not in excel + new excel versions
-        const merged = products.map((p) => {
-          const match = imported.find((imp) => imp.code.toUpperCase() === p.code.toUpperCase());
-          return match ? { ...match, id: p.id } : p;
-        });
-        const brandNew = newItems.filter(
-          (ni) => !merged.some((m) => m.code.toUpperCase() === ni.code.toUpperCase())
-        );
-        setPendingOverwrittenProducts([...merged, ...brandNew]);
-        setConflictModalOpen(true);
-      } else {
-        onBatchUpdateProducts([...products, ...imported]);
-        alert(`Đã nhập thành công ${imported.length} sản phẩm từ Excel!`);
-      }
-
+      setProductImportFileName(file.name);
+      setProductImportCheckItems(checkItems);
+      setProductImportModalOpen(true);
       e.target.value = '';
     } catch (err: any) {
       alert(`Lỗi đọc file Excel: ${err.message}`);
+      e.target.value = '';
     }
   };
 
-  const handleSkipDuplicates = () => {
-    onBatchUpdateProducts([...products, ...pendingNewProducts]);
-    setConflictModalOpen(false);
-    alert(`Đã bỏ qua các mã trùng. Đã thêm thành công ${pendingNewProducts.length} sản phẩm mới từ Excel!`);
-  };
-
-  const handleOverwriteDuplicates = () => {
-    onBatchUpdateProducts(pendingOverwrittenProducts);
-    setConflictModalOpen(false);
-    alert(`Đã cập nhật/thêm thành công danh mục sản phẩm từ Excel!`);
+  const handleConfirmProductImport = (selectedNew: Product[], selectedUpdates: Product[]) => {
+    const payload = [...selectedUpdates, ...selectedNew];
+    if (payload.length === 0) {
+      setProductImportModalOpen(false);
+      return;
+    }
+    onBatchUpdateProducts(payload);
+    setProductImportModalOpen(false);
+    alert(
+      `Đã hoàn tất nhập danh mục sản phẩm từ Excel: thêm mới ${selectedNew.length} mã, cập nhật ${selectedUpdates.length} mã!`
+    );
   };
 
   return (
@@ -1031,17 +1108,15 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
         />
       )}
 
-      {/* Product Excel Duplicate Conflict Modal */}
-      {conflictModalOpen && (
-        <ExcelDuplicateConflictModal
-          isOpen={conflictModalOpen}
+      {/* Product Excel Import Check Modal */}
+      {productImportModalOpen && (
+        <CatalogExcelImportModal
+          isOpen={productImportModalOpen}
           entityTitle="Sản phẩm / Hàng hóa"
-          totalImportedCount={totalImportedCount}
-          newItemsCount={pendingNewProducts.length}
-          conflicts={pendingConflicts}
-          onSkipDuplicates={handleSkipDuplicates}
-          onOverwriteDuplicates={handleOverwriteDuplicates}
-          onCancel={() => setConflictModalOpen(false)}
+          fileName={productImportFileName}
+          items={productImportCheckItems}
+          onConfirm={handleConfirmProductImport}
+          onCancel={() => setProductImportModalOpen(false)}
         />
       )}
     </div>
