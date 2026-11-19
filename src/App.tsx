@@ -7,6 +7,7 @@ import {
   Supplier,
   Product,
   Order,
+  DeletedOrderRecord,
   PurchaseBill,
   DebtPayment,
   DatabaseProfile,
@@ -51,7 +52,17 @@ import { GoogleSheetsSyncModal } from './components/Common/GoogleSheetsSyncModal
 import { AuditLogModal } from './components/Common/AuditLogModal';
 import { DeviceConflictModal } from './components/Common/DeviceConflictModal';
 import { AlertTriangle } from 'lucide-react';
-import { resequenceOrders, DEFAULT_ORDER_CODE_RULES, mergeOrdersByRootCode, deduplicateOrders } from './services/orderCodeService';
+import {
+  resequenceOrders,
+  DEFAULT_ORDER_CODE_RULES,
+  mergeOrdersByRootCode,
+  deduplicateOrders,
+  mergeDeletedOrders,
+  filterDeletedOrders,
+  reconcileRemoteOrdersWithLocal,
+  generateNextRootCode,
+  ensureOrdersHaveRootCode,
+} from './services/orderCodeService';
 import {
   getCurrentDeviceName,
   setCurrentDeviceName,
@@ -68,7 +79,7 @@ export default function App() {
     const loaded = loadData(selectedDbId);
     return {
       ...loaded,
-      orders: deduplicateOrders(loaded.orders),
+      orders: filterDeletedOrders(deduplicateOrders(loaded.orders), loaded.deletedOrders),
     };
   });
 
@@ -98,6 +109,7 @@ export default function App() {
   const [hasDismissedConflict, setHasDismissedConflict] = useState(false);
   const [currentDeviceNameState, setCurrentDeviceNameState] = useState(() => getCurrentDeviceName());
   const [hasGoogleToken, setHasGoogleToken] = useState<boolean>(() => hasGoogleAccessToken());
+  const immediateSyncRequestedRef = React.useRef(false);
 
   useEffect(() => {
     setHasGoogleToken(hasGoogleAccessToken());
@@ -197,12 +209,26 @@ export default function App() {
     loadDataAsync(selectedDbId).then((fullData) => {
       if (isMounted && fullData) {
         setData((current) => {
+          const mergedDeleted = mergeDeletedOrders(current.deletedOrders, fullData.deletedOrders);
+          const filteredFullOrders = filterDeletedOrders(fullData.orders, mergedDeleted);
+          const filteredCurrentOrders = filterDeletedOrders(current.orders, mergedDeleted);
           if (
-            fullData.orders.length > current.orders.length ||
+            filteredFullOrders.length > filteredCurrentOrders.length ||
             fullData.products.length > current.products.length ||
             fullData.customers.length > current.customers.length
           ) {
-            return fullData;
+            return {
+              ...fullData,
+              orders: filteredFullOrders,
+              deletedOrders: mergedDeleted,
+            };
+          }
+          if (mergedDeleted.length !== (current.deletedOrders?.length || 0)) {
+            return {
+              ...current,
+              orders: filteredCurrentOrders,
+              deletedOrders: mergedDeleted,
+            };
           }
           return current;
         });
@@ -245,9 +271,21 @@ export default function App() {
         const token = await getAccessToken();
         if (token) {
           const freshData = await loadDataFromGoogleSheets(token, targetSpreadsheetId);
-          if (freshData && (freshData.orders.length > 0 || freshData.products.length > 0)) {
-            setData(freshData);
-            saveData(freshData, dbId);
+          if (freshData) {
+            const mergedDeleted = mergeDeletedOrders(loaded.deletedOrders, freshData.deletedOrders);
+            const reconciledOrders = reconcileRemoteOrdersWithLocal(
+              loaded.orders,
+              freshData.orders,
+              mergedDeleted,
+              loaded.lastSyncedAt
+            );
+            const mergedData: AppData = {
+              ...freshData,
+              orders: reconciledOrders,
+              deletedOrders: mergedDeleted,
+            };
+            setData(mergedData);
+            saveData(mergedData, dbId);
           }
         }
       } catch (err) {
@@ -299,11 +337,27 @@ export default function App() {
         const token = await getAccessToken();
         if (token) {
           const freshData = await loadDataFromGoogleSheets(token, targetSpreadsheetId);
-          if (freshData && (freshData.orders.length > 0 || freshData.products.length > 0)) {
+          if (freshData) {
+            const mergedDeleted = mergeDeletedOrders(loaded.deletedOrders, freshData.deletedOrders);
+            const hasUnpushedDeletes =
+              (loaded.deletedOrders?.length || 0) > 0 &&
+              mergedDeleted.length > (freshData.deletedOrders?.length || 0);
+            if (hasUnpushedDeletes) {
+              immediateSyncRequestedRef.current = true;
+            }
+            const reconciledOrders = reconcileRemoteOrdersWithLocal(
+              loaded.orders,
+              freshData.orders,
+              mergedDeleted,
+              loaded.lastSyncedAt
+            );
             // Keep current session in fresh data
             const freshWithSession: AppData = {
               ...freshData,
+              orders: reconciledOrders,
+              deletedOrders: mergedDeleted,
               activeSessions: registerOrUpdateDeviceSession(user, freshData.activeSessions).updatedSessions,
+              auditLogs: appendAuditLog(freshData.auditLogs || loaded.auditLogs, loginLog),
             };
             setData(freshWithSession);
             saveData(freshWithSession, dbId);
@@ -370,17 +424,30 @@ export default function App() {
           (newOrder.orderCode && o.orderCode && o.orderCode.trim().toLowerCase() === newOrder.orderCode.trim().toLowerCase())
       );
 
+      let orderToSave = newOrder;
+      if (existingIdx === -1) {
+        const deletedRootSet = new Set(
+          (prev.deletedOrders || []).map((d) => d.rootCode?.trim().toUpperCase()).filter(Boolean) as string[]
+        );
+        if (!orderToSave.rootCode || deletedRootSet.has(orderToSave.rootCode.trim().toUpperCase())) {
+          orderToSave = {
+            ...orderToSave,
+            rootCode: generateNextRootCode(prev.orders, prev.deletedOrders || []),
+          };
+        }
+      }
+
       let updatedOrders: Order[];
       if (existingIdx !== -1) {
         // Cập nhật đơn hàng đã có trong danh sách
-        updatedOrders = prev.orders.map((o, idx) => (idx === existingIdx ? newOrder : o));
+        updatedOrders = prev.orders.map((o, idx) => (idx === existingIdx ? orderToSave : o));
       } else {
         // Thêm đơn hàng mới
-        updatedOrders = [newOrder, ...prev.orders];
+        updatedOrders = [orderToSave, ...prev.orders];
       }
 
       // Khử trùng tuyệt đối: 1 mã gốc chỉ có duy nhất 1 đơn hàng
-      const cleanOrders = deduplicateOrders(updatedOrders);
+      const cleanOrders = deduplicateOrders(ensureOrdersHaveRootCode(updatedOrders));
 
       return {
         ...prev,
@@ -448,8 +515,36 @@ export default function App() {
     }
 
     const deletedOrder = data.orders.find((o) => o.id === orderId);
+    const nowIso = new Date().toISOString();
+    immediateSyncRequestedRef.current = true;
+
     setData((prev) => {
-      const remaining = prev.orders.filter((o) => o.id !== orderId);
+      const ensuredPrev = ensureOrdersHaveRootCode(prev.orders);
+      const targetOrder = ensuredPrev.find((o) => o.id === orderId) || deletedOrder;
+      const newTombstone: DeletedOrderRecord | null = targetOrder
+        ? {
+            id: targetOrder.id,
+            rootCode: targetOrder.rootCode,
+            orderCode: targetOrder.orderCode,
+            deletedAt: nowIso,
+            deletedById: currentUser?.id,
+            deletedByName: currentUser?.fullName || currentUser?.username,
+          }
+        : {
+            id: orderId,
+            deletedAt: nowIso,
+            deletedById: currentUser?.id,
+            deletedByName: currentUser?.fullName || currentUser?.username,
+          };
+
+      const mergedDeleted = mergeDeletedOrders(
+        prev.deletedOrders || [],
+        newTombstone ? [newTombstone] : []
+      );
+      const remaining = filterDeletedOrders(
+        ensuredPrev.filter((o) => o.id !== orderId),
+        mergedDeleted
+      );
       const rules =
         prev.settings.orderCodeRules && prev.settings.orderCodeRules.length > 0
           ? prev.settings.orderCodeRules
@@ -458,6 +553,7 @@ export default function App() {
       return {
         ...prev,
         orders: deduplicateOrders(resequenced),
+        deletedOrders: mergedDeleted,
       };
     });
 
@@ -481,8 +577,28 @@ export default function App() {
       return;
     }
 
+    const nowIso = new Date().toISOString();
+    immediateSyncRequestedRef.current = true;
+
     setData((prev) => {
-      const remaining = prev.orders.filter((o) => !orderIds.includes(o.id));
+      const ensuredPrev = ensureOrdersHaveRootCode(prev.orders);
+      const targetIdSet = new Set(orderIds);
+      const newTombstones: DeletedOrderRecord[] = ensuredPrev
+        .filter((o) => targetIdSet.has(o.id))
+        .map((o) => ({
+          id: o.id,
+          rootCode: o.rootCode,
+          orderCode: o.orderCode,
+          deletedAt: nowIso,
+          deletedById: currentUser?.id,
+          deletedByName: currentUser?.fullName || currentUser?.username,
+        }));
+
+      const mergedDeleted = mergeDeletedOrders(prev.deletedOrders || [], newTombstones);
+      const remaining = filterDeletedOrders(
+        ensuredPrev.filter((o) => !targetIdSet.has(o.id)),
+        mergedDeleted
+      );
       const rules =
         prev.settings.orderCodeRules && prev.settings.orderCodeRules.length > 0
           ? prev.settings.orderCodeRules
@@ -491,6 +607,7 @@ export default function App() {
       return {
         ...prev,
         orders: deduplicateOrders(resequenced),
+        deletedOrders: mergedDeleted,
       };
     });
 
@@ -849,7 +966,7 @@ export default function App() {
     });
   };
 
-  // Direction 1: Auto-sync on local changes (orders, customers, purchases, suppliers, products, debts)
+  // Direction 1: Auto-sync on local changes (orders, deletedOrders, customers, purchases, suppliers, products, debts)
   const isInitialMount = React.useRef(true);
   const autoSyncTimerRef = React.useRef<any>(null);
 
@@ -861,6 +978,7 @@ export default function App() {
     }
 
     if (!autoSyncEnabled || data.isDemo || !currentUser || !data.spreadsheetId) {
+      immediateSyncRequestedRef.current = false;
       return;
     }
 
@@ -868,7 +986,10 @@ export default function App() {
       clearTimeout(autoSyncTimerRef.current);
     }
 
-    // Debounce 4.5 seconds after user actions to batch multiple keystrokes/actions
+    const debounceMs = immediateSyncRequestedRef.current ? 300 : 4500;
+    immediateSyncRequestedRef.current = false;
+
+    // Push changes to Google Sheets (fast 300ms for deletions, 4.5s debounce for normal edits)
     autoSyncTimerRef.current = setTimeout(async () => {
       try {
         const token = await getAccessToken();
@@ -887,7 +1008,7 @@ export default function App() {
       } finally {
         setIsAutoSyncing(false);
       }
-    }, 4500);
+    }, debounceMs);
 
     return () => {
       if (autoSyncTimerRef.current) {
@@ -896,6 +1017,7 @@ export default function App() {
     };
   }, [
     data.orders,
+    data.deletedOrders,
     data.customers,
     data.purchases,
     data.suppliers,
@@ -932,10 +1054,17 @@ export default function App() {
           const restored = await loadDataFromGoogleSheets(token, data.spreadsheetId!);
           if (restored) {
             setData((prev) => {
-              const mergedOrders = mergeOrdersByRootCode(prev.orders, restored.orders);
+              const mergedDeleted = mergeDeletedOrders(prev.deletedOrders, restored.deletedOrders);
+              const mergedOrders = reconcileRemoteOrdersWithLocal(
+                prev.orders,
+                restored.orders,
+                mergedDeleted,
+                prev.lastSyncedAt
+              );
               const merged: AppData = {
                 ...restored,
                 orders: mergedOrders,
+                deletedOrders: mergedDeleted,
                 activeSessions: prev.activeSessions,
               };
               saveData(merged, selectedDbId);
@@ -943,7 +1072,7 @@ export default function App() {
             });
             setGlobalBanner({
               type: 'success',
-              message: `🔄 Đã tự động đồng bộ đơn hàng mới từ Google Sheets (thiết bị khác) lúc ${new Date(meta.lastSyncedAt).toLocaleTimeString('vi-VN')}!`,
+              message: `🔄 Đã tự động đồng bộ dữ liệu mới nhất từ Google Sheets (thiết bị khác) lúc ${new Date(meta.lastSyncedAt).toLocaleTimeString('vi-VN')}!`,
             });
           }
         }
@@ -985,7 +1114,7 @@ export default function App() {
   const handleManualResetData = async () => {
     try {
       const loaded = await loadDataAsync(selectedDbId);
-      const cleanOrders = deduplicateOrders(loaded.orders);
+      const cleanOrders = filterDeletedOrders(deduplicateOrders(loaded.orders), loaded.deletedOrders);
       const refreshed: AppData = {
         ...loaded,
         orders: cleanOrders,
@@ -1092,10 +1221,17 @@ export default function App() {
 
       const restored = await loadDataFromGoogleSheets(token, data.spreadsheetId);
       if (restored) {
-        const mergedOrders = deduplicateOrders(mergeOrdersByRootCode(data.orders, restored.orders));
+        const mergedDeleted = mergeDeletedOrders(data.deletedOrders, restored.deletedOrders);
+        const mergedOrders = reconcileRemoteOrdersWithLocal(
+          data.orders,
+          restored.orders,
+          mergedDeleted,
+          data.lastSyncedAt
+        );
         const updated: AppData = {
           ...restored,
           orders: mergedOrders,
+          deletedOrders: mergedDeleted,
           activeSessions: data.activeSessions,
           lastSyncedAt: new Date().toISOString(),
         };
@@ -1151,11 +1287,18 @@ export default function App() {
       const remote = await loadDataFromGoogleSheets(token, data.spreadsheetId);
       let combinedData = { ...data };
       if (remote) {
-        const mergedOrders = deduplicateOrders(mergeOrdersByRootCode(data.orders, remote.orders));
+        const mergedDeleted = mergeDeletedOrders(data.deletedOrders, remote.deletedOrders);
+        const mergedOrders = reconcileRemoteOrdersWithLocal(
+          data.orders,
+          remote.orders,
+          mergedDeleted,
+          data.lastSyncedAt
+        );
         combinedData = {
           ...remote,
           ...data,
           orders: mergedOrders,
+          deletedOrders: mergedDeleted,
         };
       }
 
@@ -1520,8 +1663,19 @@ export default function App() {
             });
           }}
           onSuccessPull={(restoredData) => {
-            setData(restoredData);
-            saveData(restoredData, selectedDbId);
+            const isSameDb =
+              (restoredData.databaseId && restoredData.databaseId === data.databaseId) ||
+              (restoredData.spreadsheetId && restoredData.spreadsheetId === data.spreadsheetId);
+            const mergedDeleted = isSameDb
+              ? mergeDeletedOrders(data.deletedOrders, restoredData.deletedOrders)
+              : restoredData.deletedOrders || [];
+            const finalPullData: AppData = {
+              ...restoredData,
+              deletedOrders: mergedDeleted,
+              orders: filterDeletedOrders(restoredData.orders, mergedDeleted),
+            };
+            setData(finalPullData);
+            saveData(finalPullData, selectedDbId);
             setGlobalBanner({
               type: 'success',
               message: '✓ Đã nạp và khôi phục dữ liệu từ Google Sheets thành công!',

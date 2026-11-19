@@ -250,6 +250,15 @@ export interface DatabaseProfile {
   lastUsedAt: string;
 }
 
+export interface DeletedOrderRecord {
+  id: string;
+  rootCode?: string;
+  orderCode?: string;
+  deletedAt: string; // ISO 8601 timestamp
+  deletedById?: string;
+  deletedByName?: string;
+}
+
 export interface AppData {
   databaseId?: string;
   databaseName?: string;
@@ -260,6 +269,7 @@ export interface AppData {
   suppliers: Supplier[];
   products: Product[];
   orders: Order[];
+  deletedOrders?: DeletedOrderRecord[];
   purchases: PurchaseBill[];
   debtPayments: DebtPayment[];
   settings: AppSettings;

@@ -1,5 +1,5 @@
 import { AppData, AppSettings, AppUser, Customer, Supplier, Product, Order, PurchaseBill, DebtPayment, DatabaseProfile } from '../types';
-import { DEFAULT_ORDER_CODE_RULES } from './orderCodeService';
+import { DEFAULT_ORDER_CODE_RULES, filterDeletedOrders, mergeDeletedOrders } from './orderCodeService';
 import { idbSaveAppData, idbGetAppData, idbDeleteAppData } from './indexedDbStorage';
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -831,6 +831,8 @@ function normalizeAppData(data: AppData, targetId: string): AppData {
   if (!data.users || data.users.length === 0) {
     data.users = targetId === DEMO_DATABASE_ID ? INITIAL_USERS : [createDefaultOfficialAdminUser()];
   }
+  data.deletedOrders = mergeDeletedOrders(data.deletedOrders || [], []);
+  data.orders = filterDeletedOrders(data.orders || [], data.deletedOrders);
   data.isDemo = targetId === DEMO_DATABASE_ID;
   data.databaseId = targetId;
   return data;
@@ -960,8 +962,18 @@ export function loadData(databaseId?: string): AppData {
 
     // Background verify if IDB has more complete data (e.g. if localStorage was truncated)
     idbGetAppData(targetId).then((idbData) => {
-      if (idbData && idbData.orders && idbData.orders.length > normalized.orders.length) {
-        memoryCache.set(targetId, normalizeAppData(idbData, targetId));
+      if (idbData && idbData.orders) {
+        const mergedDeleted = mergeDeletedOrders(normalized.deletedOrders, idbData.deletedOrders);
+        const filteredIdbOrders = filterDeletedOrders(idbData.orders, mergedDeleted);
+        if (filteredIdbOrders.length > normalized.orders.length) {
+          memoryCache.set(
+            targetId,
+            normalizeAppData(
+              { ...idbData, orders: filteredIdbOrders, deletedOrders: mergedDeleted },
+              targetId
+            )
+          );
+        }
       }
     }).catch(() => {});
 

@@ -1,4 +1,4 @@
-import { Order, OrderCodeRule, OrderCodePatternType } from '../types';
+import { Order, OrderCodeRule, OrderCodePatternType, DeletedOrderRecord } from '../types';
 
 export const DEFAULT_ORDER_CODE_RULES: OrderCodeRule[] = [
   {
@@ -277,12 +277,14 @@ export function resequenceOrders(orders: Order[], rules: OrderCodeRule[]): Order
   }
 
   // Update order codes in the returned list
+  const nowIso = new Date().toISOString();
   return orders.map((ord) => {
     const updatedCode = newCodeMap.get(ord.id);
     if (updatedCode && updatedCode !== ord.orderCode) {
       return {
         ...ord,
         orderCode: updatedCode,
+        updatedAt: nowIso,
       };
     }
     return ord;
@@ -293,11 +295,25 @@ export function resequenceOrders(orders: Order[], rules: OrderCodeRule[]): Order
  * Sinh mã gốc quy chiếu tự tăng dần cho đơn hàng mới: DH-ROOT-00001, DH-ROOT-00002...
  * Mã này là bất biến khi thêm, sửa, xóa, đánh số lại mã đơn hiển thị.
  */
-export function generateNextRootCode(allOrders: Order[] = []): string {
+export function generateNextRootCode(
+  allOrders: Order[] = [],
+  deletedOrders: DeletedOrderRecord[] = []
+): string {
   let maxNum = 0;
   for (const o of allOrders) {
     if (o.rootCode) {
       const match = o.rootCode.match(/(\d+)$/);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (!isNaN(n) && n > maxNum) {
+          maxNum = n;
+        }
+      }
+    }
+  }
+  for (const d of deletedOrders) {
+    if (d.rootCode) {
+      const match = d.rootCode.match(/(\d+)$/);
       if (match) {
         const n = parseInt(match[1], 10);
         if (!isNaN(n) && n > maxNum) {
@@ -425,12 +441,14 @@ export function deduplicateOrders(orders: Order[] = []): Order[] {
     // 2. orderCode (không phân biệt hoa thường)
     // 3. id
     const matchIdx = result.findIndex((item) => {
-      const matchRoot =
-        Boolean(ord.rootCode && item.rootCode && ord.rootCode.trim().toUpperCase() === item.rootCode.trim().toUpperCase());
+      const ordRoot = ord.rootCode?.trim().toUpperCase();
+      const itemRoot = item.rootCode?.trim().toUpperCase();
+      const matchRoot = Boolean(ordRoot && itemRoot && ordRoot === itemRoot);
+      const differentRoots = Boolean(ordRoot && itemRoot && ordRoot !== itemRoot);
       const matchCode =
         Boolean(ord.orderCode && item.orderCode && ord.orderCode.trim().toLowerCase() === item.orderCode.trim().toLowerCase());
       const matchId = Boolean(ord.id && item.id && ord.id === item.id);
-      return matchRoot || matchCode || matchId;
+      return matchRoot || matchId || (!differentRoots && matchCode);
     });
 
     if (matchIdx === -1) {
@@ -445,23 +463,165 @@ export function deduplicateOrders(orders: Order[] = []): Order[] {
 }
 
 /**
+ * Hợp nhất danh sách đánh dấu đơn hàng đã xóa (tombstones) giữa local và remote
+ */
+export function mergeDeletedOrders(
+  localDeleted: DeletedOrderRecord[] = [],
+  remoteDeleted: DeletedOrderRecord[] = []
+): DeletedOrderRecord[] {
+  const map = new Map<string, DeletedOrderRecord>();
+  const combined = [...(localDeleted || []), ...(remoteDeleted || [])];
+
+  for (const rec of combined) {
+    if (!rec) continue;
+    const key =
+      rec.rootCode && rec.rootCode.trim()
+        ? `root:${rec.rootCode.trim().toUpperCase()}`
+        : rec.id && rec.id.trim()
+        ? `id:${rec.id.trim()}`
+        : rec.orderCode && rec.orderCode.trim()
+        ? `code:${rec.orderCode.trim().toLowerCase()}`
+        : '';
+    if (!key) continue;
+
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, { ...rec });
+    } else {
+      const existingTime = new Date(existing.deletedAt || 0).getTime();
+      const recTime = new Date(rec.deletedAt || 0).getTime();
+      if (recTime >= existingTime) {
+        map.set(key, { ...existing, ...rec });
+      }
+    }
+  }
+
+  return Array.from(map.values())
+    .sort((a, b) => new Date(b.deletedAt || 0).getTime() - new Date(a.deletedAt || 0).getTime())
+    .slice(0, 1500);
+}
+
+/**
+ * Loại bỏ các đơn hàng đã bị Admin xóa theo danh sách đánh dấu (tombstones)
+ */
+export function filterDeletedOrders(
+  orders: Order[] = [],
+  deletedOrders: DeletedOrderRecord[] = []
+): Order[] {
+  if (!orders || orders.length === 0) return [];
+  if (!deletedOrders || deletedOrders.length === 0) return orders;
+
+  return orders.filter((ord) => {
+    if (!ord) return false;
+    const ordCreated = new Date(ord.createdAt || 0).getTime();
+    const ordRoot = ord.rootCode?.trim().toUpperCase();
+    const ordId = ord.id?.trim();
+    const ordCode = ord.orderCode?.trim().toLowerCase();
+
+    const isDeleted = deletedOrders.some((del) => {
+      if (!del) return false;
+      const delTime = new Date(del.deletedAt || 0).getTime();
+      if (delTime > 0 && ordCreated > delTime + 5000) {
+        // Đơn mới được tạo sau thời điểm xóa (không phải đơn bị xóa)
+        return false;
+      }
+
+      const delRoot = del.rootCode?.trim().toUpperCase();
+      const delId = del.id?.trim();
+      const delCode = del.orderCode?.trim().toLowerCase();
+
+      if (delRoot && ordRoot) {
+        return delRoot === ordRoot;
+      }
+      if (delId && ordId && delId === ordId) {
+        return true;
+      }
+      // Fallback theo mã đơn chỉ áp dụng khi ít nhất 1 bên chưa có rootCode (legacy)
+      if ((!delRoot || !ordRoot) && delCode && ordCode && delCode === ordCode) {
+        return true;
+      }
+      return false;
+    });
+
+    return !isDeleted;
+  });
+}
+
+/**
  * Hợp nhất thông minh danh sách đơn hàng giữa các thiết bị (Máy tính & Điện thoại)
  * theo Mã gốc quy chiếu (rootCode) và Mã đơn (orderCode).
+ * - Loại bỏ tuyệt đối các đơn hàng nằm trong danh sách đã xóa (deletedOrders) để không bị đồng bộ ngược lại.
  * - Tuyệt đối không để xảy ra trùng lặp đơn hàng hoặc trùng mã gốc.
  * - Bảo toàn vẹn toàn Người tạo đơn (createdById, createdByName) của nhân viên tạo đơn.
  * - Khi cùng đơn hàng bị chỉnh sửa trên nhiều máy: lấy bản ghi có thời gian updatedAt mới nhất.
  */
-export function mergeOrdersByRootCode(localOrders: Order[] = [], remoteOrders: Order[] = []): Order[] {
-  // 1. Khử trùng nội bộ từng danh sách trước
-  const cleanLocal = deduplicateOrders(localOrders);
-  const cleanRemote = deduplicateOrders(remoteOrders);
+export function mergeOrdersByRootCode(
+  localOrders: Order[] = [],
+  remoteOrders: Order[] = [],
+  deletedOrders: DeletedOrderRecord[] = []
+): Order[] {
+  // 1. Lọc bỏ các đơn đã bị xóa trên cả 2 danh sách
+  const activeLocal = filterDeletedOrders(localOrders, deletedOrders);
+  const activeRemote = filterDeletedOrders(remoteOrders, deletedOrders);
 
-  // 2. Gộp 2 danh sách và khử trùng toàn diện
+  // 2. Khử trùng nội bộ từng danh sách trước
+  const cleanLocal = deduplicateOrders(activeLocal);
+  const cleanRemote = deduplicateOrders(activeRemote);
+
+  // 3. Gộp 2 danh sách và khử trùng toàn diện
   const merged = deduplicateOrders([...cleanLocal, ...cleanRemote]);
 
-  // 3. Đảm bảo mọi đơn đều có rootCode và sắp xếp theo ngày mới nhất
+  // 4. Đảm bảo mọi đơn đều có rootCode và sắp xếp theo ngày mới nhất
   const ensured = ensureOrdersHaveRootCode(merged);
   return deduplicateOrders(ensured).sort(
     (a, b) => b.orderDate.localeCompare(a.orderDate) || b.createdAt.localeCompare(a.createdAt)
   );
+}
+
+/**
+ * Đối soát đơn hàng khi tải dữ liệu mới từ Google Sheets về máy:
+ * - Áp dụng danh sách đơn hàng đã xóa (tombstones) từ cả 2 phía.
+ * - Nếu một đơn hàng ở máy cục bộ đã tồn tại từ trước lần đồng bộ cuối (localLastSyncedAt)
+ *   nhưng không còn trên Google Sheets (đã bị Admin xóa trên máy khác), không giữ lại để tránh đồng bộ ngược.
+ * - Chỉ giữ lại đơn hàng cục bộ nếu đơn đó mới được tạo hoặc chỉnh sửa cục bộ SAU localLastSyncedAt.
+ */
+export function reconcileRemoteOrdersWithLocal(
+  localOrders: Order[] = [],
+  remoteOrders: Order[] = [],
+  deletedOrders: DeletedOrderRecord[] = [],
+  localLastSyncedAt?: string
+): Order[] {
+  const activeRemote = filterDeletedOrders(remoteOrders, deletedOrders);
+  const activeLocal = filterDeletedOrders(localOrders, deletedOrders);
+
+  const localSyncTime = localLastSyncedAt ? new Date(localLastSyncedAt).getTime() : 0;
+  if (!localSyncTime || isNaN(localSyncTime)) {
+    return mergeOrdersByRootCode(activeLocal, activeRemote, deletedOrders);
+  }
+
+  const remoteRootSet = new Set(
+    activeRemote.map((o) => o.rootCode?.trim().toUpperCase()).filter(Boolean) as string[]
+  );
+  const remoteIdSet = new Set(activeRemote.map((o) => o.id).filter(Boolean));
+  const remoteCodeSet = new Set(
+    activeRemote.map((o) => o.orderCode?.trim().toLowerCase()).filter(Boolean) as string[]
+  );
+
+  const survivingLocal = activeLocal.filter((ord) => {
+    const ordRoot = ord.rootCode?.trim().toUpperCase();
+    const ordCode = ord.orderCode?.trim().toLowerCase();
+    const existsInRemote =
+      (ordRoot && remoteRootSet.has(ordRoot)) ||
+      (ord.id && remoteIdSet.has(ord.id)) ||
+      (!ordRoot && ordCode && remoteCodeSet.has(ordCode));
+
+    if (existsInRemote) return true;
+
+    // Không có trên bản mới từ Sheets: chỉ giữ lại nếu đơn mới được tạo/sửa offline sau lần sync cuối
+    const createdT = new Date(ord.createdAt || 0).getTime();
+    const updatedT = new Date(ord.updatedAt || ord.createdAt || 0).getTime();
+    return createdT > localSyncTime || updatedT > localSyncTime;
+  });
+
+  return mergeOrdersByRootCode(survivingLocal, activeRemote, deletedOrders);
 }

@@ -10,7 +10,14 @@ import {
   PurchaseBill,
   DebtPayment,
 } from '../types';
-import { DEFAULT_ORDER_CODE_RULES, ensureOrdersHaveRootCode, mergeOrdersByRootCode, deduplicateOrders } from './orderCodeService';
+import {
+  DEFAULT_ORDER_CODE_RULES,
+  ensureOrdersHaveRootCode,
+  mergeOrdersByRootCode,
+  deduplicateOrders,
+  mergeDeletedOrders,
+  filterDeletedOrders,
+} from './orderCodeService';
 import { createDefaultOfficialAdminUser, DEFAULT_SETTINGS } from './storage';
 
 // Initialize Firebase if not already initialized
@@ -387,12 +394,23 @@ export async function syncDataToGoogleSheets(
   const now = new Date().toISOString();
 
   // Chunk serialized JSON backup (max 40,000 chars per chunk) to stay well under Google Sheets 50,000 character limit
-  const serialized = JSON.stringify(data);
+  const cleanDeletedOrders = mergeDeletedOrders(data.deletedOrders || [], []);
+  const cleanOrdersForSync = deduplicateOrders(
+    ensureOrdersHaveRootCode(filterDeletedOrders(data.orders || [], cleanDeletedOrders))
+  );
+  const dataToSerialize: AppData = {
+    ...data,
+    orders: cleanOrdersForSync,
+    deletedOrders: cleanDeletedOrders,
+  };
+  const serialized = JSON.stringify(dataToSerialize);
   const CHUNK_SIZE = 40000;
   const backupChunks: string[] = [];
   for (let i = 0; i < serialized.length; i += CHUNK_SIZE) {
     backupChunks.push(serialized.substring(i, i + CHUNK_SIZE));
   }
+
+  const deletedOrdersCompact = JSON.stringify(cleanDeletedOrders.slice(0, 200));
 
   // 1. Metadata
   const metadataRows: string[][] = [
@@ -408,9 +426,10 @@ export async function syncDataToGoogleSheets(
     ['totalCustomers', String(data.customers.length), 'Số khách hàng'],
     ['totalSuppliers', String(data.suppliers.length), 'Số NCC'],
     ['totalProducts', String(data.products.length), 'Số hàng hóa'],
-    ['totalOrders', String(data.orders.length), 'Số đơn hàng'],
+    ['totalOrders', String(cleanOrdersForSync.length), 'Số đơn hàng'],
     ['totalPurchases', String(data.purchases.length), 'Số phiếu nhập'],
     ['totalDebtPayments', String(data.debtPayments.length), 'Số phiếu thu chi nợ'],
+    ['deletedOrdersJson', deletedOrdersCompact.length <= 45000 ? deletedOrdersCompact : '[]', 'Danh sách đơn hàng đã xóa'],
     ['serializedBackupChunks', String(backupChunks.length), 'Số phần lưu trữ JSON backup'],
     ...backupChunks.map((chunk, idx) => [
       `serializedBackup_${idx}`,
@@ -444,7 +463,7 @@ export async function syncDataToGoogleSheets(
   ];
 
   // 5. Orders - Lưu trữ đầy đủ Mã gốc quy chiếu và Người tạo đơn ban đầu, khử trùng tuyệt đối
-  const processedOrders = deduplicateOrders(ensureOrdersHaveRootCode(data.orders));
+  const processedOrders = cleanOrdersForSync;
   const orderRows: string[][] = [
     [
       'Mã đơn',
@@ -529,7 +548,50 @@ function getSheetRange(tabName: string, rows: (string | number)[][], minRows = 1
   return `'${tabName}'!A1:${colLetter}${rowCount}`;
 }
 
-  // Send batch clear & write to spreadsheet formatted entirely as text
+  // Ensure all required sheet tabs exist and clear stale rows (especially deleted orders) before writing
+  const requiredTabs = ['Metadata', 'Customers', 'Suppliers', 'Products', 'Orders', 'Purchases', 'DebtPayments'];
+  try {
+    const metaRes = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }
+    );
+    if (metaRes.ok) {
+      const metaJson = await metaRes.json();
+      const existingTitles: string[] = (metaJson.sheets || [])
+        .map((s: any) => s.properties?.title)
+        .filter(Boolean);
+      const missingTabs = requiredTabs.filter((t) => !existingTitles.includes(t));
+      if (missingTabs.length > 0) {
+        await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            requests: missingTabs.map((title) => ({ addSheet: { properties: { title } } })),
+          }),
+        });
+      }
+    }
+
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ranges: requiredTabs.map((t) => `'${t}'!A:Z`),
+      }),
+    });
+  } catch (clearErr) {
+    console.debug('Pre-sync tab ensure/clear warning:', clearErr);
+  }
+
+  // Send batch write to spreadsheet formatted entirely as text
   // Dynamically compute exact range for each tab (e.g. Orders has 21 columns -> A1:U...)
   // to avoid Google Sheets 400 error: 'Requested writing within range, but tried writing to column'
   const payload = {
@@ -1054,15 +1116,42 @@ export async function loadDataFromGoogleSheets(
   }
 
   // 11. Synthesize final AppData
+  let metaDeletedOrders: any[] = [];
+  if (metaObj['deletedOrdersJson']) {
+    try {
+      const parsedDel = JSON.parse(metaObj['deletedOrdersJson']);
+      if (Array.isArray(parsedDel)) metaDeletedOrders = parsedDel;
+    } catch {
+      // ignore
+    }
+  }
+
   let finalResult: AppData;
 
   if (parsedFromJson) {
     finalResult = parsedFromJson;
-    // CRITICAL: Hợp nhất thông minh theo Mã gốc quy chiếu (rootCode)
-    if (parsedSheetOrders.length > 0) {
-      finalResult.orders = mergeOrdersByRootCode(finalResult.orders || [], parsedSheetOrders);
+    const combinedDeleted = mergeDeletedOrders(finalResult.deletedOrders || [], metaDeletedOrders);
+    finalResult.deletedOrders = combinedDeleted;
+
+    const hasAuthoritativeJsonOrders =
+      Array.isArray(finalResult.orders) &&
+      (finalResult.orders.length > 0 || metaObj['totalOrders'] === '0');
+
+    if (hasAuthoritativeJsonOrders) {
+      // Tin cậy danh sách orders trong JSON backup (đồng bộ cùng lúc với Metadata) để không hồi sinh dòng cũ còn sót trên sheet
+      finalResult.orders = deduplicateOrders(
+        ensureOrdersHaveRootCode(filterDeletedOrders(finalResult.orders || [], combinedDeleted))
+      );
+    } else if (parsedSheetOrders.length > 0) {
+      finalResult.orders = mergeOrdersByRootCode(
+        finalResult.orders || [],
+        parsedSheetOrders,
+        combinedDeleted
+      );
     } else {
-      finalResult.orders = ensureOrdersHaveRootCode(finalResult.orders || []);
+      finalResult.orders = ensureOrdersHaveRootCode(
+        filterDeletedOrders(finalResult.orders || [], combinedDeleted)
+      );
     }
     // Also merge other entities if sheet tab has rows but backup was empty
     if (parsedSheetPurchases.length > 0 && (!finalResult.purchases || finalResult.purchases.length === 0)) {
@@ -1082,6 +1171,7 @@ export async function loadDataFromGoogleSheets(
     }
   } else {
     // Reconstruct full AppData entirely from sheet tabs
+    const filteredOrders = filterDeletedOrders(parsedSheetOrders, metaDeletedOrders);
     finalResult = {
       databaseId: metaObj.databaseId || targetId,
       databaseName: metaObj.databaseName || metaObj.companyName || 'CSDL Google Sheets',
@@ -1096,19 +1186,23 @@ export async function loadDataFromGoogleSheets(
       customers: parsedSheetCustomers,
       suppliers: parsedSheetSuppliers,
       products: parsedSheetProducts,
-      orders: deduplicateOrders(parsedSheetOrders),
+      orders: deduplicateOrders(filteredOrders),
+      deletedOrders: metaDeletedOrders,
       purchases: parsedSheetPurchases,
       debtPayments: parsedSheetDebts,
       users: [createDefaultOfficialAdminUser()],
       isDemo: false,
       spreadsheetId: targetId,
       syncSource: 'google_drive',
-      lastSyncedAt: new Date().toISOString(),
+      lastSyncedAt: metaObj['lastSyncedAt'] || new Date().toISOString(),
     };
   }
 
-  finalResult.orders = deduplicateOrders(finalResult.orders || []);
-  finalResult.lastSyncedAt = new Date().toISOString();
+  finalResult.deletedOrders = mergeDeletedOrders(finalResult.deletedOrders || [], metaDeletedOrders);
+  finalResult.orders = deduplicateOrders(
+    filterDeletedOrders(finalResult.orders || [], finalResult.deletedOrders)
+  );
+  finalResult.lastSyncedAt = metaObj['lastSyncedAt'] || new Date().toISOString();
   finalResult.syncSource = 'google_drive';
   finalResult.spreadsheetId = targetId;
   return finalResult;
