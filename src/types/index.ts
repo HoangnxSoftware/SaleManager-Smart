@@ -119,6 +119,7 @@ export interface OrderCodeRule {
   separator: string; // Dấu ngăn cách: '-', ';', ',', '/', '_' hoặc để trống ''
   minDigits: number; // Số chữ số tối thiểu STT: 1 (1, 2, 3...) hoặc 2 (01, 02...), 3, 4
   isDefault: boolean; // Quy tắc mặc định
+  isLocked?: boolean; // Khóa quy tắc (khi khóa sẽ không hiển thị khi tạo mới đơn hàng)
   createdAt?: string;
 }
 

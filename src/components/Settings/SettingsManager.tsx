@@ -23,7 +23,9 @@ import {
   Star,
   Tags,
   ArrowUpDown,
-  X
+  X,
+  Lock,
+  Unlock
 } from 'lucide-react';
 
 interface SettingsManagerProps {
@@ -84,6 +86,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   const [ruleDateFormat, setRuleDateFormat] = useState<'YYYYMMDD' | 'YYMMDD' | 'DDMMYYYY' | 'YYYY-MM-DD'>('YYYYMMDD');
   const [ruleMinDigits, setRuleMinDigits] = useState(1);
   const [ruleIsDefault, setRuleIsDefault] = useState(false);
+  const [ruleIsLocked, setRuleIsLocked] = useState(false);
 
   const [showConfirmResetEmpty, setShowConfirmResetEmpty] = useState(false);
   const [showConfirmResetSample, setShowConfirmResetSample] = useState(false);
@@ -97,6 +100,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     setRuleDateFormat('YYYYMMDD');
     setRuleMinDigits(1);
     setRuleIsDefault(rules.length === 0);
+    setRuleIsLocked(false);
     setIsRuleModalOpen(true);
   };
 
@@ -109,6 +113,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     setRuleDateFormat(r.dateFormat || 'YYYYMMDD');
     setRuleMinDigits(r.minDigits || 1);
     setRuleIsDefault(r.isDefault || defaultRuleId === r.id);
+    setRuleIsLocked(Boolean(r.isLocked));
     setIsRuleModalOpen(true);
   };
 
@@ -119,7 +124,14 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       return;
     }
 
+    const otherUnlockedCount = rules.filter((r) => r.id !== editingRule?.id && !r.isLocked).length;
+    if (ruleIsLocked && otherUnlockedCount === 0) {
+      alert('Hệ thống cần ít nhất 1 quy tắc đang mở để sử dụng khi tạo đơn hàng mới!');
+      return;
+    }
+
     const ruleId = editingRule ? editingRule.id : `rule-${Date.now()}`;
+    const finalIsDefault = ruleIsLocked ? false : ruleIsDefault;
     const newRule: OrderCodeRule = {
       id: ruleId,
       name: ruleName.trim(),
@@ -128,7 +140,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       separator: ruleSeparator,
       dateFormat: ruleDateFormat,
       minDigits: Math.max(1, ruleMinDigits || 1),
-      isDefault: ruleIsDefault,
+      isDefault: finalIsDefault,
+      isLocked: ruleIsLocked,
       createdAt: editingRule?.createdAt || new Date().toISOString(),
     };
 
@@ -140,15 +153,19 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     }
 
     let newDefaultId = defaultRuleId;
-    if (ruleIsDefault || updatedRules.length === 1) {
+    if (finalIsDefault || updatedRules.length === 1) {
       newDefaultId = ruleId;
       updatedRules = updatedRules.map((r) => ({
         ...r,
         isDefault: r.id === ruleId,
       }));
-    } else if (!updatedRules.some((r) => r.isDefault)) {
-      newDefaultId = updatedRules[0].id;
-      updatedRules[0].isDefault = true;
+    } else if (!updatedRules.some((r) => r.isDefault && !r.isLocked)) {
+      const firstUnlocked = updatedRules.find((r) => !r.isLocked) || updatedRules[0];
+      newDefaultId = firstUnlocked.id;
+      updatedRules = updatedRules.map((r) => ({
+        ...r,
+        isDefault: r.id === firstUnlocked.id,
+      }));
     }
 
     setRules(updatedRules);
@@ -164,6 +181,11 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   };
 
   const handleSetDefaultRule = (ruleId: string) => {
+    const target = rules.find((r) => r.id === ruleId);
+    if (target?.isLocked) {
+      alert('Quy tắc này đang bị khóa. Vui lòng mở khóa trước khi đặt làm mặc định!');
+      return;
+    }
     const updatedRules = rules.map((r) => ({
       ...r,
       isDefault: r.id === ruleId,
@@ -179,12 +201,60 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     onUpdateSettings(updatedSettings);
   };
 
+  const handleToggleLockRule = (ruleId: string) => {
+    const target = rules.find((r) => r.id === ruleId);
+    if (!target) return;
+
+    const willLock = !target.isLocked;
+    if (willLock) {
+      const unlockedCount = rules.filter((r) => !r.isLocked).length;
+      if (unlockedCount <= 1) {
+        alert('Hệ thống cần ít nhất 1 quy tắc đang mở để sử dụng khi tạo đơn hàng mới!');
+        return;
+      }
+    }
+
+    let updatedRules = rules.map((r) =>
+      r.id === ruleId
+        ? {
+            ...r,
+            isLocked: willLock,
+            isDefault: willLock ? false : r.isDefault,
+          }
+        : r
+    );
+
+    let newDefaultId = defaultRuleId;
+    if (willLock && (defaultRuleId === ruleId || target.isDefault)) {
+      const firstUnlocked = updatedRules.find((r) => !r.isLocked) || updatedRules[0];
+      newDefaultId = firstUnlocked.id;
+      updatedRules = updatedRules.map((r) => ({
+        ...r,
+        isDefault: r.id === firstUnlocked.id,
+      }));
+    }
+
+    setRules(updatedRules);
+    setDefaultRuleId(newDefaultId);
+    const updatedSettings: AppSettings = {
+      ...form,
+      orderCodeRules: updatedRules,
+      defaultOrderCodeRuleId: newDefaultId,
+    };
+    setForm(updatedSettings);
+    onUpdateSettings(updatedSettings);
+  };
+
   const handleDeleteRule = async (ruleId: string) => {
     if (rules.length <= 1) {
       alert('Hệ thống cần tối thiểu 1 quy tắc tạo mã đơn!');
       return;
     }
     const target = rules.find((r) => r.id === ruleId);
+    if (!target?.isLocked && rules.filter((r) => !r.isLocked).length <= 1) {
+      alert('Không thể xóa quy tắc đang mở duy nhất. Vui lòng mở khóa quy tắc khác trước!');
+      return;
+    }
     const ok = await confirm({
       title: 'Xác nhận xóa quy tắc',
       message: `Bạn có chắc chắn muốn xóa quy tắc tạo mã "${target?.name}" không?`,
@@ -196,10 +266,11 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     let updatedRules = rules.filter((r) => r.id !== ruleId);
     let newDefaultId = defaultRuleId;
     if (defaultRuleId === ruleId) {
-      newDefaultId = updatedRules[0].id;
-      updatedRules = updatedRules.map((r, idx) => ({
+      const firstUnlocked = updatedRules.find((r) => !r.isLocked) || updatedRules[0];
+      newDefaultId = firstUnlocked.id;
+      updatedRules = updatedRules.map((r) => ({
         ...r,
-        isDefault: idx === 0,
+        isDefault: r.id === firstUnlocked.id,
       }));
     }
 
@@ -765,25 +836,36 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                 <th className="p-3 border-r border-slate-200 text-center">Dấu ngăn cách</th>
                 <th className="p-3 border-r border-slate-200 font-mono text-center">Mẫu xem trước</th>
                 <th className="p-3 border-r border-slate-200 text-center">Mặc định</th>
+                <th className="p-3 border-r border-slate-200 text-center">Trạng thái</th>
                 <th className="p-3 text-center">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {rules.map((rule, idx) => {
-                const isDef = rule.isDefault || defaultRuleId === rule.id;
+                const isLocked = Boolean(rule.isLocked);
+                const isDef = !isLocked && (rule.isDefault || defaultRuleId === rule.id);
                 const sample1 = formatOrderCode(rule, 1, '2026-01-01');
                 const sample2 = formatOrderCode(rule, 2, '2026-01-01');
                 const sample3 = formatOrderCode(rule, 3, '2026-01-01');
 
                 return (
-                  <tr key={rule.id} className="hover:bg-slate-50/70 transition-colors">
+                  <tr
+                    key={rule.id}
+                    className={`transition-colors ${
+                      isLocked ? 'bg-slate-50/90 opacity-75 hover:bg-slate-100/80' : 'hover:bg-slate-50/70'
+                    }`}
+                  >
                     <td className="p-3 text-center text-slate-400 font-medium border-r border-slate-100">
                       {idx + 1}
                     </td>
                     <td className="p-3 font-bold text-slate-900 border-r border-slate-100">
                       <div className="flex items-center gap-1.5">
-                        {isDef && <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" />}
-                        <span>{rule.name}</span>
+                        {isLocked ? (
+                          <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        ) : (
+                          isDef && <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" />
+                        )}
+                        <span className={isLocked ? 'line-through text-slate-500' : ''}>{rule.name}</span>
                       </div>
                     </td>
                     <td className="p-3 border-r border-slate-100">
@@ -813,7 +895,9 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                       <span className="font-bold text-blue-700">{sample1}</span>, {sample2}, {sample3}...
                     </td>
                     <td className="p-3 text-center border-r border-slate-100">
-                      {isDef ? (
+                      {isLocked ? (
+                        <span className="text-[11px] text-slate-400 italic">Đang khóa</span>
+                      ) : isDef ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[11px]">
                           <Check className="w-3 h-3" /> Mặc định
                         </span>
@@ -827,8 +911,45 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                         </button>
                       )}
                     </td>
+                    <td className="p-3 text-center border-r border-slate-100">
+                      {isLocked ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-bold text-[11px]">
+                          <Lock className="w-3 h-3" /> Đã khóa
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px]">
+                          Đang mở
+                        </span>
+                      )}
+                    </td>
                     <td className="p-3 text-center">
                       <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleLockRule(rule.id)}
+                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold cursor-pointer transition-colors ${
+                            isLocked
+                              ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'
+                              : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200'
+                          }`}
+                          title={
+                            isLocked
+                              ? 'Mở khóa quy tắc (hiển thị lại khi tạo đơn hàng mới)'
+                              : 'Khóa quy tắc (ẩn khỏi danh sách khi tạo mới đơn hàng)'
+                          }
+                        >
+                          {isLocked ? (
+                            <>
+                              <Unlock className="w-3 h-3" />
+                              <span>Mở khóa</span>
+                            </>
+                          ) : (
+                            <>
+                              <Lock className="w-3 h-3" />
+                              <span>Khóa</span>
+                            </>
+                          )}
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleOpenEditRule(rule)}
@@ -856,7 +977,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
         </div>
 
         <div className="p-3.5 bg-amber-50/60 border border-amber-200 rounded-xl text-xs text-amber-900 leading-relaxed">
-          <span className="font-bold">Ghi chú về quy tắc tạo mã đơn:</span> Khi tạo hoặc sửa đơn hàng, người dùng có thể lựa chọn quy tắc tạo mã từ danh sách trên. Khi một đơn hàng phía trước bị xóa, hệ thống tự động cập nhật lại các đơn hàng phía sau theo thứ tự tăng dần liên tục của từng quy tắc (ví dụ: các đơn DH- sẽ được đánh số lại liên tục DH-1, DH-2... mà không ảnh hưởng tới các đơn NB-), đảm bảo tránh trùng lặp đơn hàng.
+          <span className="font-bold">Ghi chú về quy tắc tạo mã đơn:</span> Khi tạo đơn hàng mới, chỉ các quy tắc <strong>Đang mở</strong> mới được hiển thị để lựa chọn; các quy tắc <strong>Đã khóa</strong> sẽ bị ẩn khỏi danh sách tạo mới đơn hàng (nhưng vẫn giữ nguyên cho các đơn cũ đã tạo). Khi một đơn hàng phía trước bị xóa, hệ thống tự động cập nhật lại các đơn hàng phía sau theo thứ tự tăng dần liên tục của từng quy tắc.
         </div>
       </div>
 
@@ -1283,18 +1404,38 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
                 </div>
               </div>
 
-              {/* Default checkbox */}
-              <label className="flex items-center gap-2 pt-1 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={ruleIsDefault}
-                  onChange={(e) => setRuleIsDefault(e.target.checked)}
-                  className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
-                />
-                <span className="text-xs font-semibold text-slate-800">
-                  Đặt làm quy tắc mặc định khi tạo đơn hàng mới
-                </span>
-              </label>
+              {/* Default & Lock checkboxes */}
+              <div className="space-y-2 pt-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={ruleIsDefault}
+                    disabled={ruleIsLocked}
+                    onChange={(e) => setRuleIsDefault(e.target.checked)}
+                    className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer disabled:opacity-50"
+                  />
+                  <span className={`text-xs font-semibold ${ruleIsLocked ? 'text-slate-400' : 'text-slate-800'}`}>
+                    Đặt làm quy tắc mặc định khi tạo đơn hàng mới
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={ruleIsLocked}
+                    onChange={(e) => {
+                      const locked = e.target.checked;
+                      setRuleIsLocked(locked);
+                      if (locked) setRuleIsDefault(false);
+                    }}
+                    className="w-4 h-4 text-amber-600 rounded border-slate-300 focus:ring-amber-500 cursor-pointer"
+                  />
+                  <span className="text-xs font-semibold text-amber-900 flex items-center gap-1">
+                    <Lock className="w-3.5 h-3.5 text-amber-600" />
+                    Khóa quy tắc (không hiển thị khi tạo mới đơn hàng)
+                  </span>
+                </label>
+              </div>
 
               {/* Buttons */}
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">

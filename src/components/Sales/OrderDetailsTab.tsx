@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Order, OrderItem } from '../../types';
+import { Order, OrderItem, AppUser } from '../../types';
 import { formatCurrency, formatNumber, formatDate } from '../../utils/formatters';
 import { exportOrderDetailsToExcel } from '../../services/excelService';
 import {
@@ -16,11 +16,13 @@ import {
   TrendingUp,
   Receipt,
   Sparkles,
-  Info
+  Info,
+  Lock
 } from 'lucide-react';
 
 interface OrderDetailsTabProps {
   orders: Order[];
+  currentUser?: AppUser;
   initialStartDate?: string;
   initialEndDate?: string;
   onSaveOrder: (order: Order) => void;
@@ -39,12 +41,14 @@ interface FlattenedRow {
 
 export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
   orders,
+  currentUser,
   initialStartDate = '',
   initialEndDate = '',
   onSaveOrder,
   onViewOrder,
   onEditOrder,
 }) => {
+  const isAdmin = !currentUser || currentUser.role === 'admin';
   const [searchTerm, setSearchTerm] = useState('');
   const [startDate, setStartDate] = useState(initialStartDate);
   const [endDate, setEndDate] = useState(initialEndDate);
@@ -206,6 +210,10 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
 
   // Handle starting inline edit
   const handleStartEditPostTax = (order: Order, item: OrderItem) => {
+    if (order.deliveryStatus === 'completed' && !isAdmin) {
+      alert('Đơn hàng đã hoàn thành. Chỉ tài khoản Admin mới được phép chỉnh sửa!');
+      return;
+    }
     const key = `${order.id}_${item.id}`;
     setEditingKey(key);
     const postTax =
@@ -867,6 +875,16 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
                               <X className="w-3.5 h-3.5" />
                             </button>
                           </div>
+                        ) : order.deliveryStatus === 'completed' && !isAdmin ? (
+                          <div
+                            className="flex items-center justify-end gap-1.5 p-1 text-slate-500 cursor-not-allowed"
+                            title="Đơn hàng đã hoàn thành — Chỉ tài khoản Admin mới chỉnh sửa được"
+                          >
+                            <span className="font-black text-slate-700">
+                              {formatNumber(currentPostTaxPrice, 2)} ₫
+                            </span>
+                            <Lock className="w-3 h-3 text-amber-600 shrink-0" />
+                          </div>
                         ) : (
                           <div
                             onClick={() => handleStartEditPostTax(order, item)}
@@ -892,14 +910,23 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
                           >
                             <Eye className="w-3.5 h-3.5" />
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => onEditOrder(order)}
-                            className="p-1 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-md cursor-pointer"
-                            title="Chỉnh sửa toàn bộ đơn hàng"
-                          >
-                            <Edit className="w-3.5 h-3.5" />
-                          </button>
+                          {order.deliveryStatus === 'completed' && !isAdmin ? (
+                            <span
+                              className="p-1 text-amber-500 cursor-not-allowed inline-flex items-center"
+                              title="Đơn hàng đã hoàn thành — Chỉ tài khoản Admin mới chỉnh sửa được"
+                            >
+                              <Lock className="w-3.5 h-3.5" />
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => onEditOrder(order)}
+                              className="p-1 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-md cursor-pointer"
+                              title="Chỉnh sửa toàn bộ đơn hàng"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

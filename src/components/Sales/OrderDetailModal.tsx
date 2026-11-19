@@ -1,11 +1,12 @@
 import React from 'react';
-import { Order, AppSettings } from '../../types';
+import { Order, AppSettings, AppUser } from '../../types';
 import { formatCurrency, formatDate, formatNumber } from '../../utils/formatters';
-import { X, Printer, Copy, Edit, FileText, CheckCircle, Clock, Truck, AlertCircle, Ban, RotateCcw } from 'lucide-react';
+import { X, Printer, Copy, Edit, FileText, CheckCircle, Clock, Truck, AlertCircle, Ban, RotateCcw, Lock } from 'lucide-react';
 
 interface OrderDetailModalProps {
   order: Order | null;
   settings: AppSettings;
+  currentUser?: AppUser;
   isOpen: boolean;
   onClose: () => void;
   onEdit: (order: Order) => void;
@@ -17,6 +18,7 @@ interface OrderDetailModalProps {
 export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   order,
   settings,
+  currentUser,
   isOpen,
   onClose,
   onEdit,
@@ -25,6 +27,9 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   onToggleCancel,
 }) => {
   if (!isOpen || !order) return null;
+
+  const isAdmin = !currentUser || currentUser.role === 'admin';
+  const isLockedCompleted = order.deliveryStatus === 'completed' && !isAdmin;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col sm:items-center sm:justify-center p-0 sm:p-4 bg-slate-900/80 backdrop-blur-xs overflow-hidden sm:overflow-y-auto">
@@ -106,6 +111,14 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
           <div className="bg-rose-50 border-b border-rose-200 px-4 py-2.5 text-rose-800 text-xs sm:text-sm font-bold flex items-center gap-2 shrink-0">
             <Ban className="w-4 h-4 text-rose-600 shrink-0" />
             <span>ĐƠN HÀNG ĐÃ BỊ HỦY: Đơn hàng này không trừ tồn kho hàng hóa và không tính vào công nợ khách hàng.</span>
+          </div>
+        )}
+
+        {/* Completed Order Lock Banner for Non-Admin */}
+        {isLockedCompleted && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 text-amber-900 text-xs sm:text-sm font-semibold flex items-center gap-2 shrink-0">
+            <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>Đơn hàng đã Hoàn thành — Chỉ tài khoản Admin mới được phép chỉnh sửa hoặc thay đổi trạng thái đơn hàng này.</span>
           </div>
         )}
 
@@ -312,7 +325,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             Đóng
           </button>
           <div className="flex items-center gap-2">
-            {onToggleCancel && (
+            {onToggleCancel && !isLockedCompleted && (
               <button
                 type="button"
                 onClick={() => {
@@ -349,16 +362,28 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               <Copy className="w-4 h-4 text-slate-500" />
               <span>Copy đơn hàng này</span>
             </button>
-            <button
-              onClick={() => {
-                onEdit(order);
-                onClose();
-              }}
-              className="flex items-center gap-1.5 px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm transition-colors cursor-pointer"
-            >
-              <Edit className="w-4 h-4" />
-              <span>Chỉnh sửa đơn hàng</span>
-            </button>
+            {isLockedCompleted ? (
+              <button
+                type="button"
+                disabled
+                className="flex items-center gap-1.5 px-4 py-2 text-xs sm:text-sm font-semibold text-amber-900 bg-amber-100 border border-amber-300 rounded-xl cursor-not-allowed opacity-85"
+                title="Đơn hàng đã hoàn thành — Chỉ tài khoản Admin mới chỉnh sửa được"
+              >
+                <Lock className="w-4 h-4" />
+                <span>Đã hoàn thành (Chỉ Admin sửa)</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  onEdit(order);
+                  onClose();
+                }}
+                className="flex items-center gap-1.5 px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm transition-colors cursor-pointer"
+              >
+                <Edit className="w-4 h-4" />
+                <span>Chỉnh sửa đơn hàng</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

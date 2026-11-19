@@ -335,6 +335,32 @@ export default function App() {
 
   // Order Handlers
   const handleSaveOrder = (newOrder: Order) => {
+    const existingOrder = data.orders.find(
+      (o) =>
+        (newOrder.rootCode && o.rootCode && o.rootCode.trim().toUpperCase() === newOrder.rootCode.trim().toUpperCase()) ||
+        o.id === newOrder.id ||
+        (newOrder.orderCode && o.orderCode && o.orderCode.trim().toLowerCase() === newOrder.orderCode.trim().toLowerCase())
+    );
+
+    const isAdmin = currentUser?.role === 'admin';
+    if (existingOrder?.deliveryStatus === 'completed' && !isAdmin) {
+      setGlobalBanner({
+        type: 'error',
+        message: '⚠️ BẠN KHÔNG CÓ QUYỀN: Đơn hàng đã hoàn thành, chỉ tài khoản Admin mới được phép chỉnh sửa!',
+      });
+      alert('Đơn hàng đã hoàn thành! Chỉ tài khoản Admin mới được phép chỉnh sửa.');
+      return;
+    }
+
+    if (newOrder.deliveryStatus === 'completed' && existingOrder?.deliveryStatus !== 'completed' && !isAdmin) {
+      setGlobalBanner({
+        type: 'error',
+        message: '⚠️ BẠN KHÔNG CÓ QUYỀN: Chỉ tài khoản Admin mới được phép tích hoàn thành đơn hàng!',
+      });
+      alert('Chỉ tài khoản Admin mới được phép tích hoàn thành đơn hàng!');
+      return;
+    }
+
     setData((prev) => {
       // Tìm xem đơn hàng đã tồn tại hay chưa theo rootCode, orderCode hoặc id
       const existingIdx = prev.orders.findIndex(
@@ -362,12 +388,7 @@ export default function App() {
       };
     });
 
-    const isExisting = data.orders.some(
-      (o) =>
-        o.id === newOrder.id ||
-        (newOrder.rootCode && o.rootCode && o.rootCode.trim().toUpperCase() === newOrder.rootCode.trim().toUpperCase()) ||
-        (newOrder.orderCode && o.orderCode && o.orderCode.trim().toLowerCase() === newOrder.orderCode.trim().toLowerCase())
-    );
+    const isExisting = Boolean(existingOrder);
     logUserAction(
       isExisting ? 'update' : 'create',
       'order',
@@ -378,8 +399,27 @@ export default function App() {
   };
 
   const handleBatchUpdateOrders = (newOrUpdatedOrders: Order[]) => {
+    const isAdmin = currentUser?.role === 'admin';
+    const allowedOrders = isAdmin
+      ? newOrUpdatedOrders
+      : newOrUpdatedOrders.filter((incoming) => {
+          const existing = data.orders.find(
+            (o) =>
+              o.id === incoming.id ||
+              (incoming.rootCode && o.rootCode && o.rootCode.trim().toUpperCase() === incoming.rootCode.trim().toUpperCase())
+          );
+          if (existing?.deliveryStatus === 'completed') return false;
+          if (incoming.deliveryStatus === 'completed') return false;
+          return true;
+        });
+
+    if (!isAdmin && allowedOrders.length === 0 && newOrUpdatedOrders.length > 0) {
+      alert('Chỉ tài khoản Admin mới được phép hoàn thành hoặc chỉnh sửa đơn hàng đã hoàn thành!');
+      return;
+    }
+
     setData((prev) => {
-      const combined = [...newOrUpdatedOrders, ...prev.orders];
+      const combined = [...allowedOrders, ...prev.orders];
       const cleanOrders = deduplicateOrders(combined);
 
       return {
@@ -391,8 +431,8 @@ export default function App() {
     logUserAction(
       'import_excel',
       'order',
-      `${newOrUpdatedOrders.length} đơn hàng`,
-      `Nhập/đồng bộ hàng loạt ${newOrUpdatedOrders.length} đơn hàng từ Excel hoặc chức năng tính lại giá`
+      `${allowedOrders.length} đơn hàng`,
+      `Nhập/đồng bộ hàng loạt ${allowedOrders.length} đơn hàng từ Excel hoặc chức năng tính lại giá`
     );
   };
 

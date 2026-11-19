@@ -55,6 +55,7 @@ import {
   X,
   Ban,
   RotateCcw,
+  Lock,
 } from 'lucide-react';
 
 interface SalesManagerProps {
@@ -122,15 +123,28 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
   onOpenSyncModal = () => {},
 }) => {
   const confirm = useConfirm();
+  const isAdmin = currentUser.role === 'admin';
+  const canEditOrder = (order: Order) => order.deliveryStatus !== 'completed' || isAdmin;
   const [activeSubTab, setActiveSubTab] = useState<'orders' | 'order-details' | 'customers'>('orders');
 
-  // Search & filter
+  // Search, filter & sort
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [salespersonFilter, setSalespersonFilter] = useState<string>('all');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [activeDatePreset, setActiveDatePreset] = useState<string>('all');
+  const [orderSortField, setOrderSortField] = useState<'orderDate' | 'orderCode'>('orderDate');
+  const [orderSortDirection, setOrderSortDirection] = useState<'asc' | 'desc'>('desc');
+
+  const handleOrderSort = (field: 'orderCode' | 'orderDate') => {
+    if (orderSortField === field) {
+      setOrderSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setOrderSortField(field);
+      setOrderSortDirection(field === 'orderDate' ? 'desc' : 'asc');
+    }
+  };
 
   const handleApplyDatePreset = (preset: string) => {
     setActiveDatePreset(preset);
@@ -280,8 +294,20 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         o.createdByName === salespersonFilter;
 
       return matchSearch && matchStatus && matchDate && matchSalesperson;
-    }).sort((a, b) => b.orderDate.localeCompare(a.orderDate) || b.createdAt.localeCompare(a.createdAt));
-  }, [uniqueOrders, searchTerm, statusFilter, startDate, endDate, salespersonFilter, customers, products, users]);
+    }).sort((a, b) => {
+      const dir = orderSortDirection === 'asc' ? 1 : -1;
+      if (orderSortField === 'orderCode') {
+        const cmp = a.orderCode.localeCompare(b.orderCode, 'vi', { numeric: true, sensitivity: 'base' });
+        if (cmp !== 0) return cmp * dir;
+        return a.orderDate.localeCompare(b.orderDate) * dir;
+      }
+      const dateCmp = a.orderDate.localeCompare(b.orderDate);
+      if (dateCmp !== 0) return dateCmp * dir;
+      const codeCmp = a.orderCode.localeCompare(b.orderCode, 'vi', { numeric: true, sensitivity: 'base' });
+      if (codeCmp !== 0) return codeCmp * dir;
+      return a.createdAt.localeCompare(b.createdAt) * dir;
+    });
+  }, [uniqueOrders, searchTerm, statusFilter, startDate, endDate, salespersonFilter, customers, products, users, orderSortField, orderSortDirection]);
 
   // Duplicate tax codes check for customers (REQUIREMENT: nếu trong danh mục có trùng mã số thuế thì bôi đỏ)
   const duplicateTaxCodes = useMemo(() => {
@@ -533,8 +559,12 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
     alert(`Đã sao chép thành công đơn hàng mới với mã: ${newCode}`);
   };
 
-  // Batch Complete Orders
+  // Batch Complete Orders (CHỈ TÀI KHOẢN ADMIN MỚI ĐƯỢC TÍCH HOÀN THÀNH)
   const handleBatchComplete = () => {
+    if (!isAdmin) {
+      alert('Chỉ tài khoản Admin mới được phép tích hoàn thành đơn hàng!');
+      return;
+    }
     if (selectedOrderIds.length === 0) {
       alert('Vui lòng tích chọn các đơn hàng cần hoàn thành.');
       return;
@@ -544,12 +574,38 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
       .map((o) => ({
         ...o,
         deliveryStatus: 'completed' as DeliveryStatus,
+        updatedById: currentUser.id,
+        updatedByName: currentUser.fullName,
         updatedAt: new Date().toISOString(),
       }));
 
     onBatchUpdateOrders(updated);
     setSelectedOrderIds([]);
     alert(`Đã hoàn thành ${updated.length} đơn hàng.`);
+  };
+
+  // Single Order Quick Complete (CHỈ TÀI KHOẢN ADMIN)
+  const handleQuickCompleteOrder = async (order: Order) => {
+    if (!isAdmin) {
+      alert('Chỉ tài khoản Admin mới được phép tích hoàn thành đơn hàng!');
+      return;
+    }
+    const ok = await confirm({
+      title: 'Xác nhận hoàn thành đơn hàng',
+      message: `Xác nhận đánh dấu HOÀN THÀNH đơn hàng ${order.orderCode} (${order.customerName})? Sau khi hoàn thành, chỉ tài khoản Admin mới có quyền chỉnh sửa đơn hàng này.`,
+      confirmText: 'Xác nhận hoàn thành',
+      type: 'info',
+    });
+    if (!ok) return;
+
+    const updatedOrder: Order = {
+      ...order,
+      deliveryStatus: 'completed',
+      updatedById: currentUser.id,
+      updatedByName: currentUser.fullName,
+      updatedAt: new Date().toISOString(),
+    };
+    onSaveOrder(updatedOrder);
   };
 
   // Batch Copy Orders
@@ -611,6 +667,10 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
 
   // Toggle Cancel Order (Đánh dấu đơn hàng bị hủy / Khôi phục)
   const handleToggleCancelOrder = async (order: Order) => {
+    if (order.deliveryStatus === 'completed' && !isAdmin) {
+      alert('Đơn hàng đã hoàn thành! Chỉ tài khoản Admin mới được phép chỉnh sửa hoặc thay đổi trạng thái.');
+      return;
+    }
     const isCancelled = order.deliveryStatus === 'cancelled';
     if (!isCancelled) {
       const ok = await confirm({
@@ -663,23 +723,28 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
       alert('Vui lòng chọn ít nhất một đơn hàng để đánh dấu hủy.');
       return;
     }
+    const eligibleOrders = orders.filter(
+      (o) => selectedOrderIds.includes(o.id) && (isAdmin || o.deliveryStatus !== 'completed')
+    );
+    if (eligibleOrders.length === 0) {
+      alert('Các đơn hàng đã chọn đều đã Hoàn thành. Chỉ tài khoản Admin mới có thể thay đổi trạng thái đơn đã hoàn thành.');
+      return;
+    }
     const ok = await confirm({
       title: 'Xác nhận hủy đơn hàng hàng loạt',
-      message: `Bạn có chắc chắn muốn ĐÁNH DẤU HỦY ${selectedOrderIds.length} đơn hàng đã chọn? Các đơn bị hủy sẽ không tính vào công nợ và không xuất kho.`,
+      message: `Bạn có chắc chắn muốn ĐÁNH DẤU HỦY ${eligibleOrders.length} đơn hàng đã chọn? Các đơn bị hủy sẽ không tính vào công nợ và không xuất kho.`,
       confirmText: 'Đánh dấu hủy hàng loạt',
       type: 'danger',
     });
     if (ok) {
-      const updated = orders
-        .filter((o) => selectedOrderIds.includes(o.id))
-        .map((o) => ({
-          ...o,
-          deliveryStatus: 'cancelled' as DeliveryStatus,
-          debtAmount: 0,
-          updatedById: currentUser.id,
-          updatedByName: currentUser.fullName,
-          updatedAt: new Date().toISOString(),
-        }));
+      const updated = eligibleOrders.map((o) => ({
+        ...o,
+        deliveryStatus: 'cancelled' as DeliveryStatus,
+        debtAmount: 0,
+        updatedById: currentUser.id,
+        updatedByName: currentUser.fullName,
+        updatedAt: new Date().toISOString(),
+      }));
       onBatchUpdateOrders(updated);
       setSelectedOrderIds([]);
       alert(`Đã đánh dấu hủy ${updated.length} đơn hàng.`);
@@ -1191,7 +1256,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
+                <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
                   {(startDate || endDate) && (
                     <button
                       type="button"
@@ -1205,6 +1270,48 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                       Xóa lọc ngày
                     </button>
                   )}
+
+                  {/* Sort Order List by Date or Order Code */}
+                  <div className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 shadow-2xs shrink-0">
+                    <ArrowUpDown className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                    <span className="text-slate-500 font-medium hidden xs:inline">Sắp xếp:</span>
+                    <select
+                      value={orderSortField}
+                      onChange={(e) => {
+                        const nextField = e.target.value as 'orderDate' | 'orderCode';
+                        setOrderSortField(nextField);
+                        setOrderSortDirection(nextField === 'orderDate' ? 'desc' : 'asc');
+                      }}
+                      className="bg-transparent font-bold text-slate-800 focus:outline-hidden cursor-pointer"
+                      aria-label="Sắp xếp danh sách đơn hàng theo"
+                    >
+                      <option value="orderDate">Ngày tháng</option>
+                      <option value="orderCode">Mã đơn</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setOrderSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'))}
+                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-slate-100 hover:bg-blue-100 rounded text-[11px] font-bold text-blue-700 cursor-pointer transition-colors"
+                      title={
+                        orderSortDirection === 'asc'
+                          ? 'Đang sắp xếp tăng dần. Bấm để đổi sang giảm dần'
+                          : 'Đang sắp xếp giảm dần. Bấm để đổi sang tăng dần'
+                      }
+                    >
+                      {orderSortDirection === 'asc' ? (
+                        <>
+                          <ArrowUp className="w-3 h-3" />
+                          <span>Tăng</span>
+                        </>
+                      ) : (
+                        <>
+                          <ArrowDown className="w-3 h-3" />
+                          <span>Giảm</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
                   <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white border border-slate-200 text-slate-700 shadow-2xs shrink-0 ml-auto sm:ml-0">
                     <span className="text-slate-400 font-normal">Đang xem:</span>
                     <span className="text-blue-700 font-bold font-mono">{filteredOrders.length}</span>
@@ -1231,16 +1338,29 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                   <span>Chọn tất cả ({selectedOrderIds.length}/{filteredOrders.length})</span>
                 </button>
 
-                {/* Batch Complete */}
-                <button
-                  type="button"
-                  disabled={selectedOrderIds.length === 0}
-                  onClick={handleBatchComplete}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                >
-                  <CheckCircle className="w-3.5 h-3.5" />
-                  <span>Hoàn thành hàng loạt</span>
-                </button>
+                {/* Batch Complete - CHỈ CHO PHÉP TÀI KHOẢN ADMIN */}
+                {isAdmin ? (
+                  <button
+                    type="button"
+                    disabled={selectedOrderIds.length === 0}
+                    onClick={handleBatchComplete}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    title="Tích hoàn thành các đơn hàng đã chọn (Chỉ Admin)"
+                  >
+                    <CheckCircle className="w-3.5 h-3.5" />
+                    <span>Hoàn thành hàng loạt</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-75"
+                    title="Chỉ tài khoản Admin mới được phép tích hoàn thành đơn hàng"
+                  >
+                    <Lock className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Hoàn thành hàng loạt (Chỉ Admin)</span>
+                  </button>
+                )}
 
                 {/* Batch Copy */}
                 <button
@@ -1378,8 +1498,42 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                         className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                       />
                     </th>
-                    <th className="p-3 text-left">Mã đơn</th>
-                    <th className="p-3 text-left">Ngày tháng</th>
+                    <th
+                      onClick={() => handleOrderSort('orderCode')}
+                      className="p-3 text-left cursor-pointer select-none hover:bg-slate-200 transition-colors group"
+                      title="Bấm để sắp xếp theo Mã đơn"
+                    >
+                      <div className="inline-flex items-center gap-1">
+                        <span>Mã đơn</span>
+                        {orderSortField === 'orderCode' ? (
+                          orderSortDirection === 'asc' ? (
+                            <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
+                          ) : (
+                            <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 group-hover:opacity-100" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => handleOrderSort('orderDate')}
+                      className="p-3 text-left cursor-pointer select-none hover:bg-slate-200 transition-colors group"
+                      title="Bấm để sắp xếp theo Ngày tháng"
+                    >
+                      <div className="inline-flex items-center gap-1">
+                        <span>Ngày tháng</span>
+                        {orderSortField === 'orderDate' ? (
+                          orderSortDirection === 'asc' ? (
+                            <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
+                          ) : (
+                            <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 group-hover:opacity-100" />
+                        )}
+                      </div>
+                    </th>
                     <th className="p-3 text-left min-w-44">Khách hàng</th>
                     <th className="p-3 text-left min-w-40">Người tạo đơn/Bán hàng</th>
                     <th className="p-3 text-left">Tổng tiền TT</th>
@@ -1599,18 +1753,41 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                                 <Eye className="w-4 h-4" />
                               </button>
 
-                              {/* Edit */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingOrder(order);
-                                  setIsOrderFormOpen(true);
-                                }}
-                                className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
-                                title="Chỉnh sửa đơn hàng"
-                              >
-                                <Edit className="w-4 h-4" />
-                              </button>
+                              {/* Quick Complete - CHỈ TÀI KHOẢN ADMIN */}
+                              {isAdmin && order.deliveryStatus !== 'completed' && order.deliveryStatus !== 'cancelled' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickCompleteOrder(order)}
+                                  className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Tích hoàn thành đơn hàng (Chỉ Admin)"
+                                >
+                                  <CheckCircle className="w-4 h-4" />
+                                </button>
+                              )}
+
+                              {/* Edit - KHI ĐÃ HOÀN THÀNH CHỈ ADMIN MỚI SỬA ĐƯỢC */}
+                              {canEditOrder(order) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingOrder(order);
+                                    setIsOrderFormOpen(true);
+                                  }}
+                                  className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Chỉnh sửa đơn hàng"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled
+                                  className="p-1.5 text-amber-500 bg-amber-50/70 rounded-lg cursor-not-allowed opacity-80"
+                                  title="Đơn hàng đã hoàn thành — Chỉ tài khoản Admin mới chỉnh sửa được"
+                                >
+                                  <Lock className="w-4 h-4" />
+                                </button>
+                              )}
 
                               {/* Copy */}
                               <button
@@ -1623,18 +1800,20 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                               </button>
 
                               {/* Toggle Cancel / Restore */}
-                              <button
-                                type="button"
-                                onClick={() => handleToggleCancelOrder(order)}
-                                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                                  isCancelled
-                                    ? 'text-amber-600 hover:text-emerald-600 hover:bg-emerald-50'
-                                    : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
-                                }`}
-                                title={isCancelled ? 'Khôi phục đơn hàng' : 'Đánh dấu hủy đơn hàng (không trừ kho, không tính nợ)'}
-                              >
-                                {isCancelled ? <RotateCcw className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
-                              </button>
+                              {!(order.deliveryStatus === 'completed' && !isAdmin) && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleCancelOrder(order)}
+                                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                    isCancelled
+                                      ? 'text-amber-600 hover:text-emerald-600 hover:bg-emerald-50'
+                                      : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                                  }`}
+                                  title={isCancelled ? 'Khôi phục đơn hàng' : 'Đánh dấu hủy đơn hàng (không trừ kho, không tính nợ)'}
+                                >
+                                  {isCancelled ? <RotateCcw className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
+                                </button>
+                              )}
 
                               {/* Print */}
                               <button
@@ -1684,6 +1863,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
       ) : activeSubTab === 'order-details' ? (
         <OrderDetailsTab
           orders={uniqueOrders}
+          currentUser={currentUser}
           initialStartDate={startDate}
           initialEndDate={endDate}
           onSaveOrder={onSaveOrder}
@@ -1692,6 +1872,10 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
             setIsDetailModalOpen(true);
           }}
           onEditOrder={(order) => {
+            if (!canEditOrder(order)) {
+              alert('Đơn hàng đã hoàn thành. Chỉ tài khoản Admin mới được phép chỉnh sửa!');
+              return;
+            }
             setEditingOrder(order);
             setIsOrderFormOpen(true);
           }}
@@ -2050,9 +2234,14 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         <OrderDetailModal
           order={viewingOrder}
           settings={settings}
+          currentUser={currentUser}
           isOpen={isDetailModalOpen}
           onClose={() => setIsDetailModalOpen(false)}
           onEdit={(ord) => {
+            if (!canEditOrder(ord)) {
+              alert('Đơn hàng đã hoàn thành. Chỉ tài khoản Admin mới được phép chỉnh sửa!');
+              return;
+            }
             setEditingOrder(ord);
             setIsOrderFormOpen(true);
           }}

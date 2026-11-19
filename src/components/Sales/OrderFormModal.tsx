@@ -24,6 +24,7 @@ import {
   Edit,
   RefreshCw,
   Sparkles,
+  Lock,
 } from 'lucide-react';
 import { DEFAULT_ORDER_CODE_RULES, generateNextOrderCode, matchOrderToRule, generateNextRootCode } from '../../services/orderCodeService';
 import { ChangeProductModal } from './ChangeProductModal';
@@ -70,12 +71,26 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
   const [editingCustomerForModal, setEditingCustomerForModal] = useState<Customer | null>(null);
   const [changingItemIndex, setChangingItemIndex] = useState<number | null>(null);
 
-  // Available order code rules
+  // Available order code rules (locked rules are hidden when creating new orders)
   const rulesList = useMemo(() => {
     return settings.orderCodeRules && settings.orderCodeRules.length > 0
       ? settings.orderCodeRules
       : DEFAULT_ORDER_CODE_RULES;
   }, [settings.orderCodeRules]);
+
+  const unlockedRules = useMemo(() => {
+    const active = rulesList.filter((r) => !r.isLocked);
+    return active.length > 0 ? active : rulesList;
+  }, [rulesList]);
+
+  const selectableRules = useMemo(() => {
+    if (!initialOrder) {
+      return unlockedRules;
+    }
+    const matched = matchOrderToRule(initialOrder, rulesList);
+    const currentId = initialOrder.orderCodeRuleId || matched?.id;
+    return rulesList.filter((r) => !r.isLocked || r.id === currentId);
+  }, [initialOrder, rulesList, unlockedRules]);
 
   // Handler for rule change: auto-update order code with next sequential number
   const handleRuleChange = (newRuleId: string) => {
@@ -245,7 +260,12 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
           const hasDraftNotes = Boolean(draft.notes && draft.notes.trim() !== '');
 
           if (hasDraftItems || hasDraftCustomer || hasDraftNotes) {
-            setSelectedRuleId(draft.selectedRuleId || settings.defaultOrderCodeRuleId || rulesList[0]?.id || '');
+            const draftRule = unlockedRules.find((r) => r.id === draft.selectedRuleId);
+            const fallbackRule =
+              unlockedRules.find((r) => r.id === settings.defaultOrderCodeRuleId) ||
+              unlockedRules.find((r) => r.isDefault) ||
+              unlockedRules[0];
+            setSelectedRuleId(draftRule?.id || fallbackRule?.id || '');
             setOrderCode(draft.orderCode || '');
             setOrderDate(draft.orderDate || new Date().toISOString().slice(0, 10));
             setSelectedCustomer(draft.customer || null);
@@ -275,9 +295,9 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
         setHasRestoredDraft(false);
         setDraftSavedAt(null);
         const defaultRule =
-          rulesList.find((r) => r.id === settings.defaultOrderCodeRuleId) ||
-          rulesList.find((r) => r.isDefault) ||
-          rulesList[0];
+          unlockedRules.find((r) => r.id === settings.defaultOrderCodeRuleId) ||
+          unlockedRules.find((r) => r.isDefault) ||
+          unlockedRules[0];
         const activeRuleId = defaultRule?.id || '';
         setSelectedRuleId(activeRuleId);
 
@@ -390,9 +410,12 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
     setNotes('');
 
     const defaultRule =
-      rulesList.find((r) => r.id === settings.defaultOrderCodeRuleId) ||
-      rulesList.find((r) => r.isDefault) ||
-      rulesList[0];
+      unlockedRules.find((r) => r.id === settings.defaultOrderCodeRuleId) ||
+      unlockedRules.find((r) => r.isDefault) ||
+      unlockedRules[0];
+    if (defaultRule) {
+      setSelectedRuleId(defaultRule.id);
+    }
     const today = new Date().toISOString().slice(0, 10);
     setOrderDate(today);
     if (defaultRule) {
@@ -732,8 +755,19 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
     }
   };
 
+  const isAdmin = currentUser.role === 'admin';
+  const isLockedCompleted = Boolean(initialOrder && initialOrder.deliveryStatus === 'completed' && !isAdmin);
+
   const handleSaveOrder = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLockedCompleted) {
+      alert('Đơn hàng đã hoàn thành. Chỉ tài khoản Admin mới được phép chỉnh sửa!');
+      return;
+    }
+    if (deliveryStatus === 'completed' && initialOrder?.deliveryStatus !== 'completed' && !isAdmin) {
+      alert('Chỉ tài khoản Admin mới được phép tích hoàn thành đơn hàng!');
+      return;
+    }
     if (!selectedCustomer) {
       alert('Vui lòng chọn thông tin khách hàng.');
       return;
@@ -840,6 +874,16 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
           </button>
         </div>
 
+        {/* Completed Order Lock Banner for Non-Admin */}
+        {isLockedCompleted && (
+          <div className="bg-amber-50 border-b border-amber-300 px-3.5 py-2.5 flex items-center gap-2 text-xs text-amber-950 font-semibold shrink-0">
+            <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>
+              Đơn hàng này đã ở trạng thái <strong>Hoàn thành</strong>. Chỉ tài khoản <strong>Admin</strong> mới được phép chỉnh sửa nội dung đơn hàng.
+            </span>
+          </div>
+        )}
+
         {/* Restored Draft Notice Banner */}
         {hasRestoredDraft && (
           <div className="bg-amber-50 border-b border-amber-200 px-3.5 py-2.5 flex items-center justify-between gap-2 shrink-0">
@@ -875,9 +919,9 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                 className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 cursor-pointer"
                 title="Thay đổi quy tắc tạo mã đơn, mã đơn sẽ tự cập nhật số thứ tự tăng dần"
               >
-                {rulesList.map((r) => (
+                {selectableRules.map((r) => (
                   <option key={r.id} value={r.id}>
-                    {r.name} {r.isDefault ? '★' : ''}
+                    {r.name} {r.isDefault ? '★' : ''} {r.isLocked ? '(Đã khóa)' : ''}
                   </option>
                 ))}
               </select>
@@ -962,12 +1006,23 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
               </label>
               <select
                 value={deliveryStatus}
-                onChange={(e) => setDeliveryStatus(e.target.value as DeliveryStatus)}
-                className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-800 cursor-pointer"
+                disabled={isLockedCompleted}
+                onChange={(e) => {
+                  const next = e.target.value as DeliveryStatus;
+                  if (next === 'completed' && !isAdmin) {
+                    alert('Chỉ tài khoản Admin mới được phép tích hoàn thành đơn hàng!');
+                    return;
+                  }
+                  setDeliveryStatus(next);
+                }}
+                className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-800 cursor-pointer disabled:bg-slate-100 disabled:cursor-not-allowed"
+                title={!isAdmin ? 'Chỉ tài khoản Admin mới được phép chọn trạng thái Hoàn thành' : undefined}
               >
                 <option value="pending">⏳ Chờ giao (Mặc định)</option>
                 <option value="delivering">🚚 Đang giao</option>
-                <option value="completed">✅ Hoàn thành</option>
+                <option value="completed" disabled={!isAdmin}>
+                  {isAdmin ? '✅ Hoàn thành' : '🔒 Hoàn thành (Chỉ Admin)'}
+                </option>
                 <option value="cancelled">❌ Đã hủy</option>
               </select>
             </div>
@@ -2125,14 +2180,26 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
             Đóng / Hủy
           </button>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleSaveOrder}
-              className="flex items-center justify-center gap-1.5 sm:gap-2 px-4 sm:px-6 py-2.5 text-xs sm:text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
-            >
-              <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
-              <span>{initialOrder ? 'Cập nhật đơn hàng' : 'Lưu đơn hàng'}</span>
-            </button>
+            {isLockedCompleted ? (
+              <button
+                type="button"
+                disabled
+                className="flex items-center justify-center gap-1.5 sm:gap-2 px-4 sm:px-6 py-2.5 text-xs sm:text-sm font-bold text-amber-900 bg-amber-100 border border-amber-300 rounded-xl cursor-not-allowed opacity-85"
+                title="Đơn hàng đã hoàn thành — Chỉ tài khoản Admin mới được phép chỉnh sửa"
+              >
+                <Lock className="w-4 h-4 shrink-0" />
+                <span>Đã hoàn thành (Chỉ Admin sửa)</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSaveOrder}
+                className="flex items-center justify-center gap-1.5 sm:gap-2 px-4 sm:px-6 py-2.5 text-xs sm:text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl shadow-lg shadow-blue-500/20 transition-all cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+                <span>{initialOrder ? 'Cập nhật đơn hàng' : 'Lưu đơn hàng'}</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
