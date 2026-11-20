@@ -46,31 +46,33 @@ export function exportOrderDetailsToExcel(orders: Order[], dateRangeStr?: string
   const rows: any[] = [];
   let stt = 1;
 
+  // Collect all distinct VAT rates across all exported orders so every row shares consistent columns
+  const vatRateSet = new Set<number>();
+  for (const o of orders) {
+    if (!o.items || o.items.length === 0) continue;
+    for (const it of o.items) {
+      vatRateSet.add(Number(it.vatRate) || 0);
+    }
+  }
+  const sortedVatRates = Array.from(vatRateSet).sort((a, b) => b - a);
+
   for (const o of orders) {
     if (!o.items || o.items.length === 0) continue;
 
-    // Calculate tax and subtotal breakdown for this order
+    // Calculate tax and subtotal breakdown for this order by each VAT rate
     const taxMap = new Map<number, number>();
     const subtotalMap = new Map<number, number>();
     o.items.forEach((it) => {
-      const rate = it.vatRate || 0;
+      const rate = Number(it.vatRate) || 0;
       taxMap.set(rate, (taxMap.get(rate) || 0) + (it.vatAmount || 0));
       subtotalMap.set(rate, (subtotalMap.get(rate) || 0) + (it.subtotal || 0));
     });
-    const taxBreakdownStr = Array.from(taxMap.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([rate, amt]) => `Thuế ${rate}%: ${amt.toLocaleString('vi-VN')} ₫`)
-      .join('; ');
-    const subtotalBreakdownStr = Array.from(subtotalMap.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([rate, amt]) => `Thuế ${rate}%: ${amt.toLocaleString('vi-VN')} ₫`)
-      .join('; ');
 
     const orderSubtotal = o.totalPreTax || o.items.reduce((sum, it) => sum + (it.subtotal || 0), 0);
 
     o.items.forEach((item, idx) => {
       const isFirst = idx === 0;
-      rows.push({
+      const rowData: Record<string, any> = {
         'STT': stt++,
         'Mã đơn': isFirst ? o.orderCode : '',
         'Ngày tháng': isFirst ? o.orderDate : '',
@@ -92,10 +94,18 @@ export function exportOrderDetailsToExcel(orders: Order[], dateRangeStr?: string
         'Chiết khấu giảm giá tổng đơn hàng': isFirst ? (o.orderDiscount || 0) : '',
         'Tổng thuế GTGT': isFirst ? (o.totalVat || 0) : '',
         'Tổng tiền thanh toán': isFirst ? o.totalAmount : '',
-        'Tổng thành tiền theo từng thuế suất': isFirst ? subtotalBreakdownStr : '',
-        'Tổng thuế GTGT theo từng thuế suất': isFirst ? taxBreakdownStr : '',
-        'Đơn giá bán sau thuế': item.postTaxPrice || Number((item.preTaxPrice * (1 + (item.vatRate || 0) / 100)).toFixed(2)),
-      });
+      };
+
+      // Paired columns per VAT rate in descending order: Tổng thành tiền - Thuế X%, Tổng thuế GTGT - Thuế X%
+      for (const rate of sortedVatRates) {
+        rowData[`Tổng thành tiền - Thuế ${rate}%`] = isFirst ? (subtotalMap.get(rate) ?? 0) : '';
+        rowData[`Tổng thuế GTGT - Thuế ${rate}%`] = isFirst ? (taxMap.get(rate) ?? 0) : '';
+      }
+
+      rowData['Đơn giá bán sau thuế'] =
+        item.postTaxPrice ?? Number((item.preTaxPrice * (1 + (item.vatRate || 0) / 100)).toFixed(2));
+
+      rows.push(rowData);
     });
   }
 
