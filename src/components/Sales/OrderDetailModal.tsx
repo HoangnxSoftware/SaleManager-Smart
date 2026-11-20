@@ -1,6 +1,6 @@
 import React from 'react';
 import { Order, AppSettings, AppUser } from '../../types';
-import { formatCurrency, formatDate, formatNumber } from '../../utils/formatters';
+import { formatCurrency, formatDate, formatNumber, formatPaymentMethod } from '../../utils/formatters';
 import { X, Printer, Copy, Edit, FileText, CheckCircle, Clock, Truck, AlertCircle, Ban, RotateCcw, Lock } from 'lucide-react';
 
 interface OrderDetailModalProps {
@@ -154,7 +154,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               </h4>
               <p>
                 <span className="font-semibold text-slate-900">Phương thức TT:</span>{' '}
-                {order.paymentMethod === 'cash' ? 'Tiền mặt' : order.paymentMethod === 'transfer' ? 'Chuyển khoản' : 'Thẻ'}
+                {formatPaymentMethod(order.paymentMethod)}
               </p>
               <p>
                 <span className="font-semibold text-slate-900">Đã thanh toán:</span>{' '}

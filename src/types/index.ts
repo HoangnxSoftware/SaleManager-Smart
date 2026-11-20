@@ -74,7 +74,7 @@ export interface OrderItem {
   totalAmount: number; // Tổng TT từng mặt hàng (sau chiết khấu + thuế)
 }
 
-export type PaymentMethod = 'cash' | 'transfer' | 'card';
+export type PaymentMethod = 'cash' | 'transfer' | 'card' | 'debt_offset';
 export type DeliveryStatus = 'pending' | 'delivering' | 'completed' | 'cancelled';
 
 export interface Order {
@@ -95,7 +95,7 @@ export interface Order {
   totalPreTax: number; // Tổng tiền trước thuế
   totalVat: number; // Tổng thuế GTGT
   totalAmount: number; // Tổng tiền thanh toán
-  paymentMethod: PaymentMethod; // Phương thức thanh toán (tiền mặt, chuyển khoản, thẻ)
+  paymentMethod: PaymentMethod; // Phương thức thanh toán (tiền mặt, chuyển khoản, thẻ, cấn trừ công nợ)
   paidAmount: number; // Số tiền thanh toán đợt này
   debtAmount: number; // Công nợ còn lại của đơn
   deliveryStatus: DeliveryStatus; // Trạng thái giao hàng (Mặc định: pending - Chờ giao)

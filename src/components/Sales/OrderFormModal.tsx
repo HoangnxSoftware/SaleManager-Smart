@@ -25,6 +25,7 @@ import {
   RefreshCw,
   Sparkles,
   Lock,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { DEFAULT_ORDER_CODE_RULES, generateNextOrderCode, matchOrderToRule, generateNextRootCode } from '../../services/orderCodeService';
 import { ChangeProductModal } from './ChangeProductModal';
@@ -2008,42 +2009,54 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                 <label className="block text-xs font-semibold text-slate-700 mb-2">
                   Phương thức thanh toán:
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <button
                     type="button"
                     onClick={() => setPaymentMethod('cash')}
-                    className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border-2 text-xs font-semibold transition-all cursor-pointer ${
+                    className={`flex items-center justify-center gap-1.5 p-2.5 rounded-xl border-2 text-xs font-semibold transition-all cursor-pointer ${
                       paymentMethod === 'cash'
                         ? 'border-emerald-600 bg-emerald-50 text-emerald-800 ring-2 ring-emerald-500/20'
                         : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                     }`}
                   >
-                    <Banknote className="w-4 h-4 text-emerald-600" />
+                    <Banknote className="w-4 h-4 text-emerald-600 shrink-0" />
                     <span>Tiền mặt</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setPaymentMethod('transfer')}
-                    className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border-2 text-xs font-semibold transition-all cursor-pointer ${
+                    className={`flex items-center justify-center gap-1.5 p-2.5 rounded-xl border-2 text-xs font-semibold transition-all cursor-pointer ${
                       paymentMethod === 'transfer'
                         ? 'border-blue-600 bg-blue-50 text-blue-800 ring-2 ring-blue-500/20'
                         : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                     }`}
                   >
-                    <Building className="w-4 h-4 text-blue-600" />
+                    <Building className="w-4 h-4 text-blue-600 shrink-0" />
                     <span>Chuyển khoản</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setPaymentMethod('card')}
-                    className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border-2 text-xs font-semibold transition-all cursor-pointer ${
+                    className={`flex items-center justify-center gap-1.5 p-2.5 rounded-xl border-2 text-xs font-semibold transition-all cursor-pointer ${
                       paymentMethod === 'card'
                         ? 'border-purple-600 bg-purple-50 text-purple-800 ring-2 ring-purple-500/20'
                         : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                     }`}
                   >
-                    <CreditCard className="w-4 h-4 text-purple-600" />
+                    <CreditCard className="w-4 h-4 text-purple-600 shrink-0" />
                     <span>Thẻ</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('debt_offset')}
+                    className={`flex items-center justify-center gap-1.5 p-2.5 rounded-xl border-2 text-xs font-semibold transition-all cursor-pointer ${
+                      paymentMethod === 'debt_offset'
+                        ? 'border-amber-600 bg-amber-50 text-amber-800 ring-2 ring-amber-500/20'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <ArrowLeftRight className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>Cấn trừ công nợ</span>
                   </button>
                 </div>
               </div>

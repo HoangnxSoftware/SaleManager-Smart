@@ -124,3 +124,26 @@ export function formatDateTime(dateStr: string | undefined | null): string {
   const year = d.getFullYear();
   return `${hours}:${minutes} ${day}/${month}/${year}`;
 }
+
+export function formatPaymentMethod(method?: string | null): string {
+  if (method === 'cash') return 'Tiền mặt';
+  if (method === 'transfer') return 'Chuyển khoản';
+  if (method === 'card') return 'Thẻ';
+  if (method === 'debt_offset') return 'Cấn trừ công nợ';
+  return method ? String(method) : 'Tiền mặt';
+}
+
+export function parsePaymentMethod(raw?: string | null): 'cash' | 'transfer' | 'card' | 'debt_offset' {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!s) return 'cash';
+  if (s.includes('cấn trừ') || s.includes('công nợ') || s.includes('debt_offset') || s.includes('offset')) {
+    return 'debt_offset';
+  }
+  if (s.includes('chuyển') || s.includes('transfer') || s.includes('ck')) {
+    return 'transfer';
+  }
+  if (s.includes('thẻ') || s.includes('card')) {
+    return 'card';
+  }
+  return 'cash';
+}

@@ -21,6 +21,7 @@ import {
 } from './orderCodeService';
 import { createDefaultOfficialAdminUser, DEFAULT_SETTINGS } from './storage';
 import { buildOrderDetailsMatrix } from './excelService';
+import { parsePaymentMethod } from '../utils/formatters';
 
 // Initialize Firebase if not already initialized
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
@@ -1110,7 +1111,7 @@ export async function loadDataFromGoogleSheets(
       const tot = Number(r[idxTotal] !== undefined ? r[idxTotal] : r[10]) || 0;
       const paid = Number(r[idxPaid] !== undefined ? r[idxPaid] : r[11]) || 0;
       const debt = Number(r[idxDebt] !== undefined ? r[idxDebt] : r[12]) || 0;
-      const pMethod = ((r[idxMethod] !== undefined ? r[idxMethod] : r[13]) || 'cash') as any;
+      const pMethod = parsePaymentMethod(r[idxMethod] !== undefined ? r[idxMethod] : r[13]);
       const dStatus = ((r[idxStatus] !== undefined ? r[idxStatus] : r[14]) || 'pending') as any;
       const createdByName = idxCreatedByName !== -1 && r[idxCreatedByName] ? String(r[idxCreatedByName]).trim() : '';
       const createdById = idxCreatedById !== -1 && r[idxCreatedById] ? String(r[idxCreatedById]).trim() : '';

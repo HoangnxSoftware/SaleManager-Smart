@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Order, OrderItem, AppUser } from '../../types';
-import { formatCurrency, formatNumber, formatDate } from '../../utils/formatters';
+import { formatCurrency, formatNumber, formatDate, formatPaymentMethod } from '../../utils/formatters';
 import { exportOrderDetailsToExcel } from '../../services/excelService';
 import {
   Search,
@@ -151,14 +151,7 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
     return rows.filter((r) => {
       const o = r.order;
       const it = r.item;
-      const paymentLabel =
-        o.paymentMethod === 'cash'
-          ? 'tiền mặt'
-          : o.paymentMethod === 'transfer'
-          ? 'chuyển khoản'
-          : o.paymentMethod === 'card'
-          ? 'thẻ'
-          : '';
+      const paymentLabel = formatPaymentMethod(o.paymentMethod).toLowerCase();
       return (
         o.orderCode.toLowerCase().includes(q) ||
         o.customerName.toLowerCase().includes(q) ||
@@ -803,14 +796,12 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
                                 ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                 : order.paymentMethod === 'transfer'
                                 ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : order.paymentMethod === 'debt_offset'
+                                ? 'bg-amber-50 text-amber-800 border-amber-200'
                                 : 'bg-purple-50 text-purple-700 border-purple-200'
                             }`}
                           >
-                            {order.paymentMethod === 'cash'
-                              ? 'Tiền mặt'
-                              : order.paymentMethod === 'transfer'
-                              ? 'Chuyển khoản'
-                              : 'Thẻ'}
+                            {formatPaymentMethod(order.paymentMethod)}
                           </span>
                         ) : (
                           <span className="text-slate-200 select-none">—</span>

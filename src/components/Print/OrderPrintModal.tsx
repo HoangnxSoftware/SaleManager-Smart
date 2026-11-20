@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { Order, AppSettings } from '../../types';
-import { formatCurrency, formatDate, formatNumber } from '../../utils/formatters';
+import { formatCurrency, formatDate, formatNumber, formatPaymentMethod } from '../../utils/formatters';
 import { Printer, X, Download, ExternalLink } from 'lucide-react';
 
 interface OrderPrintModalProps {
@@ -134,7 +134,7 @@ function generateOrderPrintHtml(orders: Order[], settings: AppSettings): string 
           </div>
           <div style="flex: 1; line-height: 1.55;">
             <div><strong>Địa chỉ giao:</strong> ${order.customerAddress || 'Tại quầy'}</div>
-            <div><strong>Phương thức TT:</strong> ${order.paymentMethod === 'cash' ? 'Tiền mặt' : order.paymentMethod === 'transfer' ? 'Chuyển khoản' : 'Thẻ'}</div>
+            <div><strong>Phương thức TT:</strong> ${formatPaymentMethod(order.paymentMethod)}</div>
             <div><strong>Ghi chú:</strong> ${order.notes || 'Không có'}</div>
           </div>
         </div>
@@ -511,11 +511,7 @@ export const OrderPrintModal: React.FC<OrderPrintModalProps> = ({
                     </p>
                     <p className="text-slate-700 mt-1">
                       <span className="font-bold text-slate-900">Phương thức TT:</span>{' '}
-                      {order.paymentMethod === 'cash'
-                        ? 'Tiền mặt'
-                        : order.paymentMethod === 'transfer'
-                        ? 'Chuyển khoản'
-                        : 'Thẻ'}
+                      {formatPaymentMethod(order.paymentMethod)}
                     </p>
                     <p className="text-slate-700 mt-1">
                       <span className="font-bold text-slate-900">Ghi chú:</span>{' '}

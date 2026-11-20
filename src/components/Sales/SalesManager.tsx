@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Customer, Order, Product, PurchaseBill, AppUser, AppSettings, DebtPayment, DeliveryStatus, DeletedOrderRecord } from '../../types';
-import { formatCurrency, formatDate } from '../../utils/formatters';
+import { formatCurrency, formatDate, formatPaymentMethod, parsePaymentMethod } from '../../utils/formatters';
 import {
   exportOrdersToExcel,
   exportOrderDetailsToExcel,
@@ -999,7 +999,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           totalPreTax,
           totalVat,
           totalAmount: grandTotal,
-          paymentMethod: 'cash',
+          paymentMethod: parsePaymentMethod(first['Phương thức thanh toán']),
           paidAmount: paid,
           debtAmount: Math.max(0, grandTotal - paid),
           deliveryStatus: 'pending',
@@ -1725,8 +1725,14 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                             )}
                           </td>
                           <td className="p-3 text-center">
-                            <span className="inline-block px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-700">
-                              {order.paymentMethod === 'cash' ? 'Tiền mặt' : order.paymentMethod === 'transfer' ? 'Chuyển khoản' : 'Thẻ'}
+                            <span
+                              className={`inline-block px-2 py-0.5 rounded text-[11px] font-medium ${
+                                order.paymentMethod === 'debt_offset'
+                                  ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                  : 'bg-slate-100 text-slate-700'
+                              }`}
+                            >
+                              {formatPaymentMethod(order.paymentMethod)}
                             </span>
                           </td>
                           <td className="p-3 text-center">

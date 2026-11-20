@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { Customer, Order, Product, PurchaseBill, Supplier } from '../types';
+import { formatPaymentMethod } from '../utils/formatters';
 
 /**
  * Downloads an Excel workbook
@@ -27,7 +28,7 @@ export function exportOrdersToExcel(orders: Order[]) {
     'Tổng tiền thanh toán': o.totalAmount,
     'Số tiền đã trả': o.paidAmount,
     'Công nợ còn lại': o.debtAmount,
-    'Phương thức thanh toán': o.paymentMethod === 'cash' ? 'Tiền mặt' : o.paymentMethod === 'transfer' ? 'Chuyển khoản' : 'Thẻ',
+    'Phương thức thanh toán': formatPaymentMethod(o.paymentMethod),
     'Trạng thái giao hàng': o.deliveryStatus === 'pending' ? 'Chờ giao' : o.deliveryStatus === 'delivering' ? 'Đang giao' : o.deliveryStatus === 'completed' ? 'Hoàn thành' : 'Đã hủy',
     'Người tạo đơn/Bán hàng': o.createdByName || '',
     'Ghi chú': o.notes || '',
@@ -111,14 +112,7 @@ export function buildOrderDetailsMatrix(orders: Order[]): (string | number)[][] 
       const postTaxPrice =
         item.postTaxPrice ?? Number((item.preTaxPrice * (1 + (item.vatRate || 0) / 100)).toFixed(2));
 
-      const paymentMethodLabel =
-        o.paymentMethod === 'cash'
-          ? 'Tiền mặt'
-          : o.paymentMethod === 'transfer'
-          ? 'Chuyển khoản'
-          : o.paymentMethod === 'card'
-          ? 'Thẻ'
-          : '';
+      const paymentMethodLabel = formatPaymentMethod(o.paymentMethod);
 
       matrix.push([
         stt++,
