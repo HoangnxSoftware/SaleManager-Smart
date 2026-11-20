@@ -731,3 +731,234 @@ export function reconcileRemoteOrdersWithLocal(
 
   return mergeOrdersByRootCode(survivingLocal, activeRemote, deletedOrders);
 }
+
+/**
+ * Sorts orders strictly from oldest to newest:
+ * 1. orderDate ascending
+ * 2. createdAt ascending (preserving batch copy creation sequence on same day)
+ * 3. matched rule numeric sequence ascending
+ * 4. orderCode natural numeric ascending & rootCode ascending
+ */
+export function sortOrdersOldestFirst(
+  orders: Order[],
+  rules: OrderCodeRule[] = DEFAULT_ORDER_CODE_RULES
+): Order[] {
+  const rulesList = rules && rules.length > 0 ? rules : DEFAULT_ORDER_CODE_RULES;
+  return [...orders].sort((a, b) => {
+    const dateCmp = (a.orderDate || '').localeCompare(b.orderDate || '');
+    if (dateCmp !== 0) return dateCmp;
+
+    const createdCmp = (a.createdAt || '').localeCompare(b.createdAt || '');
+    if (createdCmp !== 0) return createdCmp;
+
+    const ruleA = matchOrderToRule(a, rulesList);
+    const ruleB = matchOrderToRule(b, rulesList);
+    const seqA = ruleA ? extractSequenceNumber(a.orderCode, ruleA, a.orderDate) : null;
+    const seqB = ruleB ? extractSequenceNumber(b.orderCode, ruleB, b.orderDate) : null;
+    if (seqA !== null && seqB !== null && seqA !== seqB) {
+      return seqA - seqB;
+    }
+
+    const codeCmp = (a.orderCode || '').localeCompare(b.orderCode || '', 'vi', {
+      numeric: true,
+      sensitivity: 'base',
+    });
+    if (codeCmp !== 0) return codeCmp;
+
+    return (a.rootCode || '').localeCompare(b.rootCode || '');
+  });
+}
+
+export interface RegenerateOrderCodeResult {
+  order: Order;
+  oldCode: string;
+  newCode: string;
+  ruleId: string;
+  ruleName: string;
+  changed: boolean;
+}
+
+/**
+ * Generates new order codes for targetOrderIds according to a chosen rule (or auto-matching each order's rule),
+ * processing orders from oldest to newest and preventing duplicates against non-target orders.
+ */
+export function regenerateOrderCodes(params: {
+  allOrders: Order[];
+  targetOrderIds: Set<string>;
+  rules: OrderCodeRule[];
+  mode: 'apply_rule' | 'auto_match';
+  selectedRuleId?: string;
+  strategy: 'continue' | 'resequence_all';
+}): RegenerateOrderCodeResult[] {
+  const { allOrders, targetOrderIds, rules, mode, selectedRuleId, strategy } = params;
+  const rulesList = rules && rules.length > 0 ? rules : DEFAULT_ORDER_CODE_RULES;
+  const defaultRule = rulesList.find((r) => !r.isLocked && r.isDefault) || rulesList.find((r) => !r.isLocked) || rulesList[0];
+
+  if (strategy === 'resequence_all') {
+    const baseTime = Date.now();
+    // Apply selectedRuleId to target orders first if mode === 'apply_rule'
+    const chosenRule =
+      mode === 'apply_rule'
+        ? rulesList.find((r) => r.id === selectedRuleId) || defaultRule
+        : null;
+
+    const preparedOrders = allOrders.map((ord) => {
+      if (targetOrderIds.has(ord.id) && chosenRule) {
+        return {
+          ...ord,
+          orderCodeRuleId: chosenRule.id,
+        };
+      }
+      return ord;
+    });
+
+    // Classify every order into its rule (using orderCodeRuleId or matchOrderToRule)
+    const ruleOrdersMap = new Map<string, Order[]>();
+    for (const r of rulesList) ruleOrdersMap.set(r.id, []);
+
+    for (const ord of preparedOrders) {
+      const matched =
+        (targetOrderIds.has(ord.id) && chosenRule)
+          ? chosenRule
+          : matchOrderToRule(ord, rulesList);
+      if (matched && ruleOrdersMap.has(matched.id)) {
+        ruleOrdersMap.get(matched.id)!.push(ord);
+      }
+    }
+
+    const newCodeMap = new Map<string, { code: string; rule: OrderCodeRule }>();
+    for (const rule of rulesList) {
+      const list = ruleOrdersMap.get(rule.id) || [];
+      if (list.length === 0) continue;
+
+      if (rule.patternType === 'prefix_and_date' || rule.patternType === 'date_only') {
+        const dateMap = new Map<string, Order[]>();
+        for (const ord of list) {
+          const dKey = formatDateForCode(ord.orderDate, rule.dateFormat || 'YYYYMMDD');
+          if (!dateMap.has(dKey)) dateMap.set(dKey, []);
+          dateMap.get(dKey)!.push(ord);
+        }
+        for (const [, dateOrders] of dateMap.entries()) {
+          const sorted = sortOrdersOldestFirst(dateOrders, rulesList);
+          sorted.forEach((ord, idx) => {
+            newCodeMap.set(ord.id, {
+              code: formatOrderCode(rule, idx + 1, ord.orderDate),
+              rule,
+            });
+          });
+        }
+      } else {
+        const sorted = sortOrdersOldestFirst(list, rulesList);
+        sorted.forEach((ord, idx) => {
+          newCodeMap.set(ord.id, {
+            code: formatOrderCode(rule, idx + 1, ord.orderDate),
+            rule,
+          });
+        });
+      }
+    }
+
+    const results: RegenerateOrderCodeResult[] = [];
+    const sortedAll = sortOrdersOldestFirst(allOrders, rulesList);
+    sortedAll.forEach((orig, idx) => {
+      const assigned = newCodeMap.get(orig.id);
+      if (!assigned) return;
+      const isTarget = targetOrderIds.has(orig.id);
+      const changed = assigned.code !== orig.orderCode || (isTarget && orig.orderCodeRuleId !== assigned.rule.id);
+      if (!isTarget && !changed) return;
+      const safeUpdatedAt = new Date(
+        Math.max(baseTime + idx, new Date(orig.updatedAt || orig.createdAt || 0).getTime() + 1)
+      ).toISOString();
+      results.push({
+        order: {
+          ...orig,
+          orderCode: assigned.code,
+          orderCodeRuleId: assigned.rule.id,
+          updatedAt: safeUpdatedAt,
+        },
+        oldCode: orig.orderCode,
+        newCode: assigned.code,
+        ruleId: assigned.rule.id,
+        ruleName: assigned.rule.name,
+        changed: assigned.code !== orig.orderCode,
+      });
+    });
+
+    return results;
+  }
+
+  // Strategy: 'continue' — only modify targetOrders, continuing sequentially after max existing sequence of non-target orders
+  const nonTargetOrders = allOrders.filter((o) => !targetOrderIds.has(o.id));
+  const targetOrders = sortOrdersOldestFirst(
+    allOrders.filter((o) => targetOrderIds.has(o.id)),
+    rulesList
+  );
+
+  const usedCodes = new Set(
+    nonTargetOrders.map((o) => (o.orderCode || '').trim().toUpperCase()).filter(Boolean)
+  );
+
+  // Track next seq per (ruleId + optional dateKey)
+  const seqCursorMap = new Map<string, number>();
+
+  const getNextCodeForRule = (rule: OrderCodeRule, orderDate: string): string => {
+    const isPerDate = rule.patternType === 'prefix_and_date' || rule.patternType === 'date_only';
+    const dKey = isPerDate ? formatDateForCode(orderDate, rule.dateFormat || 'YYYYMMDD') : 'GLOBAL';
+    const cursorKey = `${rule.id}__${dKey}`;
+
+    if (!seqCursorMap.has(cursorKey)) {
+      let maxSeq = 0;
+      for (const nt of nonTargetOrders) {
+        if (orderMatchesRule(nt, rule)) {
+          if (isPerDate) {
+            const ntDate = formatDateForCode(nt.orderDate, rule.dateFormat || 'YYYYMMDD');
+            if (ntDate !== dKey) continue;
+          }
+          const seq = extractSequenceNumber(nt.orderCode, rule, nt.orderDate);
+          if (seq !== null && seq > maxSeq) {
+            maxSeq = seq;
+          }
+        }
+      }
+      seqCursorMap.set(cursorKey, maxSeq);
+    }
+
+    let nextSeq = (seqCursorMap.get(cursorKey) || 0) + 1;
+    let candidate = formatOrderCode(rule, nextSeq, orderDate);
+    while (usedCodes.has(candidate.trim().toUpperCase())) {
+      nextSeq += 1;
+      candidate = formatOrderCode(rule, nextSeq, orderDate);
+    }
+    seqCursorMap.set(cursorKey, nextSeq);
+    usedCodes.add(candidate.trim().toUpperCase());
+    return candidate;
+  };
+
+  const chosenRule =
+    mode === 'apply_rule'
+      ? rulesList.find((r) => r.id === selectedRuleId) || defaultRule
+      : null;
+
+  const baseTime = Date.now();
+  return targetOrders.map((ord, idx) => {
+    const ruleToUse = chosenRule || matchOrderToRule(ord, rulesList) || defaultRule;
+    const newCode = getNextCodeForRule(ruleToUse, ord.orderDate);
+    const safeUpdatedAt = new Date(
+      Math.max(baseTime + idx, new Date(ord.updatedAt || ord.createdAt || 0).getTime() + 1)
+    ).toISOString();
+
+    return {
+      order: {
+        ...ord,
+        orderCode: newCode,
+        orderCodeRuleId: ruleToUse.id,
+        updatedAt: safeUpdatedAt,
+      },
+      oldCode: ord.orderCode,
+      newCode,
+      ruleId: ruleToUse.id,
+      ruleName: ruleToUse.name,
+      changed: newCode !== ord.orderCode,
+    };
+  });
+}

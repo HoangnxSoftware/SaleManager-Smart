@@ -20,7 +20,14 @@ import {
   analyzeOrderImportCodes,
   CodeSyncDetail,
 } from '../../services/codeSyncService';
-import { generateNextRootCode, deduplicateOrders } from '../../services/orderCodeService';
+import {
+  DEFAULT_ORDER_CODE_RULES,
+  generateNextRootCode,
+  deduplicateOrders,
+  sortOrdersOldestFirst,
+  matchOrderToRule,
+} from '../../services/orderCodeService';
+import { BatchRegenerateOrderCodeModal } from './BatchRegenerateOrderCodeModal';
 import { OrderPrintModal } from '../Print/OrderPrintModal';
 import { OrderDetailsTab } from './OrderDetailsTab';
 import { CatalogExcelImportModal, CatalogImportCheckItem, CatalogImportFieldDiff } from '../Common/CatalogExcelImportModal';
@@ -56,6 +63,7 @@ import {
   Ban,
   RotateCcw,
   Lock,
+  Hash,
 } from 'lucide-react';
 
 interface SalesManagerProps {
@@ -247,6 +255,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
 
   const [isRecalcModalOpen, setIsRecalcModalOpen] = useState(false);
+  const [isRegenerateCodeModalOpen, setIsRegenerateCodeModalOpen] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [ordersToPrint, setOrdersToPrint] = useState<Order[]>([]);
 
@@ -618,40 +627,63 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
     onSaveOrder(updatedOrder);
   };
 
-  // Batch Copy Orders
+  // Batch Copy Orders (thứ tự từ đơn cũ nhất đến mới nhất, mã đơn tạo mới lấy theo mã phiếu gốc)
   const handleBatchCopy = () => {
     if (selectedOrderIds.length === 0) {
       alert('Vui lòng tích chọn các đơn hàng cần sao chép.');
       return;
     }
-    const today = new Date().toISOString().slice(0, 10);
-    const datePart = today.replace(/-/g, '');
 
-    const nowIso = new Date().toISOString();
+    const rulesList =
+      settings.orderCodeRules && settings.orderCodeRules.length > 0
+        ? settings.orderCodeRules
+        : DEFAULT_ORDER_CODE_RULES;
+
+    const selectedOrdersSorted = sortOrdersOldestFirst(
+      orders.filter((o) => selectedOrderIds.includes(o.id)),
+      rulesList
+    );
+
+    if (selectedOrdersSorted.length === 0) {
+      alert('Không tìm thấy đơn hàng hợp lệ để sao chép.');
+      return;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const baseTime = Date.now();
     const newOrders: Order[] = [];
-    selectedOrderIds.forEach((id, idx) => {
-      const src = orders.find((o) => o.id === id);
-      if (src) {
-        newOrders.push({
-          ...src,
-          id: `ord-${Date.now()}-${idx}-${Math.floor(100 + Math.random() * 900)}`,
-          rootCode: generateNextRootCode([...orders, ...newOrders], deletedOrders, nowIso),
-          orderCode: `DH-${datePart}-${Math.floor(100 + Math.random() * 900)}`,
-          orderDate: today,
-          deliveryStatus: 'pending',
-          paidAmount: 0,
-          debtAmount: src.totalAmount,
-          createdById: currentUser.id,
-          createdByName: currentUser.fullName,
-          createdAt: nowIso,
-          updatedAt: nowIso,
-        });
-      }
+
+    selectedOrdersSorted.forEach((src, idx) => {
+      const itemIso = new Date(baseTime + idx * 10).toISOString();
+      const clonedItems = (src.items || []).map((it, itemIdx) => ({
+        ...it,
+        id: `oi-${baseTime + idx}-${itemIdx}-${Math.floor(100 + Math.random() * 900)}`,
+      }));
+      newOrders.push({
+        ...src,
+        items: clonedItems,
+        id: `ord-${baseTime + idx}-${idx}-${Math.floor(100 + Math.random() * 900)}`,
+        rootCode: generateNextRootCode([...orders, ...newOrders], deletedOrders, itemIso),
+        orderCode: src.orderCode,
+        orderCodeRuleId: src.orderCodeRuleId || matchOrderToRule(src, rulesList)?.id,
+        orderDate: today,
+        deliveryStatus: 'pending',
+        paidAmount: 0,
+        debtAmount: src.totalAmount,
+        createdById: currentUser.id,
+        createdByName: currentUser.fullName,
+        updatedById: undefined,
+        updatedByName: undefined,
+        createdAt: itemIso,
+        updatedAt: itemIso,
+      });
     });
 
     onBatchUpdateOrders(newOrders);
-    setSelectedOrderIds([]);
-    alert(`Đã sao chép thành công ${newOrders.length} đơn hàng hàng loạt.`);
+    setSelectedOrderIds(newOrders.map((o) => o.id));
+    alert(
+      `Đã sao chép thành công ${newOrders.length} đơn hàng theo thứ tự từ cũ nhất đến mới nhất (mã đơn lấy theo mã phiếu gốc).\n\nCác đơn mới tạo đã được chọn sẵn — bạn có thể bấm "Tạo lại mã đơn hàng loạt" để đánh lại mã theo quy tắc nếu cần.`
+    );
   };
 
   // Batch Delete Orders (Requirement 6)
@@ -1380,9 +1412,22 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                   disabled={selectedOrderIds.length === 0}
                   onClick={handleBatchCopy}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  title="Sao chép các đơn đã chọn theo thứ tự từ cũ nhất đến mới nhất, giữ mã theo phiếu gốc"
                 >
                   <Copy className="w-3.5 h-3.5" />
                   <span>Copy đơn hàng loạt</span>
+                </button>
+
+                {/* Batch Regenerate Order Codes */}
+                <button
+                  type="button"
+                  disabled={uniqueOrders.length === 0}
+                  onClick={() => setIsRegenerateCodeModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  title="Tạo lại mã đơn hàng loạt theo quy tắc tạo mã"
+                >
+                  <Hash className="w-3.5 h-3.5" />
+                  <span>Tạo lại mã đơn hàng loạt</span>
                 </button>
 
                 {/* Batch Cancel Orders (Đánh dấu hủy đơn) */}
@@ -2282,6 +2327,28 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           isOpen={isRecalcModalOpen}
           onClose={() => setIsRecalcModalOpen(false)}
           onApplyRecalculation={onBatchUpdateOrders}
+        />
+      )}
+
+      {/* Batch Regenerate Order Codes Modal */}
+      {isRegenerateCodeModalOpen && (
+        <BatchRegenerateOrderCodeModal
+          isOpen={isRegenerateCodeModalOpen}
+          orders={uniqueOrders}
+          filteredOrders={filteredOrders}
+          selectedOrderIds={selectedOrderIds}
+          rules={
+            settings.orderCodeRules && settings.orderCodeRules.length > 0
+              ? settings.orderCodeRules
+              : DEFAULT_ORDER_CODE_RULES
+          }
+          defaultRuleId={settings.defaultOrderCodeRuleId}
+          currentUser={currentUser}
+          onClose={() => setIsRegenerateCodeModalOpen(false)}
+          onApply={(updatedOrders) => {
+            onBatchUpdateOrders(updatedOrders);
+            setSelectedOrderIds([]);
+          }}
         />
       )}
 
