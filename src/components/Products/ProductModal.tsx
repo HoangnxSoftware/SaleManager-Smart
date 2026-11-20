@@ -30,7 +30,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   const [saleUnit, setSaleUnit] = useState('Thùng');
   const [category, setCategory] = useState('');
   const [profitMargin, setProfitMargin] = useState<number | string>(0);
-  const [defaultSalePrice, setDefaultSalePrice] = useState<number>(0);
+  const [defaultSalePrice, setDefaultSalePrice] = useState<number | string>('');
   const [priceVariance, setPriceVariance] = useState<number>(0);
   const [notes, setNotes] = useState('');
   const [saleUnitCustomized, setSaleUnitCustomized] = useState(false);
@@ -63,7 +63,11 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       setSaleUnit(initialProduct.saleUnit);
       setCategory(initialProduct.category || '');
       setProfitMargin(initialProduct.profitMargin ?? 0);
-      setDefaultSalePrice(initialProduct.defaultSalePrice || 0);
+      setDefaultSalePrice(
+        initialProduct.defaultSalePrice !== undefined && initialProduct.defaultSalePrice !== null
+          ? initialProduct.defaultSalePrice
+          : ''
+      );
       setPriceVariance(initialProduct.priceVariance || 0);
       setNotes(initialProduct.notes || '');
       setDuplicateWarning(null);
@@ -80,7 +84,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       setSaleUnitCustomized(false);
       setCategory('');
       setProfitMargin(0);
-      setDefaultSalePrice(0);
+      setDefaultSalePrice('');
       setPriceVariance(0);
       setNotes('');
       setDuplicateWarning(null);
@@ -114,7 +118,11 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     setSaleUnit(existing.saleUnit);
     setCategory(existing.category || '');
     setProfitMargin(existing.profitMargin ?? 0);
-    setDefaultSalePrice(existing.defaultSalePrice || 0);
+    setDefaultSalePrice(
+      existing.defaultSalePrice !== undefined && existing.defaultSalePrice !== null
+        ? existing.defaultSalePrice
+        : ''
+    );
     setPriceVariance(existing.priceVariance || 0);
     setNotes(existing.notes || '');
     setDuplicateWarning(null);
@@ -151,6 +159,13 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     const parsedMargin = typeof profitMargin === 'number' ? profitMargin : parseFloat(String(profitMargin));
     const finalProfitMargin = isNaN(parsedMargin) ? 0 : parsedMargin;
 
+    const rawDefaultPrice = String(defaultSalePrice).trim();
+    const parsedDefaultPrice = rawDefaultPrice === '' ? undefined : parseFloat(rawDefaultPrice);
+    const finalDefaultSalePrice =
+      parsedDefaultPrice !== undefined && !isNaN(parsedDefaultPrice) && parsedDefaultPrice >= 0
+        ? parsedDefaultPrice
+        : undefined;
+
     const prod: Product = {
       id: targetProductId || `prod-${Date.now()}`,
       code: trimmedCode,
@@ -162,7 +177,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       saleUnit: saleUnit.trim() || purchaseUnit.trim() || 'Cái',
       category: category.trim(),
       profitMargin: finalProfitMargin,
-      defaultSalePrice: defaultSalePrice > 0 ? defaultSalePrice : undefined,
+      defaultSalePrice: finalDefaultSalePrice,
       priceVariance: priceVariance > 0 ? priceVariance : undefined,
       notes: notes.trim(),
     };
@@ -392,12 +407,22 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 type="number"
                 min="0"
                 step="any"
-                value={defaultSalePrice || ''}
-                onChange={(e) => setDefaultSalePrice(parseFloat(e.target.value) || 0)}
-                placeholder="VD: 5580"
+                value={defaultSalePrice}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === '') {
+                    setDefaultSalePrice('');
+                  } else {
+                    const parsed = parseFloat(val);
+                    if (!isNaN(parsed) && parsed >= 0) {
+                      setDefaultSalePrice(val);
+                    }
+                  }
+                }}
+                placeholder="VD: 5580 (hoặc 0)"
                 className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-bold text-slate-900 bg-white focus:ring-2 focus:ring-indigo-500"
               />
-              <span className="text-[11px] text-slate-500 mt-0.5 block">Giá bán chuẩn để gợi ý khi lập đơn hàng</span>
+              <span className="text-[11px] text-slate-500 mt-0.5 block">Giá bán chuẩn để gợi ý khi lập đơn hàng (có thể nhập 0)</span>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">

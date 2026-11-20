@@ -223,7 +223,7 @@ export function getMaxStockCostUpToDate(
   purchases: PurchaseBill[],
   orders: Order[] = [],
   excludeOrderId?: string
-): { maxCostPerPurchaseUnit: number; maxCostPerSaleUnit: number } {
+): { maxCostPerPurchaseUnit: number; maxCostPerSaleUnit: number; hasInputCost: boolean } {
   const productMap = new Map<string, Product>();
   products.forEach((p) => productMap.set(p.code, p));
   const prod = productMap.get(productCode);
@@ -294,7 +294,7 @@ export function getMaxStockCostUpToDate(
         maxSaleUnit = l.costPerSaleUnit;
       }
     }
-    return { maxCostPerPurchaseUnit: maxPurchaseUnit, maxCostPerSaleUnit: maxSaleUnit };
+    return { maxCostPerPurchaseUnit: maxPurchaseUnit, maxCostPerSaleUnit: maxSaleUnit, hasInputCost: true };
   }
 
   // Fallback 1: Any lot up to orderDate
@@ -307,27 +307,34 @@ export function getMaxStockCostUpToDate(
         maxSaleUnit = l.costPerSaleUnit;
       }
     }
-    return { maxCostPerPurchaseUnit: maxPurchaseUnit, maxCostPerSaleUnit: maxSaleUnit };
+    return { maxCostPerPurchaseUnit: maxPurchaseUnit, maxCostPerSaleUnit: maxSaleUnit, hasInputCost: true };
   }
 
   // Fallback 2: Any purchase lot in the system for this product
   let fallbackPurchaseUnit = 0;
+  let hasAnyPurchase = false;
   for (const bill of purchases) {
     for (const item of bill.items) {
-      if (item.productCode === productCode && item.unitPrice > fallbackPurchaseUnit) {
-        fallbackPurchaseUnit = item.unitPrice;
+      if (item.productCode === productCode) {
+        hasAnyPurchase = true;
+        if (item.unitPrice > fallbackPurchaseUnit) {
+          fallbackPurchaseUnit = item.unitPrice;
+        }
       }
     }
   }
   return {
     maxCostPerPurchaseUnit: fallbackPurchaseUnit,
     maxCostPerSaleUnit: conversion > 0 ? fallbackPurchaseUnit / conversion : fallbackPurchaseUnit,
+    hasInputCost: hasAnyPurchase,
   };
 }
 
 export interface SuggestedPrices {
   priceByMargin: number; // Giá bán theo tỷ suất lợi nhuận (VD: 5.740 đ)
   defaultPrice: number; // Giá bán mặc định (VD: 5.580 đ)
+  hasDefaultPrice: boolean; // Có nhập giá bán mặc định (bao gồm cả 0)
+  hasInputCost: boolean; // Có lô nhập hàng (bao gồm cả đơn giá đầu vào = 0)
   priceMinusVariance: number; // Giá biên độ (-) (VD: 5.480 đ)
   pricePlusVariance: number; // Giá biên độ (+) (VD: 5.680 đ)
   maxCostPerPurchaseUnit: number; // Đơn giá Max tồn kho ĐVT_Mua (VD: 120.500 đ)
@@ -352,7 +359,7 @@ export function calculateSuggestedPrices(
   salePriceDecimals: number = 2,
   excludeOrderId?: string
 ): SuggestedPrices {
-  const { maxCostPerPurchaseUnit, maxCostPerSaleUnit } = getMaxStockCostUpToDate(
+  const { maxCostPerPurchaseUnit, maxCostPerSaleUnit, hasInputCost } = getMaxStockCostUpToDate(
     product.code,
     orderDate,
     products,
@@ -362,7 +369,7 @@ export function calculateSuggestedPrices(
   );
 
   const profitMargin = product.profitMargin ?? 0;
-  const vatRate = product.vatRate || 10;
+  const vatRate = product.vatRate ?? 10;
 
   // Công thức: Đơn giá bán (Theo ĐVT_Bán) theo tỷ suất lợi nhuận (Đã bao gồm thuế GTGT)
   // = maxCostPerSaleUnit * (1 + margin / 100) * (1 + vat / 100)
@@ -372,7 +379,8 @@ export function calculateSuggestedPrices(
     priceByMargin = roundPrice(rawPostTax, postTaxDecimals);
   }
 
-  const defaultPrice = product.defaultSalePrice || 0;
+  const hasDefaultPrice = product.defaultSalePrice !== undefined && product.defaultSalePrice !== null;
+  const defaultPrice = hasDefaultPrice ? Number(product.defaultSalePrice) : 0;
   const variance = product.priceVariance || 0;
   const priceMinusVariance = defaultPrice > 0 && variance > 0 ? Math.max(0, defaultPrice - variance) : 0;
   const pricePlusVariance = defaultPrice > 0 && variance > 0 ? defaultPrice + variance : 0;
@@ -380,6 +388,8 @@ export function calculateSuggestedPrices(
   return {
     priceByMargin,
     defaultPrice,
+    hasDefaultPrice,
+    hasInputCost,
     priceMinusVariance,
     pricePlusVariance,
     maxCostPerPurchaseUnit,
@@ -797,27 +807,33 @@ export function autoRecalculateOrderPrices(
       const prod = productMap.get(item.productCode);
       const vatRate = item.vatRate ?? 10;
       let newPreTaxPrice = item.preTaxPrice;
-      let postTaxPrice = item.postTaxPrice || Number((item.preTaxPrice * (1 + vatRate / 100)).toFixed(decimals));
+        let postTaxPrice =
+          item.postTaxPrice !== undefined && item.postTaxPrice !== null
+            ? item.postTaxPrice
+            : Number((item.preTaxPrice * (1 + vatRate / 100)).toFixed(decimals));
 
-      if (prod) {
-        const sp = calculateSuggestedPrices(
-          prod,
-          ord.orderDate,
-          products,
-          purchases,
-          orders,
-          postTaxDecimals,
-          decimals,
-          ord.id
-        );
-        if (sp.priceByMargin > 0) {
-          postTaxPrice = sp.priceByMargin;
-          newPreTaxPrice = Number((sp.priceByMargin / (1 + vatRate / 100)).toFixed(decimals));
-        } else if (prod.defaultSalePrice && prod.defaultSalePrice > 0) {
-          postTaxPrice = prod.defaultSalePrice;
-          newPreTaxPrice = Number((prod.defaultSalePrice / (1 + vatRate / 100)).toFixed(decimals));
+        if (prod) {
+          const sp = calculateSuggestedPrices(
+            prod,
+            ord.orderDate,
+            products,
+            purchases,
+            orders,
+            postTaxDecimals,
+            decimals,
+            ord.id
+          );
+          if (sp.priceByMargin > 0) {
+            postTaxPrice = sp.priceByMargin;
+            newPreTaxPrice = Number((sp.priceByMargin / (1 + vatRate / 100)).toFixed(decimals));
+          } else if (sp.hasDefaultPrice) {
+            postTaxPrice = sp.defaultPrice;
+            newPreTaxPrice = Number((sp.defaultPrice / (1 + vatRate / 100)).toFixed(decimals));
+          } else if (sp.hasInputCost && sp.maxCostPerSaleUnit === 0) {
+            postTaxPrice = 0;
+            newPreTaxPrice = 0;
+          }
         }
-      }
 
       if (newPreTaxPrice !== item.preTaxPrice || postTaxPrice !== item.postTaxPrice) {
         hasChanges = true;

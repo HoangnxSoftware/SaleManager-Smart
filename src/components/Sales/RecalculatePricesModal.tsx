@@ -83,6 +83,12 @@ export const RecalculatePricesModal: React.FC<RecalculatePricesModalProps> = ({
           if (sp.priceByMargin > 0) {
             postTaxPrice = sp.priceByMargin;
             newPreTaxPrice = Number((sp.priceByMargin / (1 + vatRate / 100)).toFixed(decimals));
+          } else if (sp.hasDefaultPrice) {
+            postTaxPrice = sp.defaultPrice;
+            newPreTaxPrice = Number((sp.defaultPrice / (1 + vatRate / 100)).toFixed(decimals));
+          } else if (sp.hasInputCost && sp.maxCostPerSaleUnit === 0) {
+            postTaxPrice = 0;
+            newPreTaxPrice = 0;
           }
         }
 

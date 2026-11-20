@@ -1002,7 +1002,9 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                         {p.profitMargin}%
                       </td>
                       <td className="p-3 text-right bg-blue-50/30 font-bold text-slate-900">
-                        {p.defaultSalePrice ? formatNumber(p.defaultSalePrice) + ' ₫' : '—'}
+                        {p.defaultSalePrice !== undefined && p.defaultSalePrice !== null
+                          ? formatNumber(p.defaultSalePrice) + ' ₫'
+                          : '—'}
                       </td>
                       <td className="p-3 text-right bg-blue-50/30 font-semibold text-indigo-700">
                         {p.priceVariance ? '±' + formatNumber(p.priceVariance) + ' ₫' : '—'}

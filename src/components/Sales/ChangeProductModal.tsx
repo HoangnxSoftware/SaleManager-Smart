@@ -331,7 +331,7 @@ export const ChangeProductModal: React.FC<ChangeProductModalProps> = ({
                     {/* Price Suggestions Chips */}
                     <div className="flex items-center gap-1.5 mt-2 flex-wrap text-xs">
                       <span className="text-[11px] text-slate-400 font-medium">Giá gợi ý:</span>
-                      {sp.priceByMargin > 0 && (
+                      {(sp.priceByMargin > 0 || (sp.hasInputCost && sp.maxCostPerSaleUnit === 0)) && (
                         <button
                           type="button"
                           onClick={() => handleChooseProduct(prod, sp.priceByMargin)}
@@ -341,7 +341,7 @@ export const ChangeProductModal: React.FC<ChangeProductModalProps> = ({
                           TSLN: {formatNumber(sp.priceByMargin)} ₫
                         </button>
                       )}
-                      {sp.defaultPrice > 0 && (
+                      {(sp.defaultPrice > 0 || sp.hasDefaultPrice) && (
                         <button
                           type="button"
                           onClick={() => handleChooseProduct(prod, sp.defaultPrice)}

@@ -166,7 +166,7 @@ export function exportProductsToExcel(
       'ĐVT_Bán': p.saleUnit,
       'Nhóm/loại HH': p.category,
       'Tỷ suất lợi nhuận (%)': p.profitMargin,
-      'Giá bán mặc định (Sau thuế)': p.defaultSalePrice || '',
+      'Giá bán mặc định (Sau thuế)': p.defaultSalePrice ?? '',
       'Biên độ giá (+/-)': p.priceVariance || '',
       'Tồn kho hiện tại': stockInfo !== undefined ? stockInfo.inStock : '',
       'Trị giá tồn kho hiện tại': stockInfo?.inventoryValue !== undefined ? stockInfo.inventoryValue : '',

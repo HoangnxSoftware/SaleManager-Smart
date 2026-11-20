@@ -557,8 +557,10 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
       let newPostTax = item.postTaxPrice;
       if (sp.priceByMargin > 0) {
         newPostTax = sp.priceByMargin;
-      } else if (prod.defaultSalePrice && prod.defaultSalePrice > 0) {
-        newPostTax = prod.defaultSalePrice;
+      } else if (sp.hasDefaultPrice) {
+        newPostTax = sp.defaultPrice;
+      } else if (sp.hasInputCost && sp.maxCostPerSaleUnit === 0) {
+        newPostTax = 0;
       }
 
       const vatRate = item.vatRate;
@@ -595,17 +597,17 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
     );
 
     let postTax = customPrice;
-    if (!postTax || postTax <= 0) {
+    if (postTax === undefined) {
       if (sp.priceByMargin > 0) {
         postTax = sp.priceByMargin;
-      } else if (sp.defaultPrice > 0) {
+      } else if (sp.hasDefaultPrice) {
         postTax = sp.defaultPrice;
       } else {
-        postTax = 100000;
+        postTax = 0;
       }
     }
 
-    const vat = prod.vatRate || 10;
+    const vat = prod.vatRate ?? 10;
     const rate = 1 + vat / 100;
     const qty = 1;
     // Cột Tổng tiền = Số lượng * Đơn giá sau thuế
@@ -648,8 +650,8 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
     const qty = options.keepQuantity ? (oldItem.quantity > 0 ? oldItem.quantity : 1) : 1;
     let postTax = options.customPrice;
 
-    if (postTax === undefined || postTax <= 0) {
-      if (options.keepPrice && oldItem.postTaxPrice > 0) {
+    if (postTax === undefined) {
+      if (options.keepPrice) {
         postTax = oldItem.postTaxPrice;
       } else {
         const sp = calculateSuggestedPrices(
@@ -664,15 +666,15 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
         );
         if (sp.priceByMargin > 0) {
           postTax = sp.priceByMargin;
-        } else if (sp.defaultPrice > 0) {
+        } else if (sp.hasDefaultPrice) {
           postTax = sp.defaultPrice;
         } else {
-          postTax = oldItem.postTaxPrice > 0 ? oldItem.postTaxPrice : 100000;
+          postTax = 0;
         }
       }
     }
 
-    const vat = newProd.vatRate !== undefined ? newProd.vatRate : 10;
+    const vat = newProd.vatRate ?? 10;
     const rate = 1 + vat / 100;
     const itemDiscount = oldItem.itemDiscount || 0;
     const rawTotal = qty * postTax - itemDiscount;
@@ -717,7 +719,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
       item.postTaxPrice = val;
     } else if (field === 'preTaxPrice') {
       item.preTaxPrice = val;
-      const rate = 1 + (item.vatRate || 10) / 100;
+      const rate = 1 + (item.vatRate ?? 0) / 100;
       item.postTaxPrice = Number((val * rate).toFixed(salePriceDecimals));
     }
 
@@ -1325,19 +1327,21 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                               );
                               const hasSuggestions =
                                 sp.priceByMargin > 0 ||
+                                sp.hasInputCost ||
                                 sp.defaultPrice > 0 ||
+                                sp.hasDefaultPrice ||
                                 sp.priceMinusVariance > 0 ||
                                 sp.pricePlusVariance > 0;
                               if (!hasSuggestions) return null;
                               return (
                                 <div className="text-[10px] text-slate-600 flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-100">
                                   <span className="text-slate-400 font-medium">Giá gợi ý:</span>
-                                  {sp.priceByMargin > 0 && (
+                                  {(sp.priceByMargin > 0 || (sp.hasInputCost && sp.maxCostPerSaleUnit === 0)) && (
                                     <span className="bg-indigo-50 text-indigo-700 font-bold px-1.5 py-0.2 rounded border border-indigo-200">
                                       TSLN: {formatNumber(sp.priceByMargin)}₫
                                     </span>
                                   )}
-                                  {sp.defaultPrice > 0 && (
+                                  {(sp.defaultPrice > 0 || sp.hasDefaultPrice) && (
                                     <span className="bg-blue-50 text-blue-700 font-bold px-1.5 py-0.2 rounded border border-blue-200">
                                       Mặc định: {formatNumber(sp.defaultPrice)}₫
                                     </span>
@@ -1497,14 +1501,16 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                               );
                               const hasSuggestions =
                                 sp.priceByMargin > 0 ||
+                                sp.hasInputCost ||
                                 sp.defaultPrice > 0 ||
+                                sp.hasDefaultPrice ||
                                 sp.priceMinusVariance > 0 ||
                                 sp.pricePlusVariance > 0;
                               if (!hasSuggestions) return null;
 
                               return (
                                 <div className="flex flex-wrap items-center gap-1 mt-1">
-                                  {sp.priceByMargin > 0 && (
+                                  {(sp.priceByMargin > 0 || (sp.hasInputCost && sp.maxCostPerSaleUnit === 0)) && (
                                     <button
                                       type="button"
                                       onClick={() => handleUpdateItem(idx, 'postTaxPrice', sp.priceByMargin)}
@@ -1532,7 +1538,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                                       (-) {formatNumber(sp.priceMinusVariance)}
                                     </button>
                                   )}
-                                  {sp.defaultPrice > 0 && (
+                                  {(sp.defaultPrice > 0 || sp.hasDefaultPrice) && (
                                     <button
                                       type="button"
                                       onClick={() => handleUpdateItem(idx, 'postTaxPrice', sp.defaultPrice)}
@@ -1743,10 +1749,10 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                           </div>
 
                           {/* Quick suggested price chips for mobile */}
-                          {sp && (sp.priceByMargin > 0 || sp.defaultPrice > 0 || sp.priceMinusVariance > 0 || sp.pricePlusVariance > 0) && (
+                          {sp && (sp.priceByMargin > 0 || sp.hasInputCost || sp.defaultPrice > 0 || sp.hasDefaultPrice || sp.priceMinusVariance > 0 || sp.pricePlusVariance > 0) && (
                             <div className="flex flex-wrap items-center gap-1 text-[11px] bg-slate-50 p-1.5 rounded-lg border border-slate-200/60">
                               <span className="text-[10px] text-slate-400 font-semibold pl-1">Gợi ý:</span>
-                              {sp.priceByMargin > 0 && (
+                              {(sp.priceByMargin > 0 || (sp.hasInputCost && sp.maxCostPerSaleUnit === 0)) && (
                                 <button
                                   type="button"
                                   onClick={() => handleUpdateItem(idx, 'postTaxPrice', sp.priceByMargin)}
@@ -1760,7 +1766,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                                   TSLN: {formatNumber(sp.priceByMargin)}
                                 </button>
                               )}
-                              {sp.defaultPrice > 0 && (
+                              {(sp.defaultPrice > 0 || sp.hasDefaultPrice) && (
                                 <button
                                   type="button"
                                   onClick={() => handleUpdateItem(idx, 'postTaxPrice', sp.defaultPrice)}
