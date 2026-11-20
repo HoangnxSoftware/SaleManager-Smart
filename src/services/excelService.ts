@@ -40,13 +40,10 @@ export function exportOrdersToExcel(orders: Order[]) {
 }
 
 /**
- * Exports detailed order items to Excel with exact columns and first-row grouping
+ * Builds headers and row matrix for Order Details (shared by Excel export & Google Sheets OrderDetails tab)
  */
-export function exportOrderDetailsToExcel(orders: Order[], dateRangeStr?: string) {
-  const rows: any[] = [];
-  let stt = 1;
-
-  // Collect all distinct VAT rates across all exported orders so every row shares consistent columns
+export function buildOrderDetailsMatrix(orders: Order[]): (string | number)[][] {
+  // Collect all distinct VAT rates across all orders so every row shares consistent columns
   const vatRateSet = new Set<number>();
   for (const o of orders) {
     if (!o.items || o.items.length === 0) continue;
@@ -55,6 +52,38 @@ export function exportOrderDetailsToExcel(orders: Order[], dateRangeStr?: string
     }
   }
   const sortedVatRates = Array.from(vatRateSet).sort((a, b) => b - a);
+
+  const headers: string[] = [
+    'STT',
+    'Mã đơn',
+    'Ngày tháng',
+    'Tên khách hàng',
+    'MST',
+    'CCCD',
+    'Địa chỉ',
+    'Mã HH',
+    'Tên HH',
+    'ĐVT_Bán',
+    'Số lượng',
+    'Đơn giá bán trước thuế',
+    'Thành tiền từng mặt hàng',
+    'Chiết khấu giảm giá từng mặt hàng',
+    'Thuế suất GTGT từng mặt hàng (%)',
+    'Thuế GTGT từng mặt hàng',
+    'Tổng TT từng mặt hàng',
+    'Tổng thành tiền đơn hàng',
+    'Chiết khấu giảm giá tổng đơn hàng',
+    'Tổng thuế GTGT',
+    'Tổng tiền thanh toán',
+    ...sortedVatRates.flatMap((rate) => [
+      `Tổng thành tiền - Thuế ${rate}%`,
+      `Tổng thuế GTGT - Thuế ${rate}%`,
+    ]),
+    'Đơn giá bán sau thuế',
+  ];
+
+  const matrix: (string | number)[][] = [headers];
+  let stt = 1;
 
   for (const o of orders) {
     if (!o.items || o.items.length === 0) continue;
@@ -72,44 +101,52 @@ export function exportOrderDetailsToExcel(orders: Order[], dateRangeStr?: string
 
     o.items.forEach((item, idx) => {
       const isFirst = idx === 0;
-      const rowData: Record<string, any> = {
-        'STT': stt++,
-        'Mã đơn': isFirst ? o.orderCode : '',
-        'Ngày tháng': isFirst ? o.orderDate : '',
-        'Tên khách hàng': isFirst ? o.customerName : '',
-        'MST': isFirst ? (o.customerTaxCode || '') : '',
-        'CCCD': isFirst ? (o.customerIdCard || '') : '',
-        'Địa chỉ': isFirst ? (o.customerAddress || '') : '',
-        'Mã HH': item.productCode,
-        'Tên HH': item.productName,
-        'ĐVT_Bán': item.saleUnit,
-        'Số lượng': item.quantity,
-        'Đơn giá bán trước thuế': Number(item.preTaxPrice.toFixed(2)),
-        'Thành tiền từng mặt hàng': item.subtotal,
-        'Chiết khấu giảm giá từng mặt hàng': item.itemDiscount || 0,
-        'Thuế suất GTGT từng mặt hàng (%)': item.vatRate || 0,
-        'Thuế GTGT từng mặt hàng': item.vatAmount || 0,
-        'Tổng TT từng mặt hàng': item.totalAmount,
-        'Tổng thành tiền đơn hàng': isFirst ? orderSubtotal : '',
-        'Chiết khấu giảm giá tổng đơn hàng': isFirst ? (o.orderDiscount || 0) : '',
-        'Tổng thuế GTGT': isFirst ? (o.totalVat || 0) : '',
-        'Tổng tiền thanh toán': isFirst ? o.totalAmount : '',
-      };
-
-      // Paired columns per VAT rate in descending order: Tổng thành tiền - Thuế X%, Tổng thuế GTGT - Thuế X%
+      const vatColumns: (string | number)[] = [];
       for (const rate of sortedVatRates) {
-        rowData[`Tổng thành tiền - Thuế ${rate}%`] = isFirst ? (subtotalMap.get(rate) ?? 0) : '';
-        rowData[`Tổng thuế GTGT - Thuế ${rate}%`] = isFirst ? (taxMap.get(rate) ?? 0) : '';
+        vatColumns.push(isFirst ? (subtotalMap.get(rate) ?? 0) : '');
+        vatColumns.push(isFirst ? (taxMap.get(rate) ?? 0) : '');
       }
 
-      rowData['Đơn giá bán sau thuế'] =
+      const postTaxPrice =
         item.postTaxPrice ?? Number((item.preTaxPrice * (1 + (item.vatRate || 0) / 100)).toFixed(2));
 
-      rows.push(rowData);
+      matrix.push([
+        stt++,
+        isFirst ? o.orderCode : '',
+        isFirst ? o.orderDate : '',
+        isFirst ? o.customerName : '',
+        isFirst ? (o.customerTaxCode || '') : '',
+        isFirst ? (o.customerIdCard || '') : '',
+        isFirst ? (o.customerAddress || '') : '',
+        item.productCode,
+        item.productName,
+        item.saleUnit,
+        item.quantity,
+        Number(item.preTaxPrice.toFixed(2)),
+        item.subtotal,
+        item.itemDiscount || 0,
+        item.vatRate || 0,
+        item.vatAmount || 0,
+        item.totalAmount,
+        isFirst ? orderSubtotal : '',
+        isFirst ? (o.orderDiscount || 0) : '',
+        isFirst ? (o.totalVat || 0) : '',
+        isFirst ? o.totalAmount : '',
+        ...vatColumns,
+        postTaxPrice,
+      ]);
     });
   }
 
-  const ws = XLSX.utils.json_to_sheet(rows);
+  return matrix;
+}
+
+/**
+ * Exports detailed order items to Excel with exact columns and first-row grouping
+ */
+export function exportOrderDetailsToExcel(orders: Order[], dateRangeStr?: string) {
+  const matrix = buildOrderDetailsMatrix(orders);
+  const ws = XLSX.utils.aoa_to_sheet(matrix);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'ChiTietDonHang');
   const dateSuffix = dateRangeStr ? `_${dateRangeStr}` : `_${new Date().toISOString().slice(0, 10)}`;

@@ -20,6 +20,7 @@ import {
   filterDeletedOrders,
 } from './orderCodeService';
 import { createDefaultOfficialAdminUser, DEFAULT_SETTINGS } from './storage';
+import { buildOrderDetailsMatrix } from './excelService';
 
 // Initialize Firebase if not already initialized
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
@@ -266,6 +267,7 @@ export async function createDatabaseSpreadsheetOnDrive(
         { properties: { title: 'Suppliers' } },
         { properties: { title: 'Products' } },
         { properties: { title: 'Orders' } },
+        { properties: { title: 'OrderDetails' } },
         { properties: { title: 'Purchases' } },
         { properties: { title: 'DebtPayments' } },
       ],
@@ -331,6 +333,7 @@ export async function getOrCreateSpreadsheet(
         { properties: { title: 'Suppliers' } },
         { properties: { title: 'Products' } },
         { properties: { title: 'Orders' } },
+        { properties: { title: 'OrderDetails' } },
         { properties: { title: 'Purchases' } },
         { properties: { title: 'DebtPayments' } },
       ],
@@ -367,6 +370,17 @@ function toTextRow(row: any[]): string[] {
       return str.substring(0, 45000);
     }
     return str;
+  });
+}
+
+function toRawSheetRow(row: (string | number)[]): (string | number)[] {
+  return row.map((v) => {
+    if (v === null || v === undefined) return '';
+    if (typeof v === 'number') {
+      return isNaN(v) || !isFinite(v) ? 0 : v;
+    }
+    const str = String(v);
+    return str.length > 45000 ? str.substring(0, 45000) : str;
   });
 }
 
@@ -615,6 +629,9 @@ export async function syncDataToGoogleSheets(
     ]),
   ];
 
+  // 5b. OrderDetails - Chi tiết đơn hàng đầy đủ các cột giống file xuất Excel chi tiết đơn hàng
+  const orderDetailsRows = buildOrderDetailsMatrix(processedOrders);
+
   // 6. Purchases
   const purchaseRows: string[][] = [
     ['Mã phiếu (Bill No)', 'Ngày nhập', 'Mã NCC', 'MST NCC', 'Tên NCC', 'Thành tiền', 'Tổng thuế', 'Tổng thanh toán', 'Đã trả', 'Trạng thái TT', 'Chi tiết mặt hàng (JSON)'],
@@ -633,12 +650,13 @@ export async function syncDataToGoogleSheets(
   ];
 
   // Ensure all required sheet tabs exist, resize if needed, and clear ALL stale rows before writing
-  const tabPayloads: Array<{ title: string; rows: string[][] }> = [
+  const tabPayloads: Array<{ title: string; rows: (string | number)[][]; preserveNumbers?: boolean }> = [
     { title: 'Metadata', rows: metadataRows },
     { title: 'Customers', rows: customerRows },
     { title: 'Suppliers', rows: supplierRows },
     { title: 'Products', rows: productRows },
     { title: 'Orders', rows: orderRows },
+    { title: 'OrderDetails', rows: orderDetailsRows, preserveNumbers: true },
     { title: 'Purchases', rows: purchaseRows },
     { title: 'DebtPayments', rows: debtRows },
   ];
@@ -766,7 +784,7 @@ export async function syncDataToGoogleSheets(
     valueInputOption: 'RAW',
     data: tabPayloads.map((tp) => ({
       range: getSheetRange(tp.title, tp.rows, tp.rows.length),
-      values: tp.rows.map(toTextRow),
+      values: tp.preserveNumbers ? tp.rows.map(toRawSheetRow) : tp.rows.map(toTextRow),
     })),
   };
 
@@ -869,7 +887,7 @@ export async function loadDataFromGoogleSheets(
   const metaTab = sheetTitles.includes('Metadata') ? 'Metadata' : findTab(/meta/i);
   let ordersTab = sheetTitles.includes('Orders')
     ? 'Orders'
-    : findTab(/order|đơn hàng|don hang|donhang|bán hàng|ban hang|bán|danh sách đơn/i);
+    : findTab(/^(?!.*(?:orderdetails|chi\s*tiết)).*(?:order|đơn hàng|don hang|donhang|bán hàng|ban hang|bán|danh sách đơn)/i);
   const customersTab = sheetTitles.includes('Customers')
     ? 'Customers'
     : findTab(/customer|khách hàng|khach hang|khachhang/i);
