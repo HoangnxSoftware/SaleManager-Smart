@@ -17,7 +17,10 @@ import {
   Receipt,
   Sparkles,
   Info,
-  Lock
+  Lock,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 
 interface OrderDetailsTabProps {
@@ -53,6 +56,17 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
   const [startDate, setStartDate] = useState(initialStartDate);
   const [endDate, setEndDate] = useState(initialEndDate);
   const [activeDatePreset, setActiveDatePreset] = useState<string>('all');
+  const [sortField, setSortField] = useState<'orderDate' | 'orderCode'>('orderDate');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+
+  const handleSort = (field: 'orderDate' | 'orderCode') => {
+    if (sortField === field) {
+      setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDirection(field === 'orderDate' ? 'desc' : 'asc');
+    }
+  };
 
   // Helper tính ngày cho các mốc lọc nhanh
   const getPresetDates = (preset: string) => {
@@ -114,12 +128,30 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [tempPostTaxPrice, setTempPostTaxPrice] = useState<string>('');
 
-  // Flatten orders into item rows with Date Range Filtering
+  // Flatten orders into item rows with Date Range Filtering & Sorting
   const flattenedRows: FlattenedRow[] = useMemo(() => {
-    // Sort orders newest first
-    const sortedOrders = [...orders].sort(
-      (a, b) => b.orderDate.localeCompare(a.orderDate) || b.createdAt.localeCompare(a.createdAt)
-    );
+    const dir = sortDirection === 'asc' ? 1 : -1;
+    const sortedOrders = [...orders].sort((a, b) => {
+      if (sortField === 'orderCode') {
+        const codeCmp = (a.orderCode || '').localeCompare(b.orderCode || '', 'vi', {
+          numeric: true,
+          sensitivity: 'base',
+        });
+        if (codeCmp !== 0) return codeCmp * dir;
+        const dateCmp = (a.orderDate || '').localeCompare(b.orderDate || '');
+        if (dateCmp !== 0) return dateCmp * dir;
+        return (a.createdAt || '').localeCompare(b.createdAt || '') * dir;
+      }
+
+      const dateCmp = (a.orderDate || '').localeCompare(b.orderDate || '');
+      if (dateCmp !== 0) return dateCmp * dir;
+      const codeCmp = (a.orderCode || '').localeCompare(b.orderCode || '', 'vi', {
+        numeric: true,
+        sensitivity: 'base',
+      });
+      if (codeCmp !== 0) return codeCmp * dir;
+      return (a.createdAt || '').localeCompare(b.createdAt || '') * dir;
+    });
 
     const rows: FlattenedRow[] = [];
 
@@ -164,13 +196,20 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
         it.productName.toLowerCase().includes(q)
       );
     });
-  }, [orders, startDate, endDate, searchTerm]);
+  }, [orders, startDate, endDate, searchTerm, sortField, sortDirection]);
 
-  // Unique filtered orders in current date range
+  // Unique filtered orders in current date range (preserving current sort order)
   const filteredOrdersList = useMemo(() => {
-    const idSet = new Set(flattenedRows.map((r) => r.order.id));
-    return orders.filter((o) => idSet.has(o.id));
-  }, [orders, flattenedRows]);
+    const seen = new Set<string>();
+    const list: Order[] = [];
+    for (const r of flattenedRows) {
+      if (!seen.has(r.order.id)) {
+        seen.add(r.order.id);
+        list.push(r.order);
+      }
+    }
+    return list;
+  }, [flattenedRows]);
 
   // Aggregate KPI stats
   const kpiStats = useMemo(() => {
@@ -413,8 +452,49 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
             </div>
           </div>
 
-          {/* Excel Export Button */}
-          <div className="flex items-center gap-2">
+          {/* Sort & Excel Export Button */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Sort by Date or Order Code */}
+            <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-2.5 py-2 text-xs text-slate-700 shadow-2xs shrink-0">
+              <ArrowUpDown className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+              <span className="text-slate-500 font-medium">Sắp xếp:</span>
+              <select
+                value={sortField}
+                onChange={(e) => {
+                  const nextField = e.target.value as 'orderDate' | 'orderCode';
+                  setSortField(nextField);
+                  setSortDirection(nextField === 'orderDate' ? 'desc' : 'asc');
+                }}
+                className="bg-transparent font-bold text-slate-800 focus:outline-hidden cursor-pointer"
+                aria-label="Sắp xếp chi tiết đơn hàng theo"
+              >
+                <option value="orderDate">Ngày tháng</option>
+                <option value="orderCode">Mã đơn</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'))}
+                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-slate-100 hover:bg-blue-100 rounded text-[11px] font-bold text-blue-700 cursor-pointer transition-colors"
+                title={
+                  sortDirection === 'asc'
+                    ? 'Đang sắp xếp tăng dần. Bấm để đổi sang giảm dần'
+                    : 'Đang sắp xếp giảm dần. Bấm để đổi sang tăng dần'
+                }
+              >
+                {sortDirection === 'asc' ? (
+                  <>
+                    <ArrowUp className="w-3 h-3" />
+                    <span>Tăng</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowDown className="w-3 h-3" />
+                    <span>Giảm</span>
+                  </>
+                )}
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={() => {
@@ -530,8 +610,42 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
             <thead className="sticky top-0 z-20 bg-slate-100 text-slate-700 font-bold uppercase text-[11px] shadow-2xs">
               <tr className="border-b border-slate-200">
                 <th className="p-3 w-12 text-left sticky left-0 bg-slate-100 z-30">STT</th>
-                <th className="p-3 w-32 text-left sticky left-12 bg-slate-100 z-30">Mã đơn</th>
-                <th className="p-3 w-28 text-left">Ngày tháng</th>
+                <th
+                  onClick={() => handleSort('orderCode')}
+                  className="p-3 w-32 text-left sticky left-12 bg-slate-100 z-30 cursor-pointer select-none hover:bg-slate-200 transition-colors group"
+                  title="Bấm để sắp xếp theo Mã đơn"
+                >
+                  <div className="inline-flex items-center gap-1">
+                    <span>Mã đơn</span>
+                    {sortField === 'orderCode' ? (
+                      sortDirection === 'asc' ? (
+                        <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
+                      ) : (
+                        <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 group-hover:opacity-100" />
+                    )}
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleSort('orderDate')}
+                  className="p-3 w-28 text-left cursor-pointer select-none hover:bg-slate-200 transition-colors group"
+                  title="Bấm để sắp xếp theo Ngày tháng"
+                >
+                  <div className="inline-flex items-center gap-1">
+                    <span>Ngày tháng</span>
+                    {sortField === 'orderDate' ? (
+                      sortDirection === 'asc' ? (
+                        <ArrowUp className="w-3.5 h-3.5 text-blue-600" />
+                      ) : (
+                        <ArrowDown className="w-3.5 h-3.5 text-blue-600" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 group-hover:opacity-100" />
+                    )}
+                  </div>
+                </th>
                 <th className="p-3 min-w-[200px] text-left">Tên khách hàng</th>
                 <th className="p-3 w-28 text-left">MST</th>
                 <th className="p-3 w-28 text-left">CCCD</th>
