@@ -151,6 +151,14 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
     return rows.filter((r) => {
       const o = r.order;
       const it = r.item;
+      const paymentLabel =
+        o.paymentMethod === 'cash'
+          ? 'tiền mặt'
+          : o.paymentMethod === 'transfer'
+          ? 'chuyển khoản'
+          : o.paymentMethod === 'card'
+          ? 'thẻ'
+          : '';
       return (
         o.orderCode.toLowerCase().includes(q) ||
         o.customerName.toLowerCase().includes(q) ||
@@ -158,6 +166,7 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
         (o.customerTaxCode && o.customerTaxCode.toLowerCase().includes(q)) ||
         (o.customerIdCard && o.customerIdCard.toLowerCase().includes(q)) ||
         (o.customerAddress && o.customerAddress.toLowerCase().includes(q)) ||
+        paymentLabel.includes(q) ||
         it.productCode.toLowerCase().includes(q) ||
         it.productName.toLowerCase().includes(q)
       );
@@ -521,10 +530,10 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
         </span>
       </div>
 
-      {/* Main Table: 25 Columns */}
+      {/* Main Table: 26 Columns */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="overflow-x-auto overflow-y-auto max-h-[72vh] table-scrollbar">
-          <table className="w-full text-xs text-left border-collapse min-w-[2000px]">
+          <table className="w-full text-xs text-left border-collapse min-w-[2150px]">
             <thead className="sticky top-0 z-20 bg-slate-100 text-slate-700 font-bold uppercase text-[11px] shadow-2xs">
               <tr className="border-b border-slate-200">
                 <th className="p-3 w-12 text-left sticky left-0 bg-slate-100 z-30">STT</th>
@@ -550,6 +559,7 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
                 <th className="p-3 w-32 text-left">Chiết khấu giảm giá tổng đơn</th>
                 <th className="p-3 w-32 text-left">Tổng thuế GTGT</th>
                 <th className="p-3 w-36 text-left font-black text-blue-900">Tổng tiền thanh toán</th>
+                <th className="p-3 w-36 text-center">Phương thức thanh toán</th>
                 <th className="p-3 min-w-[190px] text-left font-bold text-blue-900 bg-blue-100/50">
                   Tổng thành tiền theo từng thuế suất
                 </th>
@@ -565,7 +575,7 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
             <tbody className="divide-y divide-slate-100">
               {flattenedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={25} className="p-12 text-center text-slate-400">
+                  <td colSpan={26} className="p-12 text-center text-slate-400">
                     Không tìm thấy dữ liệu mặt hàng nào phù hợp với bộ lọc.
                   </td>
                 </tr>
@@ -784,6 +794,29 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
                         )}
                       </td>
 
+                      {/* Phương thức thanh toán (Chỉ hiện dòng đầu tiên của đơn hàng) */}
+                      <td className="p-3 text-center whitespace-nowrap">
+                        {isFirstRow ? (
+                          <span
+                            className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${
+                              order.paymentMethod === 'cash'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : order.paymentMethod === 'transfer'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : 'bg-purple-50 text-purple-700 border-purple-200'
+                            }`}
+                          >
+                            {order.paymentMethod === 'cash'
+                              ? 'Tiền mặt'
+                              : order.paymentMethod === 'transfer'
+                              ? 'Chuyển khoản'
+                              : 'Thẻ'}
+                          </span>
+                        ) : (
+                          <span className="text-slate-200 select-none">—</span>
+                        )}
+                      </td>
+
                       {/* Tổng thành tiền theo từng thuế suất (Chỉ hiện dòng đầu tiên của đơn hàng) */}
                       <td className="p-3 text-right font-mono bg-blue-50/20">
                         {isFirstRow ? (
@@ -967,7 +1000,7 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
                   <td className="p-3 text-right font-black text-blue-950 bg-blue-100/60 whitespace-nowrap text-sm">
                     {formatCurrency(kpiStats.totalPaymentSum)}
                   </td>
-                  <td colSpan={4} className="p-3"></td>
+                  <td colSpan={5} className="p-3"></td>
                 </tr>
               </tfoot>
             )}

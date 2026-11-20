@@ -75,6 +75,7 @@ export function buildOrderDetailsMatrix(orders: Order[]): (string | number)[][] 
     'Chiết khấu giảm giá tổng đơn hàng',
     'Tổng thuế GTGT',
     'Tổng tiền thanh toán',
+    'Phương thức thanh toán',
     ...sortedVatRates.flatMap((rate) => [
       `Tổng thành tiền - Thuế ${rate}%`,
       `Tổng thuế GTGT - Thuế ${rate}%`,
@@ -110,6 +111,15 @@ export function buildOrderDetailsMatrix(orders: Order[]): (string | number)[][] 
       const postTaxPrice =
         item.postTaxPrice ?? Number((item.preTaxPrice * (1 + (item.vatRate || 0) / 100)).toFixed(2));
 
+      const paymentMethodLabel =
+        o.paymentMethod === 'cash'
+          ? 'Tiền mặt'
+          : o.paymentMethod === 'transfer'
+          ? 'Chuyển khoản'
+          : o.paymentMethod === 'card'
+          ? 'Thẻ'
+          : '';
+
       matrix.push([
         stt++,
         isFirst ? o.orderCode : '',
@@ -132,6 +142,7 @@ export function buildOrderDetailsMatrix(orders: Order[]): (string | number)[][] 
         isFirst ? (o.orderDiscount || 0) : '',
         isFirst ? (o.totalVat || 0) : '',
         isFirst ? o.totalAmount : '',
+        isFirst ? paymentMethodLabel : '',
         ...vatColumns,
         postTaxPrice,
       ]);
