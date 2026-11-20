@@ -526,7 +526,14 @@ export default function App() {
             incoming.createdAt || incoming.orderDate
           );
           usedRootSet.add(freshRoot.toUpperCase());
-          normalizedIncoming.push({ ...incoming, rootCode: freshRoot });
+          const orderCodeWasRoot = Boolean(
+            incRootUpper && incoming.orderCode?.trim().toUpperCase() === incRootUpper
+          );
+          normalizedIncoming.push({
+            ...incoming,
+            rootCode: freshRoot,
+            orderCode: orderCodeWasRoot ? freshRoot : incoming.orderCode,
+          });
         } else {
           if (incRootUpper) usedRootSet.add(incRootUpper);
           normalizedIncoming.push(incoming);

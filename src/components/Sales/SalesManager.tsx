@@ -25,7 +25,6 @@ import {
   generateNextRootCode,
   deduplicateOrders,
   sortOrdersOldestFirst,
-  matchOrderToRule,
 } from '../../services/orderCodeService';
 import { BatchRegenerateOrderCodeModal } from './BatchRegenerateOrderCodeModal';
 import { OrderPrintModal } from '../Print/OrderPrintModal';
@@ -627,7 +626,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
     onSaveOrder(updatedOrder);
   };
 
-  // Batch Copy Orders (thứ tự từ đơn cũ nhất đến mới nhất, mã đơn tạo mới lấy theo mã phiếu gốc)
+  // Batch Copy Orders (thứ tự từ đơn cũ nhất đến mới nhất, mã đơn lấy theo mã phiếu gốc ROOT mới sinh)
   const handleBatchCopy = () => {
     if (selectedOrderIds.length === 0) {
       alert('Vui lòng tích chọn các đơn hàng cần sao chép.');
@@ -659,13 +658,14 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         ...it,
         id: `oi-${baseTime + idx}-${itemIdx}-${Math.floor(100 + Math.random() * 900)}`,
       }));
+      const newRootCode = generateNextRootCode([...orders, ...newOrders], deletedOrders, itemIso);
       newOrders.push({
         ...src,
         items: clonedItems,
         id: `ord-${baseTime + idx}-${idx}-${Math.floor(100 + Math.random() * 900)}`,
-        rootCode: generateNextRootCode([...orders, ...newOrders], deletedOrders, itemIso),
-        orderCode: src.orderCode,
-        orderCodeRuleId: src.orderCodeRuleId || matchOrderToRule(src, rulesList)?.id,
+        rootCode: newRootCode,
+        orderCode: newRootCode,
+        orderCodeRuleId: undefined,
         orderDate: today,
         deliveryStatus: 'pending',
         paidAmount: 0,
@@ -682,7 +682,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
     onBatchUpdateOrders(newOrders);
     setSelectedOrderIds(newOrders.map((o) => o.id));
     alert(
-      `Đã sao chép thành công ${newOrders.length} đơn hàng theo thứ tự từ cũ nhất đến mới nhất (mã đơn lấy theo mã phiếu gốc).\n\nCác đơn mới tạo đã được chọn sẵn — bạn có thể bấm "Tạo lại mã đơn hàng loạt" để đánh lại mã theo quy tắc nếu cần.`
+      `Đã sao chép thành công ${newOrders.length} đơn hàng theo thứ tự từ cũ nhất đến mới nhất (mã đơn lấy theo mã phiếu gốc ROOT mới sinh).\n\nCác đơn mới tạo đã được chọn sẵn — bạn có thể bấm "Tạo lại mã đơn hàng loạt" để đánh lại mã theo quy tắc nếu cần.`
     );
   };
 
@@ -1412,7 +1412,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                   disabled={selectedOrderIds.length === 0}
                   onClick={handleBatchCopy}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                  title="Sao chép các đơn đã chọn theo thứ tự từ cũ nhất đến mới nhất, giữ mã theo phiếu gốc"
+                  title="Sao chép các đơn đã chọn theo thứ tự từ cũ nhất đến mới nhất, mã đơn mới lấy theo mã gốc ROOT mới sinh"
                 >
                   <Copy className="w-3.5 h-3.5" />
                   <span>Copy đơn hàng loạt</span>
