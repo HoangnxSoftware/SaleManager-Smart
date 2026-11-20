@@ -20,7 +20,7 @@ import {
   filterDeletedOrders,
 } from './orderCodeService';
 import { createDefaultOfficialAdminUser, DEFAULT_SETTINGS } from './storage';
-import { buildOrderDetailsMatrix } from './excelService';
+import { buildOrderDetailsMatrix, buildPurchaseDetailsMatrix } from './excelService';
 import { parsePaymentMethod } from '../utils/formatters';
 
 // Initialize Firebase if not already initialized
@@ -270,6 +270,7 @@ export async function createDatabaseSpreadsheetOnDrive(
         { properties: { title: 'Orders' } },
         { properties: { title: 'OrderDetails' } },
         { properties: { title: 'Purchases' } },
+        { properties: { title: 'PurchaseDetails' } },
         { properties: { title: 'DebtPayments' } },
       ],
     }),
@@ -336,6 +337,7 @@ export async function getOrCreateSpreadsheet(
         { properties: { title: 'Orders' } },
         { properties: { title: 'OrderDetails' } },
         { properties: { title: 'Purchases' } },
+        { properties: { title: 'PurchaseDetails' } },
         { properties: { title: 'DebtPayments' } },
       ],
     }),
@@ -642,6 +644,10 @@ export async function syncDataToGoogleSheets(
     ])
   ];
 
+  // 6b. PurchaseDetails - Bảng Quản lý nhập hàng đầy đủ các cột và SL nhập lũy kế
+  const purchaseDecimals = data.settings?.purchasePriceDecimals ?? 10;
+  const purchaseDetailsRows = buildPurchaseDetailsMatrix(data.purchases || [], purchaseDecimals);
+
   // 7. DebtPayments
   const debtRows: string[][] = [
     ['Mã phiếu', 'Loại', 'Mã đối tượng', 'Tên đối tượng', 'Ngày trả nợ', 'Số tiền', 'PT thanh toán', 'Ghi chú'],
@@ -659,6 +665,7 @@ export async function syncDataToGoogleSheets(
     { title: 'Orders', rows: orderRows },
     { title: 'OrderDetails', rows: orderDetailsRows, preserveNumbers: true },
     { title: 'Purchases', rows: purchaseRows },
+    { title: 'PurchaseDetails', rows: purchaseDetailsRows, preserveNumbers: true },
     { title: 'DebtPayments', rows: debtRows },
   ];
   const requiredTabs = tabPayloads.map((t) => t.title);
@@ -900,7 +907,7 @@ export async function loadDataFromGoogleSheets(
     : findTab(/product|hàng hóa|hang hoa|hanghoa|san pham|sản phẩm|sanpham/i);
   const purchasesTab = sheetTitles.includes('Purchases')
     ? 'Purchases'
-    : findTab(/purchase|nhập kho|nhap kho|nhapkho/i);
+    : findTab(/^(?!.*(?:purchasedetails|chi\s*tiết)).*(?:purchase|nhập kho|nhap kho|nhapkho)/i);
   const debtsTab = sheetTitles.includes('DebtPayments')
     ? 'DebtPayments'
     : findTab(/debt|công nợ|cong no|congno/i);

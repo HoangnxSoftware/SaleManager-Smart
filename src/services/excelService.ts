@@ -199,6 +199,121 @@ export function exportPurchasesToExcel(purchases: PurchaseBill[]) {
 }
 
 /**
+ * Builds headers and row matrix for Purchase Details ("Bảng Quản lý Nhập hàng") for Google Sheets PurchaseDetails tab
+ */
+export function buildPurchaseDetailsMatrix(
+  purchases: PurchaseBill[],
+  purchaseDecimals = 10
+): (string | number)[][] {
+  const headers: string[] = [
+    'STT',
+    'Mã phiếu (Bill No)',
+    'Ngày nhập',
+    'MST',
+    'Đơn vị CC',
+    'Tên Đơn vị CC',
+    'Mã HH',
+    'Tên Hàng Hóa',
+    'ĐVT_Mua',
+    'Số lượng',
+    'Đơn giá nhập',
+    'Thành tiền',
+    'Thuế %',
+    'Tiền thuế GTGT',
+    'Thành tiền tổng Bill',
+    'Tổng thuế GTGT',
+    'TT thanh toán',
+    'SL nhập lũy kế',
+  ];
+
+  // 1. Calculate cumulative quantity chronologically (oldest to newest) per productCode
+  const chronologicalBills = [...purchases].sort(
+    (a, b) =>
+      (a.purchaseDate || '').localeCompare(b.purchaseDate || '') ||
+      (a.createdAt || '').localeCompare(b.createdAt || '')
+  );
+
+  const cumulativeMap = new Map<string, number>();
+  const itemCumulativeMap = new Map<string, number>();
+
+  for (const bill of chronologicalBills) {
+    if (!bill.items) continue;
+    for (const item of bill.items) {
+      const prevCumulative = cumulativeMap.get(item.productCode) || 0;
+      const currentCumulative = prevCumulative + (Number(item.quantity) || 0);
+      cumulativeMap.set(item.productCode, currentCumulative);
+      itemCumulativeMap.set(`${bill.id}_${item.id}`, currentCumulative);
+    }
+  }
+
+  // 2. Sort bills newest first for display, matching Bảng Quản lý Nhập hàng
+  const displayBills = [...purchases].sort(
+    (a, b) =>
+      (b.purchaseDate || '').localeCompare(a.purchaseDate || '') ||
+      (b.createdAt || '').localeCompare(a.createdAt || '')
+  );
+
+  const matrix: (string | number)[][] = [headers];
+  let stt = 1;
+
+  for (const bill of displayBills) {
+    if (!bill.items || bill.items.length === 0) {
+      matrix.push([
+        stt++,
+        bill.billNo,
+        bill.purchaseDate || '',
+        bill.supplierTaxCode || '',
+        bill.supplierCode || '',
+        bill.supplierName || '',
+        '',
+        '(Phiếu chưa có mặt hàng nào)',
+        '—',
+        0,
+        0,
+        0,
+        0,
+        0,
+        bill.subtotal || 0,
+        bill.totalVat || 0,
+        bill.totalAmount || 0,
+        0,
+      ]);
+      continue;
+    }
+
+    bill.items.forEach((item, idx) => {
+      const isFirst = idx === 0;
+      const qty = Number(item.quantity) || 0;
+      const unitPrice = Number((Number(item.unitPrice) || 0).toFixed(purchaseDecimals));
+      const currentCumulative = itemCumulativeMap.get(`${bill.id}_${item.id}`) ?? qty;
+
+      matrix.push([
+        stt++,
+        isFirst ? bill.billNo : '',
+        isFirst ? (bill.purchaseDate || '') : '',
+        isFirst ? (bill.supplierTaxCode || '') : '',
+        isFirst ? (bill.supplierCode || '') : '',
+        isFirst ? (bill.supplierName || '') : '',
+        item.productCode || '',
+        item.productName || '',
+        item.purchaseUnit || '',
+        qty,
+        unitPrice,
+        Number(item.amount) || 0,
+        Number(item.vatRate) || 0,
+        Number(item.vatAmount) || 0,
+        isFirst ? (bill.subtotal || 0) : '',
+        isFirst ? (bill.totalVat || 0) : '',
+        isFirst ? (bill.totalAmount || 0) : '',
+        currentCumulative,
+      ]);
+    });
+  }
+
+  return matrix;
+}
+
+/**
  * Exports products to Excel
  */
 export function exportProductsToExcel(
