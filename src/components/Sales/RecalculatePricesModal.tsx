@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Order, Product, PurchaseBill, AppSettings } from '../../types';
+import { Order, Product, PurchaseBill, AppSettings, AppUser } from '../../types';
 import { calculateSuggestedPrices } from '../../services/fifo';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { AlertTriangle, Calculator, CheckCircle2, X } from 'lucide-react';
@@ -10,6 +10,7 @@ interface RecalculatePricesModalProps {
   products: Product[];
   purchases: PurchaseBill[];
   settings: AppSettings;
+  currentUser?: AppUser;
   isOpen: boolean;
   onClose: () => void;
   onApplyRecalculation: (updatedOrders: Order[]) => void;
@@ -21,6 +22,7 @@ export const RecalculatePricesModal: React.FC<RecalculatePricesModalProps> = ({
   products,
   purchases,
   settings,
+  currentUser,
   isOpen,
   onClose,
   onApplyRecalculation,
@@ -129,10 +131,10 @@ export const RecalculatePricesModal: React.FC<RecalculatePricesModalProps> = ({
     });
   }, [targetOrders, productMap, products, purchases, orders, settings.salePriceDecimals, settings.postTaxSalePriceDecimals]);
 
-  if (!isOpen) return null;
+  if (!isOpen || currentUser?.role === 'salesperson') return null;
 
   const handleApply = () => {
-    if (!hasConfirmed) return;
+    if (!hasConfirmed || currentUser?.role === 'salesperson') return;
     onApplyRecalculation(recalculatedOrders);
     onClose();
   };

@@ -133,6 +133,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
 }) => {
   const confirm = useConfirm();
   const isAdmin = currentUser.role === 'admin';
+  const isSalesperson = currentUser.role === 'salesperson';
   const canEditOrder = (order: Order) => order.deliveryStatus !== 'completed' || isAdmin;
   const [activeSubTab, setActiveSubTab] = useState<'orders' | 'order-details' | 'customers'>('orders');
 
@@ -682,7 +683,9 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
     onBatchUpdateOrders(newOrders);
     setSelectedOrderIds(newOrders.map((o) => o.id));
     alert(
-      `Đã sao chép thành công ${newOrders.length} đơn hàng theo thứ tự từ cũ nhất đến mới nhất (mã đơn lấy theo mã phiếu gốc ROOT mới sinh).\n\nCác đơn mới tạo đã được chọn sẵn — bạn có thể bấm "Tạo lại mã đơn hàng loạt" để đánh lại mã theo quy tắc nếu cần.`
+      isAdmin
+        ? `Đã sao chép thành công ${newOrders.length} đơn hàng theo thứ tự từ cũ nhất đến mới nhất (mã đơn lấy theo mã phiếu gốc ROOT mới sinh).\n\nCác đơn mới tạo đã được chọn sẵn — bạn có thể bấm "Tạo lại mã đơn hàng loạt" để đánh lại mã theo quy tắc nếu cần.`
+        : `Đã sao chép thành công ${newOrders.length} đơn hàng theo thứ tự từ cũ nhất đến mới nhất (mã đơn lấy theo mã phiếu gốc ROOT mới sinh).`
     );
   };
 
@@ -843,6 +846,10 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
     newCustomersToAdd: Customer[];
     newProductsToAdd: Product[];
   }) => {
+    if (isSalesperson) {
+      alert('Tài khoản Nhân viên bán hàng không được phép nhập đơn hàng từ Excel!');
+      return;
+    }
     const { finalOrders, newCustomersToAdd, newProductsToAdd } = options;
 
     if (newCustomersToAdd.length > 0 && onBatchUpdateCustomers) {
@@ -875,6 +882,11 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
 
   // Import orders from Excel
   const handleExcelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isSalesperson) {
+      e.target.value = '';
+      alert('Tài khoản Nhân viên bán hàng không được phép nhập đơn hàng từ Excel!');
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -1418,17 +1430,29 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                   <span>Copy đơn hàng loạt</span>
                 </button>
 
-                {/* Batch Regenerate Order Codes */}
-                <button
-                  type="button"
-                  disabled={uniqueOrders.length === 0}
-                  onClick={() => setIsRegenerateCodeModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                  title="Tạo lại mã đơn hàng loạt theo quy tắc tạo mã"
-                >
-                  <Hash className="w-3.5 h-3.5" />
-                  <span>Tạo lại mã đơn hàng loạt</span>
-                </button>
+                {/* Batch Regenerate Order Codes - CHỈ CHO TÀI KHOẢN ADMIN */}
+                {isAdmin ? (
+                  <button
+                    type="button"
+                    disabled={uniqueOrders.length === 0}
+                    onClick={() => setIsRegenerateCodeModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    title="Tạo lại mã đơn hàng loạt theo quy tắc tạo mã"
+                  >
+                    <Hash className="w-3.5 h-3.5" />
+                    <span>Tạo lại mã đơn hàng loạt</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-75"
+                    title="Chỉ tài khoản Admin mới được phép thực hiện chức năng Tạo lại mã đơn hàng loạt"
+                  >
+                    <Lock className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Tạo lại mã đơn hàng loạt (Chỉ Admin)</span>
+                  </button>
+                )}
 
                 {/* Batch Cancel Orders (Đánh dấu hủy đơn) */}
                 <button
@@ -1469,16 +1493,28 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                   </button>
                 )}
 
-                {/* Recalculate Prices Advanced Modal Button */}
-                <button
-                  type="button"
-                  onClick={() => setIsRecalcModalOpen(true)}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300 shadow-2xs cursor-pointer"
-                  title="Mở bảng xem trước chi tiết tính lại giá bán theo khoảng ngày"
-                >
-                  <Calculator className="w-3.5 h-3.5 text-amber-600" />
-                  <span className="hidden sm:inline">Tùy chỉnh tính giá</span>
-                </button>
+                {/* Recalculate Prices Advanced Modal Button - KHÔNG CHO PHÉP NHÂN VIÊN BÁN HÀNG */}
+                {!isSalesperson ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsRecalcModalOpen(true)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300 shadow-2xs cursor-pointer"
+                    title="Mở bảng xem trước chi tiết tính lại giá bán theo khoảng ngày"
+                  >
+                    <Calculator className="w-3.5 h-3.5 text-amber-600" />
+                    <span className="hidden sm:inline">Tùy chỉnh tính giá</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-75"
+                    title="Tài khoản Nhân viên bán hàng không được phép tính lại giá hàng loạt"
+                  >
+                    <Lock className="w-3.5 h-3.5 text-amber-500" />
+                    <span className="hidden sm:inline">Tùy chỉnh tính giá</span>
+                  </button>
+                )}
               </div>
 
               {/* Excel & Print Buttons */}
@@ -1503,17 +1539,29 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                   <span>Xuất Excel</span>
                 </button>
 
-                {/* Import Excel */}
-                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 cursor-pointer">
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>Nhập Excel</span>
-                  <input
-                    type="file"
-                    accept=".xlsx, .xls"
-                    onChange={handleExcelImport}
-                    className="hidden"
-                  />
-                </label>
+                {/* Import Excel - KHÔNG CHO PHÉP NHÂN VIÊN BÁN HÀNG */}
+                {!isSalesperson ? (
+                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 cursor-pointer">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Nhập Excel</span>
+                    <input
+                      type="file"
+                      accept=".xlsx, .xls"
+                      onChange={handleExcelImport}
+                      className="hidden"
+                    />
+                  </label>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-75"
+                    title="Tài khoản Nhân viên bán hàng không được phép nhập đơn hàng từ Excel"
+                  >
+                    <Lock className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Nhập Excel</span>
+                  </button>
+                )}
 
                 {/* Shortcut to view order details from date to date */}
                 <button
@@ -2316,22 +2364,26 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         />
       )}
 
-      {/* Recalculate Prices Modal */}
-      {isRecalcModalOpen && (
+      {/* Recalculate Prices Modal - KHÔNG CHO PHÉP NHÂN VIÊN BÁN HÀNG */}
+      {isRecalcModalOpen && !isSalesperson && (
         <RecalculatePricesModal
           orders={uniqueOrders}
           selectedOrderIds={selectedOrderIds}
           products={products}
           purchases={purchases}
           settings={settings}
+          currentUser={currentUser}
           isOpen={isRecalcModalOpen}
           onClose={() => setIsRecalcModalOpen(false)}
-          onApplyRecalculation={onBatchUpdateOrders}
+          onApplyRecalculation={(updated) => {
+            if (isSalesperson) return;
+            onBatchUpdateOrders(updated);
+          }}
         />
       )}
 
-      {/* Batch Regenerate Order Codes Modal */}
-      {isRegenerateCodeModalOpen && (
+      {/* Batch Regenerate Order Codes Modal - CHỈ CHO TÀI KHOẢN ADMIN */}
+      {isRegenerateCodeModalOpen && isAdmin && (
         <BatchRegenerateOrderCodeModal
           isOpen={isRegenerateCodeModalOpen}
           orders={uniqueOrders}
@@ -2346,6 +2398,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           currentUser={currentUser}
           onClose={() => setIsRegenerateCodeModalOpen(false)}
           onApply={(updatedOrders) => {
+            if (!isAdmin) return;
             onBatchUpdateOrders(updatedOrders);
             setSelectedOrderIds([]);
           }}
@@ -2376,8 +2429,8 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
 
 
 
-      {/* Order Excel Import Check & Rule Selection Modal */}
-      {isOrderImportCheckModalOpen && (
+      {/* Order Excel Import Check & Rule Selection Modal - KHÔNG CHO PHÉP NHÂN VIÊN BÁN HÀNG */}
+      {isOrderImportCheckModalOpen && !isSalesperson && (
         <OrderImportCheckModal
           isOpen={isOrderImportCheckModalOpen}
           importedOrders={pendingImportOrders}

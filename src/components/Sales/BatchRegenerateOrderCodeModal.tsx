@@ -121,11 +121,15 @@ export const BatchRegenerateOrderCodeModal: React.FC<BatchRegenerateOrderCodeMod
     [previewResults]
   );
 
-  if (!isOpen) return null;
+  if (!isOpen || !isAdmin) return null;
 
   const selectedRuleObj = rulesList.find((r) => r.id === selectedRuleId) || initialRule;
 
   const handleConfirm = () => {
+    if (!isAdmin) {
+      alert('Chỉ tài khoản Admin mới được phép thực hiện chức năng Tạo lại mã đơn hàng loạt!');
+      return;
+    }
     if (previewResults.length === 0) {
       alert('Không có đơn hàng nào để tạo lại mã.');
       return;
