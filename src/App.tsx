@@ -34,6 +34,12 @@ import {
   googleSignIn,
   hasGoogleAccessToken,
   subscribeGoogleAuthState,
+  initAuth,
+  getGoogleDriveConnectionState,
+  verifyGoogleDriveConnection,
+  markGoogleConnectionInterrupted,
+  GoogleDriveConnectionState,
+  GoogleDriveConnectionError,
 } from './services/googleDriveSheets';
 import { Navbar } from './components/Navigation/Navbar';
 import { Sidebar, MainTab } from './components/Navigation/Sidebar';
@@ -49,9 +55,10 @@ import { SettingsManager } from './components/Settings/SettingsManager';
 import { LoginModal } from './components/LoginModal';
 import { ExitConfirmModal } from './components/Common/ExitConfirmModal';
 import { GoogleSheetsSyncModal } from './components/Common/GoogleSheetsSyncModal';
+import { GoogleDriveReconnectModal } from './components/Common/GoogleDriveReconnectModal';
 import { AuditLogModal } from './components/Common/AuditLogModal';
 import { DeviceConflictModal } from './components/Common/DeviceConflictModal';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, CloudOff, WifiOff, RefreshCw } from 'lucide-react';
 import {
   resequenceOrders,
   DEFAULT_ORDER_CODE_RULES,
@@ -108,16 +115,184 @@ export default function App() {
   const [deviceConflictSession, setDeviceConflictSession] = useState<DeviceSession | null>(null);
   const [hasDismissedConflict, setHasDismissedConflict] = useState(false);
   const [currentDeviceNameState, setCurrentDeviceNameState] = useState(() => getCurrentDeviceName());
-  const [hasGoogleToken, setHasGoogleToken] = useState<boolean>(() => hasGoogleAccessToken());
+  const [googleConnState, setGoogleConnState] = useState<GoogleDriveConnectionState>(() =>
+    getGoogleDriveConnectionState()
+  );
+  const [hasPendingSync, setHasPendingSync] = useState(false);
+  const [hasDismissedDriveModal, setHasDismissedDriveModal] = useState(false);
+  const [isReconnectingGoogle, setIsReconnectingGoogle] = useState(false);
+  const [isCheckingGoogleConn, setIsCheckingGoogleConn] = useState(false);
+  const [googleReconnectError, setGoogleReconnectError] = useState<string | null>(null);
   const immediateSyncRequestedRef = React.useRef(false);
+  const lastDriveCheckRef = React.useRef<number>(0);
+  const prevDriveStatusRef = React.useRef<string>(googleConnState.status);
+  const wasDriveConnectedRef = React.useRef<boolean>(googleConnState.isConnected);
+  const latestDataRef = React.useRef<AppData>(data);
+  latestDataRef.current = data;
+
+  const hasGoogleToken = googleConnState.isConnected;
 
   useEffect(() => {
-    setHasGoogleToken(hasGoogleAccessToken());
-    const unsubscribe = subscribeGoogleAuthState((hasToken) => {
-      setHasGoogleToken(hasToken);
+    const unsubFirebase = initAuth();
+    setGoogleConnState(getGoogleDriveConnectionState());
+    const unsubDrive = subscribeGoogleAuthState((_hasToken, state) => {
+      setGoogleConnState(state);
     });
-    return unsubscribe;
+    return () => {
+      unsubFirebase();
+      unsubDrive();
+    };
   }, []);
+
+  // Reset modal dismissal if connection status transitions to a new disconnection/interruption state
+  useEffect(() => {
+    if (
+      !googleConnState.isConnected &&
+      prevDriveStatusRef.current !== googleConnState.status
+    ) {
+      setHasDismissedDriveModal(false);
+      setGoogleReconnectError(null);
+    }
+    prevDriveStatusRef.current = googleConnState.status;
+  }, [googleConnState.isConnected, googleConnState.status]);
+
+  // Monitor Google Drive connectivity during active work (offline/online, focus, 60s heartbeat)
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const runHealthCheck = async (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastDriveCheckRef.current < 15000) return;
+      lastDriveCheckRef.current = now;
+      await verifyGoogleDriveConnection();
+    };
+
+    const handleOffline = () => {
+      markGoogleConnectionInterrupted(
+        'Mất kết nối Internet. Kết nối Google Drive đang bị gián đoạn.'
+      );
+    };
+
+    const handleOnline = () => {
+      void runHealthCheck(true);
+    };
+
+    const handleFocusOrVisibility = () => {
+      if (!document.hidden) {
+        void runHealthCheck(false);
+      }
+    };
+
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('focus', handleFocusOrVisibility);
+    document.addEventListener('visibilitychange', handleFocusOrVisibility);
+
+    // Check immediately if browser already reports offline or missing token
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      handleOffline();
+    } else {
+      void runHealthCheck(true);
+    }
+
+    const heartbeatId = setInterval(() => {
+      if (!document.hidden) {
+        void runHealthCheck(true);
+      }
+    }, 60000);
+
+    return () => {
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('focus', handleFocusOrVisibility);
+      document.removeEventListener('visibilitychange', handleFocusOrVisibility);
+      clearInterval(heartbeatId);
+    };
+  }, [currentUser]);
+
+  const handleReconnectGoogleDrive = async () => {
+    try {
+      setIsReconnectingGoogle(true);
+      setGoogleReconnectError(null);
+      const res = await googleSignIn();
+      if (!res?.accessToken) {
+        setGoogleReconnectError('Không lấy được quyền truy cập Google Drive. Vui lòng thử lại.');
+      }
+    } catch (err: any) {
+      setGoogleReconnectError(
+        err?.message || 'Kết nối lại Google Drive thất bại. Vui lòng thử lại.'
+      );
+    } finally {
+      setIsReconnectingGoogle(false);
+    }
+  };
+
+  const handleRetryDriveCheck = async () => {
+    try {
+      setIsCheckingGoogleConn(true);
+      setGoogleReconnectError(null);
+      const state = await verifyGoogleDriveConnection();
+      if (!state.isConnected) {
+        setGoogleReconnectError(
+          state.errorMessage || 'Chưa thể khôi phục kết nối Google Drive. Vui lòng thử kết nối lại.'
+        );
+      }
+    } finally {
+      setIsCheckingGoogleConn(false);
+    }
+  };
+
+  // Auto-resume sync immediately when Google Drive connection is restored during work
+  useEffect(() => {
+    const wasConnected = wasDriveConnectedRef.current;
+    wasDriveConnectedRef.current = googleConnState.isConnected;
+
+    if (!wasConnected && googleConnState.isConnected && currentUser) {
+      setHasDismissedDriveModal(false);
+      setGoogleReconnectError(null);
+
+      const currentData = latestDataRef.current;
+      if (!currentData.isDemo && currentData.spreadsheetId && autoSyncEnabled) {
+        (async () => {
+          try {
+            const token = await getAccessToken();
+            if (!token) return;
+            setIsAutoSyncing(true);
+            const res = await syncDataToGoogleSheets(
+              currentData,
+              token,
+              currentData.spreadsheetId
+            );
+            setHasPendingSync(false);
+            setData((prev) => {
+              const updated: AppData = {
+                ...prev,
+                spreadsheetId: res.spreadsheetId,
+                lastSyncedAt: res.lastSyncedAt,
+                syncSource: 'google_drive',
+              };
+              saveData(updated, selectedDbId);
+              return updated;
+            });
+            setGlobalBanner({
+              type: 'success',
+              message:
+                '✓ Đã kết nối lại Google Drive và tiếp tục đồng bộ dữ liệu lên Google Sheets thành công!',
+            });
+          } catch (err) {
+            console.debug('Resume sync after Google Drive reconnect failed:', err);
+          } finally {
+            setIsAutoSyncing(false);
+          }
+        })();
+      } else {
+        setGlobalBanner({
+          type: 'success',
+          message: '✓ Đã kết nối lại Google Drive thành công!',
+        });
+      }
+    }
+  }, [googleConnState.isConnected, currentUser, autoSyncEnabled, selectedDbId]);
 
   // Helper log hành động người dùng theo thời gian thực
   const logUserAction = useCallback(
@@ -1039,6 +1214,8 @@ export default function App() {
       return;
     }
 
+    setHasPendingSync(true);
+
     if (autoSyncTimerRef.current) {
       clearTimeout(autoSyncTimerRef.current);
     }
@@ -1050,10 +1227,14 @@ export default function App() {
     autoSyncTimerRef.current = setTimeout(async () => {
       try {
         const token = await getAccessToken();
-        if (!token) return;
+        if (!token || !googleConnState.isConnected) {
+          setHasPendingSync(true);
+          return;
+        }
 
         setIsAutoSyncing(true);
         const res = await syncDataToGoogleSheets(data, token, data.spreadsheetId);
+        setHasPendingSync(false);
         setData((prev) => ({
           ...prev,
           spreadsheetId: res.spreadsheetId,
@@ -1061,6 +1242,9 @@ export default function App() {
           syncSource: 'google_drive',
         }));
       } catch (err: any) {
+        if (err instanceof GoogleDriveConnectionError) {
+          setHasPendingSync(true);
+        }
         console.debug('Background auto-sync push error:', err);
       } finally {
         setIsAutoSyncing(false);
@@ -1084,6 +1268,7 @@ export default function App() {
     data.isDemo,
     currentUser,
     data.spreadsheetId,
+    googleConnState.isConnected,
   ]);
 
   // Direction 2: Multi-device auto-sync (pull remote updates if another device made changes)
@@ -1157,6 +1342,10 @@ export default function App() {
 
   // Quick 1-Click Sync to Google Drive / Sheets (Opens selector modal with mismatch detection)
   const handleQuickSync = () => {
+    if (!googleConnState.isConnected) {
+      setHasDismissedDriveModal(false);
+      return;
+    }
     if (data.isDemo) {
       setGlobalBanner({
         type: 'error',
@@ -1223,6 +1412,7 @@ export default function App() {
 
       const res = await syncDataToGoogleSheets(data, token, data.spreadsheetId);
       if (res && res.spreadsheetId) {
+        setHasPendingSync(false);
         const now = res.lastSyncedAt || new Date().toISOString();
         const syncedData: AppData = {
           ...data,
@@ -1369,6 +1559,7 @@ export default function App() {
       // Step B: Push back
       const res = await syncDataToGoogleSheets(combinedData, token, data.spreadsheetId);
       if (res && res.spreadsheetId) {
+        setHasPendingSync(false);
         const now = res.lastSyncedAt || new Date().toISOString();
         const finalData: AppData = {
           ...combinedData,
@@ -1485,7 +1676,59 @@ export default function App() {
         onChangeDeviceName={handleChangeDeviceName}
         isGoogleAuthenticated={hasGoogleToken}
         isSpreadsheetLinked={Boolean(data.spreadsheetId)}
+        googleConnectionStatus={googleConnState.status}
       />
+
+      {/* Persistent Google Drive Interruption / Session Expiry Warning Bar */}
+      {!googleConnState.isConnected && (
+        <div
+          className={`px-3 sm:px-4 py-2.5 text-xs sm:text-sm font-bold shadow-md border-b z-30 ${
+            googleConnState.status === 'interrupted'
+              ? 'bg-amber-500 text-slate-950 border-amber-600'
+              : 'bg-rose-600 text-white border-rose-700'
+          }`}
+        >
+          <div className="w-full px-2 sm:px-6 lg:px-8 xl:px-10 mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              {googleConnState.status === 'interrupted' ? (
+                <WifiOff className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+              ) : (
+                <CloudOff className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+              )}
+              <span className="leading-snug">
+                {googleConnState.status === 'interrupted'
+                  ? 'CẢNH BÁO: Kết nối Google Drive bị gián đoạn! '
+                  : 'CẢNH BÁO: Phiên kết nối Google Drive đã hết hạn! '}
+                {hasPendingSync
+                  ? 'Có dữ liệu mới đang chờ đồng bộ lên Google Sheets. Vui lòng kết nối lại để đồng bộ liên tục.'
+                  : 'Vui lòng kết nối lại Google Drive để việc đồng bộ dữ liệu được diễn ra liên tục.'}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {googleConnState.status === 'interrupted' && (
+                <button
+                  type="button"
+                  disabled={isCheckingGoogleConn || isReconnectingGoogle}
+                  onClick={handleRetryDriveCheck}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/90 hover:bg-white text-slate-900 text-xs font-bold shadow-xs cursor-pointer disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isCheckingGoogleConn ? 'animate-spin' : ''}`} />
+                  <span>{isCheckingGoogleConn ? 'Đang kiểm tra...' : 'Kiểm tra lại'}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={isReconnectingGoogle}
+                onClick={handleReconnectGoogleDrive}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white text-rose-700 hover:bg-rose-50 text-xs font-black shadow-xs cursor-pointer disabled:opacity-60 whitespace-nowrap"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isReconnectingGoogle ? 'animate-spin' : ''}`} />
+                <span>{isReconnectingGoogle ? 'Đang kết nối...' : 'Kết nối lại Google Drive'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Global alert banner */}
       {globalBanner && (
@@ -1756,6 +1999,19 @@ export default function App() {
           onDatabaseCreated={handleDatabaseCreated}
         />
       )}
+
+      {/* Google Drive Interruption / Session Expiry Reconnect Modal */}
+      <GoogleDriveReconnectModal
+        isOpen={Boolean(currentUser) && !googleConnState.isConnected && !hasDismissedDriveModal}
+        connectionState={googleConnState}
+        hasPendingSync={hasPendingSync}
+        isReconnecting={isReconnectingGoogle}
+        isCheckingConnection={isCheckingGoogleConn}
+        reconnectError={googleReconnectError}
+        onReconnectGoogle={handleReconnectGoogleDrive}
+        onRetryCheck={handleRetryDriveCheck}
+        onDismissTemporary={() => setHasDismissedDriveModal(true)}
+      />
 
       {/* Mobile Bottom Navigation Bar: Fix & Fit for Phone screens */}
       <MobileNav

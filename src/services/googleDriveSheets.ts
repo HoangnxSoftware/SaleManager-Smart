@@ -30,16 +30,58 @@ export const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 provider.addScope('https://www.googleapis.com/auth/drive.file');
 provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+provider.setCustomParameters({ prompt: 'select_account' });
+
+export type GoogleDriveConnectionStatus = 'disconnected' | 'connected' | 'expired' | 'interrupted';
+
+export interface GoogleUserInfo {
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+}
+
+export interface GoogleDriveConnectionState {
+  isConnected: boolean;
+  hasToken: boolean;
+  status: GoogleDriveConnectionStatus;
+  user: GoogleUserInfo | null;
+  errorMessage: string | null;
+  tokenObtainedAt: number | null;
+}
+
+export class GoogleDriveConnectionError extends Error {
+  status: 'expired' | 'interrupted';
+  constructor(status: 'expired' | 'interrupted', message: string) {
+    super(message);
+    this.name = 'GoogleDriveConnectionError';
+    this.status = status;
+  }
+}
 
 let cachedAccessToken: string | null = null;
+let cachedGoogleUser: GoogleUserInfo | null = null;
+let tokenObtainedAt: number | null = null;
+let connectionStatus: GoogleDriveConnectionStatus = 'disconnected';
+let lastConnectionError: string | null = null;
 let isSigningIn = false;
-const authStateListeners = new Set<(hasToken: boolean) => void>();
+
+const authStateListeners = new Set<(hasToken: boolean, state: GoogleDriveConnectionState) => void>();
+
+export const getGoogleDriveConnectionState = (): GoogleDriveConnectionState => ({
+  isConnected: Boolean(cachedAccessToken) && connectionStatus === 'connected',
+  hasToken: Boolean(cachedAccessToken),
+  status: cachedAccessToken ? connectionStatus : (connectionStatus === 'expired' ? 'expired' : 'disconnected'),
+  user: cachedGoogleUser,
+  errorMessage: lastConnectionError,
+  tokenObtainedAt,
+});
 
 function notifyAuthStateListeners() {
-  const hasToken = Boolean(cachedAccessToken);
+  const state = getGoogleDriveConnectionState();
+  const hasToken = state.isConnected;
   authStateListeners.forEach((listener) => {
     try {
-      listener(hasToken);
+      listener(hasToken, state);
     } catch (err) {
       console.error('Auth state listener error:', err);
     }
@@ -48,8 +90,45 @@ function notifyAuthStateListeners() {
 
 export const hasGoogleAccessToken = (): boolean => Boolean(cachedAccessToken);
 
+export const markGoogleConnectionExpired = (
+  message = 'Phiên kết nối Google Drive đã hết hạn hoặc bị thu hồi. Vui lòng kết nối lại để tiếp tục đồng bộ.'
+) => {
+  const changed =
+    cachedAccessToken !== null ||
+    connectionStatus !== 'expired' ||
+    lastConnectionError !== message;
+  cachedAccessToken = null;
+  tokenObtainedAt = null;
+  connectionStatus = 'expired';
+  lastConnectionError = message;
+  if (changed) {
+    notifyAuthStateListeners();
+  }
+};
+
+export const markGoogleConnectionInterrupted = (
+  message = 'Kết nối Google Drive đang bị gián đoạn (mất mạng hoặc sự cố đường truyền). Vui lòng kiểm tra kết nối hoặc kết nối lại.'
+) => {
+  const changed = connectionStatus !== 'interrupted' || lastConnectionError !== message;
+  connectionStatus = 'interrupted';
+  lastConnectionError = message;
+  if (changed) {
+    notifyAuthStateListeners();
+  }
+};
+
+function markGoogleConnectionHealthy() {
+  if (!cachedAccessToken) return;
+  const changed = connectionStatus !== 'connected' || lastConnectionError !== null;
+  connectionStatus = 'connected';
+  lastConnectionError = null;
+  if (changed) {
+    notifyAuthStateListeners();
+  }
+}
+
 export const subscribeGoogleAuthState = (
-  listener: (hasToken: boolean) => void
+  listener: (hasToken: boolean, state: GoogleDriveConnectionState) => void
 ): (() => void) => {
   authStateListeners.add(listener);
   return () => {
@@ -63,11 +142,24 @@ export const initAuth = (
 ) => {
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user && cachedAccessToken) {
+      cachedGoogleUser = {
+        email: user.email,
+        displayName: user.displayName,
+        photoURL: user.photoURL,
+      };
       notifyAuthStateListeners();
       if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
     } else {
       if (!isSigningIn) {
+        const hadToken = Boolean(cachedAccessToken);
         cachedAccessToken = null;
+        tokenObtainedAt = null;
+        if (!user) {
+          cachedGoogleUser = null;
+          connectionStatus = hadToken ? 'expired' : 'disconnected';
+        } else if (hadToken) {
+          connectionStatus = 'expired';
+        }
         notifyAuthStateListeners();
       }
       if (onAuthFailure) onAuthFailure();
@@ -81,13 +173,32 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
-      throw new Error('Không lấy được access token từ Google Auth.');
+      throw new Error('Không lấy được quyền truy cập Google Drive từ phiên đăng nhập Google.');
     }
     cachedAccessToken = credential.accessToken;
+    cachedGoogleUser = {
+      email: result.user.email,
+      displayName: result.user.displayName,
+      photoURL: result.user.photoURL,
+    };
+    tokenObtainedAt = Date.now();
+    connectionStatus = 'connected';
+    lastConnectionError = null;
     notifyAuthStateListeners();
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Google sign in error:', error);
+    const code = error?.code || '';
+    if (code === 'auth/popup-closed-by-user') {
+      throw new Error('Bạn đã đóng cửa sổ đăng nhập Google trước khi hoàn tất kết nối Google Drive.');
+    }
+    if (code === 'auth/popup-blocked') {
+      throw new Error('Trình duyệt đã chặn cửa sổ bật lên Google. Vui lòng cho phép popup và thử lại.');
+    }
+    if (code === 'auth/network-request-failed') {
+      markGoogleConnectionInterrupted('Không thể kết nối tới Google do lỗi mạng. Vui lòng kiểm tra Internet.');
+      throw new Error('Lỗi kết nối mạng khi đăng nhập Google. Vui lòng kiểm tra kết nối Internet.');
+    }
     throw error;
   } finally {
     isSigningIn = false;
@@ -101,8 +212,106 @@ export const getAccessToken = async (): Promise<string | null> => {
 export const googleSignOut = async () => {
   await signOut(auth);
   cachedAccessToken = null;
+  cachedGoogleUser = null;
+  tokenObtainedAt = null;
+  connectionStatus = 'disconnected';
+  lastConnectionError = null;
   notifyAuthStateListeners();
 };
+
+/**
+ * Central fetch wrapper for Google Drive & Google Sheets APIs.
+ * Automatically detects network interruptions and expired/revoked OAuth sessions (401/403 auth errors).
+ */
+async function googleApiFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    const msg = 'Mất kết nối Internet. Kết nối Google Drive đang bị gián đoạn.';
+    markGoogleConnectionInterrupted(msg);
+    throw new GoogleDriveConnectionError('interrupted', msg);
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch {
+    const msg = 'Kết nối tới Google Drive bị gián đoạn. Vui lòng kiểm tra mạng hoặc kết nối lại.';
+    markGoogleConnectionInterrupted(msg);
+    throw new GoogleDriveConnectionError('interrupted', msg);
+  }
+
+  if (res.status === 401) {
+    const msg = 'Phiên kết nối Google Drive đã hết hạn hoặc bị thu hồi. Vui lòng kết nối lại để tiếp tục đồng bộ.';
+    markGoogleConnectionExpired(msg);
+    throw new GoogleDriveConnectionError('expired', msg);
+  }
+
+  if (res.status === 403) {
+    try {
+      const cloned = res.clone();
+      const bodyText = await cloned.text();
+      if (/UNAUTHENTICATED|Invalid Credentials|invalid_token|ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions|authError/i.test(bodyText)) {
+        const msg = 'Phiên kết nối Google Drive không còn đủ quyền hoặc đã hết hạn. Vui lòng kết nối lại Google Drive.';
+        markGoogleConnectionExpired(msg);
+        throw new GoogleDriveConnectionError('expired', msg);
+      }
+    } catch (e) {
+      if (e instanceof GoogleDriveConnectionError) throw e;
+    }
+  }
+
+  if (res.ok) {
+    markGoogleConnectionHealthy();
+  }
+
+  return res;
+}
+
+/**
+ * Verifies live connectivity and token validity against Google Drive API.
+ */
+export async function verifyGoogleDriveConnection(): Promise<GoogleDriveConnectionState> {
+  if (!cachedAccessToken) {
+    if (connectionStatus === 'connected') {
+      markGoogleConnectionExpired();
+    }
+    return getGoogleDriveConnectionState();
+  }
+
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    markGoogleConnectionInterrupted('Mất kết nối mạng. Kết nối Google Drive đang bị gián đoạn.');
+    return getGoogleDriveConnectionState();
+  }
+
+  try {
+    const res = await googleApiFetch(
+      'https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,displayName,photoLink)',
+      {
+        headers: { Authorization: `Bearer ${cachedAccessToken}` },
+      }
+    );
+    if (res.ok) {
+      try {
+        const info = await res.json();
+        if (info?.user) {
+          cachedGoogleUser = {
+            email: info.user.emailAddress || cachedGoogleUser?.email || null,
+            displayName: info.user.displayName || cachedGoogleUser?.displayName || null,
+            photoURL: info.user.photoLink || cachedGoogleUser?.photoURL || null,
+          };
+        }
+      } catch {
+        // ignore JSON parse issues
+      }
+      markGoogleConnectionHealthy();
+    }
+  } catch (err) {
+    if (!(err instanceof GoogleDriveConnectionError)) {
+      markGoogleConnectionInterrupted('Không thể xác minh kết nối Google Drive. Vui lòng kiểm tra kết nối.');
+    }
+  }
+
+  return getGoogleDriveConnectionState();
+}
 
 export const DRIVE_FOLDER_NAME = 'SaleManager-Smart';
 const DEFAULT_SPREADSHEET_NAME = 'SaleManager_Smart_Database';
@@ -112,7 +321,7 @@ const DEFAULT_SPREADSHEET_NAME = 'SaleManager_Smart_Database';
  */
 export async function getOrCreateDriveFolder(accessToken: string): Promise<string> {
   const query = encodeURIComponent(`mimeType='application/vnd.google-apps.folder' and name='${DRIVE_FOLDER_NAME}' and trashed=false`);
-  const listRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`, {
+  const listRes = await googleApiFetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
@@ -127,7 +336,7 @@ export async function getOrCreateDriveFolder(accessToken: string): Promise<strin
   }
 
   // Create folder if not yet existing
-  const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+  const createRes = await googleApiFetch('https://www.googleapis.com/drive/v3/files', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -157,7 +366,7 @@ export async function listSpreadsheetsInFolder(
   const folderId = await getOrCreateDriveFolder(accessToken);
   const query = encodeURIComponent(`'${folderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
 
-  const listRes = await fetch(
+  const listRes = await googleApiFetch(
     `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,webViewLink,modifiedTime)&orderBy=modifiedTime desc`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -198,7 +407,7 @@ export async function fetchSpreadsheetMetadata(
   spreadsheetId: string
 ): Promise<SpreadsheetMetadata | null> {
   try {
-    const metaRes = await fetch(
+    const metaRes = await googleApiFetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Metadata!A1:B35`,
       {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -236,6 +445,9 @@ export async function fetchSpreadsheetMetadata(
 
     return meta;
   } catch (e) {
+    if (e instanceof GoogleDriveConnectionError) {
+      throw e;
+    }
     console.error('Error fetching spreadsheet metadata:', e);
     return null;
   }
@@ -252,7 +464,7 @@ export async function createDatabaseSpreadsheetOnDrive(
   const folderId = await getOrCreateDriveFolder(accessToken);
   const cleanTitle = `SaleManager_Smart_${databaseName || companyName || 'Database'}`.replace(/[\/\\?%*:|"<>]/g, '_');
 
-  const sheetCreateRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+  const sheetCreateRes = await googleApiFetch('https://sheets.googleapis.com/v4/spreadsheets', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -285,7 +497,7 @@ export async function createDatabaseSpreadsheetOnDrive(
   const fileId = sheetData.spreadsheetId;
 
   // Move file into the SaleManager-Smart folder
-  await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${folderId}&fields=id,parents`, {
+  await googleApiFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${folderId}&fields=id,parents`, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -304,7 +516,7 @@ export async function getOrCreateSpreadsheet(
 ): Promise<string> {
   const title = customTitle || DEFAULT_SPREADSHEET_NAME;
   const query = encodeURIComponent(`'${folderId}' in parents and name='${title}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`);
-  const listRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`, {
+  const listRes = await googleApiFetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
@@ -319,7 +531,7 @@ export async function getOrCreateSpreadsheet(
   }
 
   // Create new spreadsheet
-  const sheetCreateRes = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+  const sheetCreateRes = await googleApiFetch('https://sheets.googleapis.com/v4/spreadsheets', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -352,7 +564,7 @@ export async function getOrCreateSpreadsheet(
   const fileId = sheetData.spreadsheetId;
 
   // Move file into the SaleManager-Smart folder
-  await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${folderId}&fields=id,parents`, {
+  await googleApiFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${folderId}&fields=id,parents`, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -446,7 +658,7 @@ async function clearTabsOnSpreadsheet(
     return `'${escapedTab}'!A1:${lastCol}${lastRow}`;
   });
 
-  const clearRes = await fetch(
+  const clearRes = await googleApiFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`,
     {
       method: 'POST',
@@ -468,7 +680,7 @@ async function clearTabsOnSpreadsheet(
   // Fallback: clear each tab individually using bare tab title (valid for entire sheet)
   for (const tab of tabs) {
     const escapedTab = `'${tab.title.replace(/'/g, "''")}'`;
-    const singleRes = await fetch(
+    const singleRes = await googleApiFetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(escapedTab)}:clear`,
       {
         method: 'POST',
@@ -699,7 +911,7 @@ export async function syncDataToGoogleSheets(
   const requiredTabs = tabPayloads.map((t) => t.title);
   const requiredTabSet = new Set(requiredTabs);
 
-  const metaRes = await fetch(
+  const metaRes = await googleApiFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title,gridProperties(rowCount,columnCount))`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -726,7 +938,7 @@ export async function syncDataToGoogleSheets(
 
   const missingTabs = tabPayloads.filter((t) => !sheetMap.has(t.title));
   if (missingTabs.length > 0) {
-    const addRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+    const addRes = await googleApiFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -791,7 +1003,7 @@ export async function syncDataToGoogleSheets(
     }
   }
   if (resizeRequests.length > 0) {
-    const resizeRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+    const resizeRes = await googleApiFetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -824,7 +1036,7 @@ export async function syncDataToGoogleSheets(
     })),
   };
 
-  const updateRes = await fetch(
+  const updateRes = await googleApiFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
     {
       method: 'POST',
@@ -858,7 +1070,7 @@ async function fetchTabValuesSafe(
   try {
     const escapedTab = `'${tabName.replace(/'/g, "''")}'!${range}`;
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(escapedTab)}`;
-    const res = await fetch(url, {
+    const res = await googleApiFetch(url, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (res.ok) {
@@ -866,6 +1078,9 @@ async function fetchTabValuesSafe(
       return (data.values || []) as string[][];
     }
   } catch (err) {
+    if (err instanceof GoogleDriveConnectionError) {
+      throw err;
+    }
     console.debug(`Failed to fetch tab ${tabName}:`, err);
   }
   return [];
@@ -891,7 +1106,7 @@ export async function loadDataFromGoogleSheets(
   let sheetTitles: string[] = [];
   const sheetGridMap = new Map<string, { rowCount: number; columnCount: number }>();
   try {
-    const sheetMetaRes = await fetch(
+    const sheetMetaRes = await googleApiFetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${targetId}?fields=sheets.properties(title,gridProperties(rowCount,columnCount))`,
       {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -913,6 +1128,9 @@ export async function loadDataFromGoogleSheets(
       }
     }
   } catch (err) {
+    if (err instanceof GoogleDriveConnectionError) {
+      throw err;
+    }
     console.debug('Error checking sheet titles:', err);
   }
 
@@ -978,7 +1196,7 @@ export async function loadDataFromGoogleSheets(
     try {
       const batchRanges = tabQueries.map((q) => encodeURIComponent(`'${q.title.replace(/'/g, "''")}'!${q.range}`));
       const batchQuery = batchRanges.map((r) => `ranges=${r}`).join('&');
-      const batchRes = await fetch(
+      const batchRes = await googleApiFetch(
         `https://sheets.googleapis.com/v4/spreadsheets/${targetId}/values:batchGet?${batchQuery}`,
         {
           headers: { Authorization: `Bearer ${accessToken}` },
@@ -1000,6 +1218,9 @@ export async function loadDataFromGoogleSheets(
         batchSucceeded = true;
       }
     } catch (e) {
+      if (e instanceof GoogleDriveConnectionError) {
+        throw e;
+      }
       console.debug('Batch get error, falling back to individual tab queries:', e);
     }
   }

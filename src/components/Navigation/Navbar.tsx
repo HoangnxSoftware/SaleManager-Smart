@@ -34,6 +34,7 @@ interface NavbarProps {
   onChangeDeviceName?: () => void;
   isGoogleAuthenticated?: boolean;
   isSpreadsheetLinked?: boolean;
+  googleConnectionStatus?: 'disconnected' | 'connected' | 'expired' | 'interrupted';
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -54,9 +55,12 @@ export const Navbar: React.FC<NavbarProps> = ({
   onChangeDeviceName,
   isGoogleAuthenticated = false,
   isSpreadsheetLinked = false,
+  googleConnectionStatus,
 }) => {
   const isBusy = isSyncing || isAutoSyncing;
-  const isGoogleConnected = isGoogleAuthenticated && isSpreadsheetLinked;
+  const isDriveHealthy =
+    googleConnectionStatus ? googleConnectionStatus === 'connected' : isGoogleAuthenticated;
+  const isGoogleConnected = isDriveHealthy && isSpreadsheetLinked;
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs max-w-full">
@@ -131,13 +135,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               className={`p-1.5 sm:px-3 sm:py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer shrink-0 flex items-center gap-1.5 ${
                 isBusy
                   ? 'border-blue-300 bg-blue-50 text-blue-700'
+                  : !isDriveHealthy
+                  ? 'border-rose-400 bg-rose-100 hover:bg-rose-200 text-rose-900 shadow-xs animate-pulse'
                   : !isGoogleConnected
                   ? 'border-yellow-400 bg-yellow-100 hover:bg-yellow-200 text-yellow-900 shadow-xs'
                   : 'border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700'
               }`}
               title={
-                !isGoogleAuthenticated
-                  ? 'Chưa đăng nhập Google — Bấm để đăng nhập & đồng bộ Google Sheets'
+                !isDriveHealthy
+                  ? googleConnectionStatus === 'interrupted'
+                    ? 'Kết nối Google Drive bị gián đoạn — Bấm để kiểm tra hoặc kết nối lại'
+                    : 'Phiên Google Drive đã hết hạn — Bấm để kết nối lại'
                   : !isSpreadsheetLinked
                   ? 'Chưa kết nối file Google Sheets — Bấm để chọn hoặc tạo file đồng bộ'
                   : 'Đã kết nối Google Drive & Sheets (Bấm để xem và quản lý đồng bộ)'
@@ -148,8 +156,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <RefreshCw className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
               ) : (
                 <div className="relative shrink-0 flex items-center justify-center">
-                  <Cloud className={`w-4 h-4 ${!isGoogleConnected ? 'text-amber-700' : 'text-blue-600'}`} />
-                  {!isGoogleConnected ? (
+                  <Cloud className={`w-4 h-4 ${!isDriveHealthy ? 'text-rose-600' : !isGoogleConnected ? 'text-amber-700' : 'text-blue-600'}`} />
+                  {!isDriveHealthy ? (
+                    <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-rose-600"></span>
+                    </span>
+                  ) : !isGoogleConnected ? (
                     <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
                       <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-600"></span>
                     </span>
@@ -164,7 +176,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
               )}
               <span className="hidden sm:inline font-bold">
-                {isBusy ? 'Đang đồng bộ...' : 'Đồng bộ Sheets'}
+                {isBusy
+                  ? 'Đang đồng bộ...'
+                  : !isDriveHealthy
+                  ? 'Mất kết nối Drive'
+                  : 'Đồng bộ Sheets'}
               </span>
             </button>
           )}

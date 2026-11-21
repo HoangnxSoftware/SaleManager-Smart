@@ -599,14 +599,14 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
           ) : (
             <span className="font-bold text-blue-800">toàn bộ các ngày</span>
           )}
-          . Các thông tin tổng quan đơn hàng (Tên KH, MST, CCCD, Địa chỉ, Tổng thành tiền, Tổng tiền thanh toán...) chỉ hiển thị tại dòng đầu tiên của mỗi đơn hàng.
+          . Các thông tin tổng quan đơn hàng (Mã KH, Tên KH, MST, CCCD, Địa chỉ, Tổng thành tiền, Tổng tiền thanh toán...) chỉ hiển thị tại dòng đầu tiên của mỗi đơn hàng.
         </span>
       </div>
 
-      {/* Main Table: 26 Columns */}
+      {/* Main Table: 27 Columns */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="overflow-x-auto overflow-y-auto max-h-[72vh] table-scrollbar">
-          <table className="w-full text-xs text-left border-collapse min-w-[2150px]">
+          <table className="w-full text-xs text-left border-collapse min-w-[2250px]">
             <thead className="sticky top-0 z-20 bg-slate-100 text-slate-700 font-bold uppercase text-[11px] shadow-2xs">
               <tr className="border-b border-slate-200">
                 <th className="p-3 w-12 text-left sticky left-0 bg-slate-100 z-30">STT</th>
@@ -646,6 +646,7 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
                     )}
                   </div>
                 </th>
+                <th className="p-3 w-28 text-left">Mã khách hàng</th>
                 <th className="p-3 min-w-[200px] text-left">Tên khách hàng</th>
                 <th className="p-3 w-28 text-left">MST</th>
                 <th className="p-3 w-28 text-left">CCCD</th>
@@ -682,7 +683,7 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
             <tbody className="divide-y divide-slate-100">
               {flattenedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={26} className="p-12 text-center text-slate-400">
+                  <td colSpan={27} className="p-12 text-center text-slate-400">
                     Không tìm thấy dữ liệu mặt hàng nào phù hợp với bộ lọc.
                   </td>
                 </tr>
@@ -749,6 +750,17 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
                       {/* 2. Ngày tháng */}
                       <td className="p-3 text-slate-600 whitespace-nowrap">
                         {isFirstRow ? formatDate(order.orderDate) : <span className="text-slate-300">—</span>}
+                      </td>
+
+                      {/* Mã khách hàng (Chỉ hiện dòng đầu tiên của đơn hàng) */}
+                      <td className="p-3 font-mono whitespace-nowrap">
+                        {isFirstRow ? (
+                          <span className="font-bold text-slate-800">
+                            {order.customerCode || '—'}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300 italic select-none">〃</span>
+                        )}
                       </td>
 
                       {/* 3. Tên khách hàng (Chỉ hiện dòng đầu tiên của đơn hàng) */}
@@ -1075,7 +1087,7 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
             {flattenedRows.length > 0 && (
               <tfoot className="sticky bottom-0 z-20 bg-slate-100 font-bold text-slate-800 border-t-2 border-slate-300 text-xs shadow-md">
                 <tr>
-                  <td colSpan={10} className="p-3 text-right uppercase tracking-wider font-black text-slate-700">
+                  <td colSpan={11} className="p-3 text-right uppercase tracking-wider font-black text-slate-700">
                     Tổng cộng ({kpiStats.orderCount} đơn, {kpiStats.rowCount} mặt hàng):
                   </td>
                   <td className="p-3 text-right font-black text-blue-900 bg-blue-50/50 whitespace-nowrap">

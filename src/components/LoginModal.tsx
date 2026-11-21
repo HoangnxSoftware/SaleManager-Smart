@@ -20,6 +20,10 @@ import {
   getAccessToken,
   loadDataFromGoogleSheets,
   DRIVE_FOLDER_NAME,
+  getGoogleDriveConnectionState,
+  subscribeGoogleAuthState,
+  hasGoogleAccessToken,
+  GoogleDriveConnectionState,
 } from '../services/googleDriveSheets';
 import {
   ShoppingBag,
@@ -105,6 +109,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [sheetUrlOrIdInput, setSheetUrlOrIdInput] = useState('');
   const [linkSheetError, setLinkSheetError] = useState<string | null>(null);
 
+  // Drive connection state (MANDATORY before login)
+  const [googleConn, setGoogleConn] = useState<GoogleDriveConnectionState>(() =>
+    getGoogleDriveConnectionState()
+  );
+  const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
+  const [googleConnectError, setGoogleConnectError] = useState<string | null>(null);
+
   // Drive scan state
   const [isScanningDrive, setIsScanningDrive] = useState(false);
   const [driveFiles, setDriveFiles] = useState<Array<{ id: string; name: string }>>([]);
@@ -114,6 +125,35 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   // Active selected profile
   const activeProfile = profiles.find((p) => p.id === selectedDbId) || profiles[0];
   const isSelectedDbDemo = activeProfile?.isDemo ?? (selectedDbId === DEMO_DATABASE_ID);
+
+  useEffect(() => {
+    setGoogleConn(getGoogleDriveConnectionState());
+    const unsubscribe = subscribeGoogleAuthState((_hasToken, state) => {
+      setGoogleConn(state);
+      if (state.isConnected) {
+        setGoogleConnectError(null);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  const handleConnectGoogleDrive = async () => {
+    try {
+      setIsConnectingGoogle(true);
+      setGoogleConnectError(null);
+      setLoginError(null);
+      const res = await googleSignIn();
+      if (!res?.accessToken) {
+        setGoogleConnectError('Không thể lấy quyền truy cập Google Drive. Vui lòng thử lại.');
+      }
+    } catch (err: any) {
+      setGoogleConnectError(
+        err?.message || 'Kết nối Google Drive không thành công. Vui lòng thử lại.'
+      );
+    } finally {
+      setIsConnectingGoogle(false);
+    }
+  };
 
   // Sync selected account when active database changes
   useEffect(() => {
@@ -163,10 +203,18 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   };
 
   // Submit login
-  const handleFormLogin = (e: React.FormEvent) => {
+  const handleFormLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
     setResetNotice(null);
+
+    const token = await getAccessToken();
+    if (!token || !hasGoogleAccessToken() || !googleConn.isConnected) {
+      setLoginError(
+        'Chưa kết nối Google Drive! Vui lòng hoàn tất Bước 1 (Kết nối Google Drive) trước khi đăng nhập vào phần mềm.'
+      );
+      return;
+    }
 
     const trimmedUser = selectedAccountUsername.trim().toLowerCase();
     const trimmedPass = passwordInput.trim();
@@ -448,12 +496,118 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
         {/* Content Body - Scrollable */}
         <div className="p-4 sm:p-6 space-y-6 overflow-y-auto flex-1">
-          {/* STEP 1: SELECT DATABASE & GOOGLE SHEET CONNECTION BEFORE WORKING */}
+          {/* STEP 1: MANDATORY GOOGLE DRIVE CONNECTION BEFORE LOGIN */}
+          <div
+            className={`p-4 sm:p-5 rounded-2xl border-2 space-y-3 transition-all ${
+              googleConn.isConnected
+                ? 'bg-emerald-50/70 border-emerald-300'
+                : googleConn.status === 'expired' || googleConn.status === 'interrupted'
+                ? 'bg-rose-50/80 border-rose-400 shadow-sm'
+                : 'bg-amber-50/80 border-amber-400 shadow-sm'
+            }`}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/70 pb-2.5">
+              <label className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                <Cloud
+                  className={`w-4 h-4 ${
+                    googleConn.isConnected ? 'text-emerald-600' : 'text-amber-600'
+                  }`}
+                />
+                <span>1. Kết nối Google Drive (Bắt buộc trước khi đăng nhập)</span>
+              </label>
+
+              {googleConn.isConnected ? (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 self-start sm:self-auto">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Đã kết nối Google Drive</span>
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-300 self-start sm:self-auto">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                  <span>
+                    {googleConn.status === 'expired'
+                      ? 'Phiên Google Drive đã hết hạn'
+                      : googleConn.status === 'interrupted'
+                      ? 'Kết nối bị gián đoạn'
+                      : 'Chưa kết nối Google Drive'}
+                  </span>
+                </span>
+              )}
+            </div>
+
+            {googleConn.isConnected ? (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-emerald-200">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold shrink-0">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0 text-xs">
+                    <div className="font-bold text-slate-900 truncate">
+                      {googleConn.user?.displayName || 'Tài khoản Google Drive'}
+                    </div>
+                    <div className="text-slate-600 truncate">
+                      {googleConn.user?.email || 'Đã xác thực quyền đồng bộ Google Drive & Sheets'}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={isConnectingGoogle}
+                  onClick={handleConnectGoogleDrive}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs border border-slate-200 transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+                >
+                  {isConnectingGoogle ? 'Đang kết nối...' : 'Đổi tài khoản Google'}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs text-slate-700 leading-relaxed">
+                  Để đảm bảo dữ liệu luôn được sao lưu và đồng bộ liên tục lên{' '}
+                  <strong>Google Drive / Google Sheets</strong>, hệ thống yêu cầu kết nối tài khoản Google Drive{' '}
+                  <strong>trước khi đăng nhập</strong>.
+                </p>
+
+                {(googleConnectError || googleConn.errorMessage) && (
+                  <div className="p-2.5 rounded-xl bg-rose-100/80 border border-rose-300 text-rose-800 text-xs font-medium flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <span>{googleConnectError || googleConn.errorMessage}</span>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  disabled={isConnectingGoogle}
+                  onClick={handleConnectGoogleDrive}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-3 px-5 py-2.5 bg-white hover:bg-slate-50 text-slate-800 font-bold text-xs sm:text-sm rounded-xl border-2 border-slate-300 hover:border-blue-500 shadow-sm transition-all cursor-pointer disabled:opacity-60"
+                >
+                  {isConnectingGoogle ? (
+                    <RefreshCw className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
+                  ) : (
+                    <svg className="w-4 h-4 shrink-0" viewBox="0 0 48 48" aria-hidden="true">
+                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                    </svg>
+                  )}
+                  <span>
+                    {isConnectingGoogle
+                      ? 'Đang kết nối Google Drive...'
+                      : googleConn.status === 'expired' || googleConn.status === 'interrupted'
+                      ? 'Kết nối lại Google Drive'
+                      : 'Kết nối Google Drive (Đăng nhập Google)'}
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* STEP 2: SELECT DATABASE & GOOGLE SHEET CONNECTION BEFORE WORKING */}
           <div className="p-4 sm:p-5 rounded-2xl bg-slate-50 border-2 border-slate-200 space-y-3.5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
               <label className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
                 <Database className="w-4 h-4 text-blue-600" />
-                <span>1. Chọn cơ sở dữ liệu & File Google Sheet làm việc</span>
+                <span>2. Chọn cơ sở dữ liệu & File Google Sheet làm việc</span>
               </label>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -658,13 +812,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </div>
           )}
 
-          {/* STEP 2: USER ACCOUNT & PASSWORD LOGIN */}
+          {/* STEP 3: USER ACCOUNT & PASSWORD LOGIN */}
           {/* REQUIREMENT: BỎ HẲN ĐĂNG NHẬP NHANH THEO VAI TRÒ! */}
           <form onSubmit={handleFormLogin} className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-200 pb-2">
               <label className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
                 <User className="w-4 h-4 text-blue-600" />
-                <span>2. Đăng nhập tài khoản người dùng</span>
+                <span>3. Đăng nhập tài khoản người dùng</span>
               </label>
               <span className="text-[11px] text-slate-500">
                 (Phân quyền lấy theo thẻ 'Phân quyền và người dùng')
@@ -769,13 +923,41 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               </div>
             </div>
 
+            {!googleConn.isConnected && (
+              <div className="p-3.5 bg-amber-50 border-2 border-amber-400 rounded-2xl text-xs text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="flex items-start gap-2">
+                  <Lock className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Chưa thể đăng nhập:</strong> Vui lòng kết nối tài khoản <strong>Google Drive</strong> ở Bước 1 trước khi bấm xác nhận đăng nhập.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  disabled={isConnectingGoogle}
+                  onClick={handleConnectGoogleDrive}
+                  className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shrink-0 cursor-pointer disabled:opacity-50"
+                >
+                  {isConnectingGoogle ? 'Đang kết nối...' : 'Kết nối Google Drive ngay'}
+                </button>
+              </div>
+            )}
+
             {/* Submit CTA */}
             <button
               type="submit"
-              className="w-full flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white font-bold text-sm sm:text-base rounded-2xl shadow-lg shadow-blue-500/25 transition-all transform active:scale-98 cursor-pointer"
+              disabled={!googleConn.isConnected || isConnectingGoogle}
+              className={`w-full flex items-center justify-center gap-2 py-3.5 font-bold text-sm sm:text-base rounded-2xl transition-all ${
+                !googleConn.isConnected || isConnectingGoogle
+                  ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
+                  : 'bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white shadow-lg shadow-blue-500/25 transform active:scale-98 cursor-pointer'
+              }`}
             >
-              <LogIn className="w-5 h-5" />
-              <span>XÁC NHẬN ĐĂNG NHẬP & BẮT ĐẦU LÀM VIỆC</span>
+              {googleConn.isConnected ? <LogIn className="w-5 h-5" /> : <Lock className="w-5 h-5" />}
+              <span>
+                {googleConn.isConnected
+                  ? 'XÁC NHẬN ĐĂNG NHẬP & BẮT ĐẦU LÀM VIỆC'
+                  : 'KẾT NỐI GOOGLE DRIVE ĐỂ MỞ KHÓA ĐĂNG NHẬP'}
+              </span>
             </button>
 
             {/* Support Contact Information */}
