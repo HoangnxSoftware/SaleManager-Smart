@@ -1232,29 +1232,29 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
 
           {/* Section 2: Product selection & Items table */}
           <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-800 text-sm sm:text-base flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-slate-800 text-sm sm:text-base flex items-center gap-2 shrink-0">
                 <Receipt className="w-5 h-5 text-indigo-600" />
                 <span>Danh sách mặt hàng bán ({items.length} mặt hàng)</span>
               </h3>
 
               {/* Quick product search input */}
-              <div ref={productSearchRef} className="relative w-full sm:w-96">
+              <div ref={productSearchRef} className="relative w-full sm:flex-1 sm:min-w-0">
                 <input
                   type="text"
-                  placeholder="Gõ mã hoặc tên HH để thêm..."
+                  placeholder="Gõ mã hàng, mã đối chiếu hoặc tên mặt hàng để tìm và thêm..."
                   value={productSearchTerm}
                   onFocus={() => setIsProductDropdownOpen(true)}
                   onChange={(e) => {
                     setProductSearchTerm(e.target.value);
                     setIsProductDropdownOpen(true);
                   }}
-                  className="w-full pl-8 pr-3 py-1.5 border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 shadow-2xs"
+                  className="w-full pl-9 pr-3 py-1.5 md:py-2 border border-slate-300 rounded-lg md:rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 shadow-2xs"
                 />
-                <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
 
                 {isProductDropdownOpen && (
-                  <div className="absolute z-30 left-0 right-0 sm:left-auto sm:right-0 sm:w-[480px] mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-72 overflow-y-auto divide-y divide-slate-100">
+                  <div className="absolute z-30 left-0 right-0 min-w-full sm:min-w-[520px] mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-80 overflow-y-auto divide-y divide-slate-100">
                     <div className="px-3 py-1.5 bg-slate-100 text-[11px] text-slate-700 flex items-center justify-between font-medium border-b border-slate-200 sticky top-0 z-10">
                       <span>Tồn kho tính đến ngày: <strong className="text-indigo-700">{formatDate(orderDate)}</strong></span>
                       <span className="text-[10px] text-slate-500">({filteredProducts.length} mặt hàng)</span>
