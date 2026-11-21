@@ -575,10 +575,38 @@ export async function syncDataToGoogleSheets(
 
   // 4. Products
   const productRows: string[][] = [
-    ['Mã HH', 'Tên hàng hóa', 'ĐVT Mua', 'Thuế suất (%)', 'SL quy đổi', 'ĐVT Bán', 'Nhóm hàng', 'Tỷ suất lợi nhuận (%)', 'Ghi chú', 'Mã đối chiếu'],
-    ...data.products.map(p => [
-      p.code, p.name, p.purchaseUnit, String(p.vatRate), String(p.conversionRate), p.saleUnit, p.category, String(p.profitMargin), p.notes || '', p.reconciliationCode || ''
-    ])
+    [
+      'Mã HH',
+      'Tên hàng hóa',
+      'ĐVT Mua',
+      'Thuế suất (%)',
+      'SL quy đổi',
+      'ĐVT Bán',
+      'Nhóm hàng',
+      'Tỷ suất lợi nhuận (%)',
+      'Ghi chú',
+      'Mã đối chiếu',
+      'Giá bán mặc định',
+      'Biên độ (+/-)',
+    ],
+    ...data.products.map((p) => [
+      p.code,
+      p.name,
+      p.purchaseUnit,
+      String(p.vatRate),
+      String(p.conversionRate),
+      p.saleUnit,
+      p.category,
+      String(p.profitMargin),
+      p.notes || '',
+      p.reconciliationCode || '',
+      p.defaultSalePrice !== undefined && p.defaultSalePrice !== null && !isNaN(p.defaultSalePrice)
+        ? String(p.defaultSalePrice)
+        : '',
+      p.priceVariance !== undefined && p.priceVariance !== null && !isNaN(p.priceVariance)
+        ? String(p.priceVariance)
+        : '',
+    ]),
   ];
 
   // 5. Orders - Lưu trữ đầy đủ Mã gốc quy chiếu và Người tạo đơn ban đầu, khử trùng tuyệt đối
@@ -933,7 +961,7 @@ export async function loadDataFromGoogleSheets(
   if (ordersTab) tabQueries.push({ key: 'orders', title: ordersTab, range: getReadRange(ordersTab, 21, 20000) });
   if (customersTab) tabQueries.push({ key: 'customers', title: customersTab, range: getReadRange(customersTab, 12, 5000) });
   if (suppliersTab) tabQueries.push({ key: 'suppliers', title: suppliersTab, range: getReadRange(suppliersTab, 10, 5000) });
-  if (productsTab) tabQueries.push({ key: 'products', title: productsTab, range: getReadRange(productsTab, 10, 5000) });
+  if (productsTab) tabQueries.push({ key: 'products', title: productsTab, range: getReadRange(productsTab, 12, 5000) });
   if (purchasesTab) tabQueries.push({ key: 'purchases', title: purchasesTab, range: getReadRange(purchasesTab, 11, 10000) });
   if (debtsTab) tabQueries.push({ key: 'debts', title: debtsTab, range: getReadRange(debtsTab, 8, 5000) });
 
@@ -1242,11 +1270,50 @@ export async function loadDataFromGoogleSheets(
   // 8. Parse human-readable Products
   const parsedSheetProducts: Product[] = [];
   if (productRows.length > 1) {
+    const pHeader = productRows[0] || [];
+    const pColMap: Record<string, number> = {};
+    pHeader.forEach((h, idx) => {
+      pColMap[String(h || '').trim().toLowerCase()] = idx;
+    });
+    const findProdCol = (aliases: string[], fallback: number): number => {
+      for (const a of aliases) {
+        for (const [hdr, idx] of Object.entries(pColMap)) {
+          if (hdr === a || hdr.includes(a)) return idx;
+        }
+      }
+      return fallback;
+    };
+    const idxDefaultPrice = findProdCol(['giá bán mặc định', 'default sale price'], 10);
+    const idxVariance = findProdCol(['biên độ', 'variance'], 11);
+
     for (let i = 1; i < productRows.length; i++) {
       const r = productRows[i];
       if (!r || !r[0] || !String(r[0]).trim()) continue;
       const code = String(r[0]).trim();
       if (code === 'Mã HH') continue;
+
+      const rawProfitMargin = r[7];
+      const parsedProfitMargin =
+        rawProfitMargin !== undefined && String(rawProfitMargin).trim() !== '' && !isNaN(Number(rawProfitMargin))
+          ? Number(rawProfitMargin)
+          : 15;
+
+      const rawDefaultPrice = r[idxDefaultPrice];
+      const cleanedDefault =
+        rawDefaultPrice !== undefined && rawDefaultPrice !== null
+          ? String(rawDefaultPrice).replace(/,/g, '').trim()
+          : '';
+      const defaultSalePrice =
+        cleanedDefault !== '' && !isNaN(Number(cleanedDefault)) ? Number(cleanedDefault) : undefined;
+
+      const rawVariance = r[idxVariance];
+      const cleanedVariance =
+        rawVariance !== undefined && rawVariance !== null
+          ? String(rawVariance).replace(/,/g, '').trim()
+          : '';
+      const priceVariance =
+        cleanedVariance !== '' && !isNaN(Number(cleanedVariance)) ? Number(cleanedVariance) : undefined;
+
       parsedSheetProducts.push({
         id: `prod-${code}`,
         code,
@@ -1256,7 +1323,9 @@ export async function loadDataFromGoogleSheets(
         conversionRate: Number(r[4]) || 1,
         saleUnit: String(r[5] || 'Cái'),
         category: String(r[6] || 'Hàng hóa'),
-        profitMargin: Number(r[7]) || 15,
+        profitMargin: parsedProfitMargin,
+        defaultSalePrice,
+        priceVariance,
         notes: String(r[8] || ''),
         reconciliationCode: String(r[9] || ''),
       });
