@@ -872,8 +872,36 @@ export async function syncDataToGoogleSheets(
     ]),
   ];
 
-  // 5b. OrderDetails - Chi tiết đơn hàng đầy đủ các cột giống file xuất Excel chi tiết đơn hàng
-  const orderDetailsRows = buildOrderDetailsMatrix(processedOrders);
+  // 5b. OrderDetails - Chi tiết đơn hàng đầy đủ các cột giống file xuất Excel chi tiết đơn hàng (sắp xếp theo ngày tăng dần)
+  const normalizeOrderDateForSort = (rawDate?: string): string => {
+    const trimmed = String(rawDate || '').trim();
+    if (!trimmed) return '9999-12-31';
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoMatch) {
+      return `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}`;
+    }
+    const vnMatch = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    if (vnMatch) {
+      return `${vnMatch[3]}-${vnMatch[2].padStart(2, '0')}-${vnMatch[1].padStart(2, '0')}`;
+    }
+    return trimmed;
+  };
+
+  const sortedOrdersForDetails = [...processedOrders].sort((a, b) => {
+    const dateCmp = normalizeOrderDateForSort(a.orderDate).localeCompare(
+      normalizeOrderDateForSort(b.orderDate)
+    );
+    if (dateCmp !== 0) return dateCmp;
+
+    const codeCmp = String(a.orderCode || '').localeCompare(String(b.orderCode || ''), 'vi', {
+      numeric: true,
+      sensitivity: 'base',
+    });
+    if (codeCmp !== 0) return codeCmp;
+
+    return String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+  });
+  const orderDetailsRows = buildOrderDetailsMatrix(sortedOrdersForDetails);
 
   // 6. Purchases
   const purchaseRows: string[][] = [
