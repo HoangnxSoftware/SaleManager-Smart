@@ -361,7 +361,7 @@ export function downloadOrderTemplate() {
       'Tên khách hàng': 'Công ty Cổ phần Xây dựng & Địa ốc Thăng Long',
       'Mã HH': 'LED-RD-18W',
       'Số lượng': 10,
-      'Đơn giá trước thuế': 110000,
+      'Đơn giá bán sau thuế': 121000,
       'Thuế suất (%)': 10,
       'Chiết khấu mặt hàng': 0,
       'Chiết khấu tổng đơn': 0,
@@ -376,7 +376,7 @@ export function downloadOrderTemplate() {
       'Tên khách hàng': 'Công ty Cổ phần Xây dựng & Địa ốc Thăng Long',
       'Mã HH': 'DAY-CAD-2X2.5',
       'Số lượng': 50,
-      'Đơn giá trước thuế': 18000,
+      'Đơn giá bán sau thuế': 19800,
       'Thuế suất (%)': 10,
       'Chiết khấu mặt hàng': 0,
       'Chiết khấu tổng đơn': 0,
@@ -657,6 +657,84 @@ export async function parseExcelFile(file: File): Promise<any[]> {
   const firstSheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[firstSheetName];
   return XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+}
+
+/**
+ * Normalizes any Excel date cell value (Excel serial number, Date object, YYYY-MM-DD, DD/MM/YYYY)
+ * into a guaranteed 'YYYY-MM-DD' string so string comparisons/sorting never crash.
+ */
+export function normalizeExcelDateToYMD(rawVal: unknown, fallbackYmd?: string): string {
+  const fallback = fallbackYmd || new Date().toISOString().slice(0, 10);
+  if (rawVal === undefined || rawVal === null || rawVal === '') return fallback;
+
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+
+  if (rawVal instanceof Date) {
+    if (!isNaN(rawVal.getTime())) {
+      return `${rawVal.getFullYear()}-${pad2(rawVal.getMonth() + 1)}-${pad2(rawVal.getDate())}`;
+    }
+    return fallback;
+  }
+
+  if (typeof rawVal === 'number' && isFinite(rawVal)) {
+    // Excel serial date (roughly 1..2958465 for years 1900..9999)
+    if (rawVal > 0 && rawVal < 3000000) {
+      const parsed = XLSX.SSF?.parse_date_code?.(rawVal);
+      if (parsed && parsed.y && parsed.m && parsed.d) {
+        return `${String(parsed.y).padStart(4, '0')}-${pad2(parsed.m)}-${pad2(parsed.d)}`;
+      }
+      const utcMs = Math.round((rawVal - 25569) * 86400 * 1000);
+      const d = new Date(utcMs);
+      if (!isNaN(d.getTime())) {
+        return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+      }
+    }
+    const asDate = new Date(rawVal);
+    if (!isNaN(asDate.getTime())) {
+      return `${asDate.getFullYear()}-${pad2(asDate.getMonth() + 1)}-${pad2(asDate.getDate())}`;
+    }
+    return fallback;
+  }
+
+  const str = String(rawVal).trim();
+  if (!str) return fallback;
+
+  // Numeric serial passed as string (e.g. "46348")
+  if (/^\d{4,6}(\.\d+)?$/.test(str)) {
+    const num = Number(str);
+    if (num > 1000 && num < 3000000) {
+      return normalizeExcelDateToYMD(num, fallback);
+    }
+  }
+
+  // YYYY-MM-DD or YYYY/MM/DD (optionally with time)
+  const ymdMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (ymdMatch) {
+    const y = Number(ymdMatch[1]);
+    const m = Number(ymdMatch[2]);
+    const d = Number(ymdMatch[3]);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${String(y).padStart(4, '0')}-${pad2(m)}-${pad2(d)}`;
+    }
+  }
+
+  // DD/MM/YYYY or DD-MM-YYYY
+  const dmyMatch = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (dmyMatch) {
+    const d = Number(dmyMatch[1]);
+    const m = Number(dmyMatch[2]);
+    const y = Number(dmyMatch[3]);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${String(y).padStart(4, '0')}-${pad2(m)}-${pad2(d)}`;
+    }
+  }
+
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    return `${parsed.getFullYear()}-${pad2(parsed.getMonth() + 1)}-${pad2(parsed.getDate())}`;
+  }
+
+  return fallback;
 }
 
 export interface DebtSummaryExportRow {

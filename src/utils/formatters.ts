@@ -103,20 +103,20 @@ export function formatPrecise(val: number | undefined | null, decimals: number =
   return formatVietnameseNumber(val, decimals);
 }
 
-export function formatDate(dateStr: string | undefined | null): string {
+export function formatDate(dateStr: string | number | Date | undefined | null): string {
   if (!dateStr) return '';
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return dateStr;
+  const d = dateStr instanceof Date ? dateStr : new Date(dateStr);
+  if (isNaN(d.getTime())) return String(dateStr);
   const day = String(d.getDate()).padStart(2, '0');
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const year = d.getFullYear();
   return `${day}/${month}/${year}`;
 }
 
-export function formatDateTime(dateStr: string | undefined | null): string {
+export function formatDateTime(dateStr: string | number | Date | undefined | null): string {
   if (!dateStr) return '';
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return dateStr;
+  const d = dateStr instanceof Date ? dateStr : new Date(dateStr);
+  if (isNaN(d.getTime())) return String(dateStr);
   const hours = String(d.getHours()).padStart(2, '0');
   const minutes = String(d.getMinutes()).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');

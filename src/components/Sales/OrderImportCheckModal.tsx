@@ -103,22 +103,26 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
   // Combined Catalogs Maps (Existing + Manually Added)
   const allKnownCustomersMap = useMemo(() => {
     const map = new Map<string, Customer>();
-    existingCustomers.forEach((c) => {
-      map.set(c.code.trim().toUpperCase(), c);
+    (existingCustomers || []).forEach((c) => {
+      const key = String(c?.code || '').trim().toUpperCase();
+      if (key) map.set(key, c);
     });
     manuallyAddedCustomers.forEach((c) => {
-      map.set(c.code.trim().toUpperCase(), c);
+      const key = String(c?.code || '').trim().toUpperCase();
+      if (key) map.set(key, c);
     });
     return map;
   }, [existingCustomers, manuallyAddedCustomers]);
 
   const allKnownProductsMap = useMemo(() => {
     const map = new Map<string, Product>();
-    existingProducts.forEach((p) => {
-      map.set(p.code.trim().toUpperCase(), p);
+    (existingProducts || []).forEach((p) => {
+      const key = String(p?.code || '').trim().toUpperCase();
+      if (key) map.set(key, p);
     });
     manuallyAddedProducts.forEach((p) => {
-      map.set(p.code.trim().toUpperCase(), p);
+      const key = String(p?.code || '').trim().toUpperCase();
+      if (key) map.set(key, p);
     });
     return map;
   }, [existingProducts, manuallyAddedProducts]);
@@ -126,21 +130,21 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
   // Detect New Customers from imported orders (excluding ones already in catalog or manually added)
   const detectedNewCustomers = useMemo<Customer[]>(() => {
     const map = new Map<string, Customer>();
-    importedOrders.forEach((ord) => {
-      const rawCode = ord.customerCode?.trim().toUpperCase();
+    (importedOrders || []).forEach((ord) => {
+      const rawCode = String(ord?.customerCode || '').trim().toUpperCase();
       if (!rawCode) return;
       if (!allKnownCustomersMap.has(rawCode) && !map.has(rawCode)) {
         map.set(rawCode, {
           id: `cust-auto-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
           code: rawCode,
-          name: ord.customerName || `Khách hàng ${rawCode}`,
-          shortName: ord.customerName || `Khách hàng ${rawCode}`,
-          taxCode: ord.customerTaxCode || '',
-          idCard: ord.customerIdCard || '',
-          address: ord.customerAddress || '',
+          name: String(ord.customerName || `Khách hàng ${rawCode}`),
+          shortName: String(ord.customerName || `Khách hàng ${rawCode}`),
+          taxCode: String(ord.customerTaxCode || ''),
+          idCard: String(ord.customerIdCard || ''),
+          address: String(ord.customerAddress || ''),
           phone: '',
           type: ord.customerTaxCode ? 'organization' : 'personal',
-          notes: `Tự động tạo từ đơn hàng Excel (${ord.orderCode})`,
+          notes: `Tự động tạo từ đơn hàng Excel (${String(ord.orderCode || '')})`,
           createdAt: new Date().toISOString(),
         });
       }
@@ -151,26 +155,26 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
   // Detect New Products from all items in imported orders (excluding ones already in catalog or manually added)
   const detectedNewProducts = useMemo<Product[]>(() => {
     const map = new Map<string, Product>();
-    importedOrders.forEach((ord) => {
-      ord.items?.forEach((it) => {
-        const rawCode = it.productCode?.trim().toUpperCase();
+    (importedOrders || []).forEach((ord) => {
+      (ord?.items || []).forEach((it) => {
+        const rawCode = String(it?.productCode || '').trim().toUpperCase();
         if (!rawCode) return;
         if (!allKnownProductsMap.has(rawCode) && !map.has(rawCode)) {
-          const prePrice = it.preTaxPrice || 0;
+          const prePrice = Number(it.preTaxPrice) || 0;
           const vatRate = it.vatRate ?? 10;
-          const postPrice = it.postTaxPrice || (prePrice > 0 ? prePrice * (1 + vatRate / 100) : 0);
+          const postPrice = Number(it.postTaxPrice) || (prePrice > 0 ? prePrice * (1 + vatRate / 100) : 0);
           map.set(rawCode, {
             id: `prod-auto-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
             code: rawCode,
-            name: it.productName || rawCode,
+            name: String(it.productName || rawCode),
             category: 'Hàng bán Excel',
-            saleUnit: it.saleUnit || 'Cái',
-            purchaseUnit: it.saleUnit || 'Cái',
+            saleUnit: String(it.saleUnit || 'Cái'),
+            purchaseUnit: String(it.saleUnit || 'Cái'),
             conversionRate: 1,
             vatRate: vatRate,
             defaultSalePrice: postPrice,
             profitMargin: 20,
-            notes: `Tự động tạo từ đơn hàng Excel (${ord.orderCode})`,
+            notes: `Tự động tạo từ đơn hàng Excel (${String(ord.orderCode || '')})`,
           });
         }
       });
@@ -214,14 +218,14 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
     }));
 
     sorted.sort((a, b) => {
-      const dateCmp = a.ord.orderDate.localeCompare(b.ord.orderDate);
+      const dateCmp = String(a.ord.orderDate || '').localeCompare(String(b.ord.orderDate || ''));
       if (dateCmp !== 0) return dateCmp;
       return a.originalIdx - b.originalIdx;
     });
 
     let startingSeq = 0;
-    for (const ex of existingOrders) {
-      const seq = extractSequenceNumber(ex.orderCode, currentRule, ex.orderDate);
+    for (const ex of existingOrders || []) {
+      const seq = extractSequenceNumber(ex?.orderCode, currentRule, ex?.orderDate);
       if (seq !== null && seq > startingSeq) {
         startingSeq = seq;
       }
@@ -234,16 +238,17 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
     if (isPerDateRule) {
       const dateMap = new Map<string, typeof sorted>();
       sorted.forEach((item) => {
-        const d = item.ord.orderDate;
+        const d = String(item.ord.orderDate || '');
         if (!dateMap.has(d)) dateMap.set(d, []);
         dateMap.get(d)!.push(item);
       });
 
       for (const [, itemsForDate] of dateMap.entries()) {
         let maxForDate = 0;
-        for (const ex of existingOrders) {
-          if (itemsForDate.length > 0 && ex.orderDate === itemsForDate[0].ord.orderDate) {
-            const seq = extractSequenceNumber(ex.orderCode, currentRule, ex.orderDate);
+        const targetDate = String(itemsForDate[0]?.ord?.orderDate || '');
+        for (const ex of existingOrders || []) {
+          if (itemsForDate.length > 0 && String(ex?.orderDate || '') === targetDate) {
+            const seq = extractSequenceNumber(ex?.orderCode, currentRule, ex?.orderDate);
             if (seq !== null && seq > maxForDate) {
               maxForDate = seq;
             }
@@ -252,7 +257,7 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
         let seq = maxForDate;
         itemsForDate.forEach((item) => {
           seq += 1;
-          const code = formatOrderCode(currentRule, seq, item.ord.orderDate);
+          const code = formatOrderCode(currentRule, seq, String(item.ord.orderDate || ''));
           renumberedMap.set(item.ord.id, code);
         });
       }
@@ -284,14 +289,14 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
   // Analyze each order against all known customers & products (including manually added ones)
   const orderCatalogAnalysis = useMemo(() => {
     return computedOrders.map((ord) => {
-      const custCodeUpper = ord.customerCode?.trim().toUpperCase();
+      const custCodeUpper = String(ord.customerCode || '').trim().toUpperCase();
       const isCustomerUncataloged = !allKnownCustomersMap.has(custCodeUpper);
       const isCustomerManuallyAdded = manuallyAddedCustomers.some(
-        (c) => c.code.trim().toUpperCase() === custCodeUpper
+        (c) => String(c.code || '').trim().toUpperCase() === custCodeUpper
       );
 
       const uncatalogedItems =
-        ord.items?.filter((it) => !allKnownProductsMap.has(it.productCode?.trim().toUpperCase())) || [];
+        (ord.items || []).filter((it) => !allKnownProductsMap.has(String(it?.productCode || '').trim().toUpperCase())) || [];
       const hasUncatalogedProducts = uncatalogedItems.length > 0;
       const isRedFlagged = isCustomerUncataloged || hasUncatalogedProducts;
 
@@ -331,11 +336,13 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
 
   // Check for duplicate codes against existing orders
   const duplicateCodeSet = useMemo(() => {
-    const existingCodeSet = new Set(existingOrders.map((o) => o.orderCode.trim().toUpperCase()));
+    const existingCodeSet = new Set(
+      (existingOrders || []).map((o) => String(o?.orderCode || '').trim().toUpperCase()).filter(Boolean)
+    );
     const dupes = new Set<string>();
     computedOrders.forEach((o) => {
-      const codeUpper = o.orderCode.trim().toUpperCase();
-      if (existingCodeSet.has(codeUpper)) {
+      const codeUpper = String(o?.orderCode || '').trim().toUpperCase();
+      if (codeUpper && existingCodeSet.has(codeUpper)) {
         dupes.add(codeUpper);
       }
     });
@@ -428,8 +435,9 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
   };
 
   const handleSaveManualCustomer = (savedCust: Customer) => {
+    const savedKey = String(savedCust.code || '').trim().toUpperCase();
     setManuallyAddedCustomers((prev) => {
-      const next = prev.filter((c) => c.code.trim().toUpperCase() !== savedCust.code.trim().toUpperCase());
+      const next = prev.filter((c) => String(c.code || '').trim().toUpperCase() !== savedKey);
       return [...next, savedCust];
     });
     setIsCustomerModalOpen(false);
@@ -459,8 +467,9 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
   };
 
   const handleSaveManualProduct = (savedProd: Product) => {
+    const savedKey = String(savedProd.code || '').trim().toUpperCase();
     setManuallyAddedProducts((prev) => {
-      const next = prev.filter((p) => p.code.trim().toUpperCase() !== savedProd.code.trim().toUpperCase());
+      const next = prev.filter((p) => String(p.code || '').trim().toUpperCase() !== savedKey);
       return [...next, savedProd];
     });
     setIsProductModalOpen(false);
@@ -507,7 +516,7 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
     // Filter only new customers needed for the selected orders + any manually added
     const neededNewCusts = autoAddNewCustomers
       ? detectedNewCustomers.filter((c) =>
-          selectedOrdersList.some((o) => o.customerCode?.trim().toUpperCase() === c.code.trim().toUpperCase())
+          selectedOrdersList.some((o) => String(o.customerCode || '').trim().toUpperCase() === String(c.code || '').trim().toUpperCase())
         )
       : [];
     const finalCustomersToAdd = [...manuallyAddedCustomers, ...neededNewCusts];
@@ -516,7 +525,7 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
     const neededNewProds = autoAddNewProducts
       ? detectedNewProducts.filter((p) =>
           selectedOrdersList.some((o) =>
-            o.items?.some((it) => it.productCode?.trim().toUpperCase() === p.code.trim().toUpperCase())
+            (o.items || []).some((it) => String(it?.productCode || '').trim().toUpperCase() === String(p.code || '').trim().toUpperCase())
           )
         )
       : [];
@@ -539,11 +548,11 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
     setAutoAddNewProducts(true);
 
     const neededNewCusts = detectedNewCustomers.filter((c) =>
-      selectedOrdersList.some((o) => o.customerCode?.trim().toUpperCase() === c.code.trim().toUpperCase())
+      selectedOrdersList.some((o) => String(o.customerCode || '').trim().toUpperCase() === String(c.code || '').trim().toUpperCase())
     );
     const neededNewProds = detectedNewProducts.filter((p) =>
       selectedOrdersList.some((o) =>
-        o.items?.some((it) => it.productCode?.trim().toUpperCase() === p.code.trim().toUpperCase())
+        (o.items || []).some((it) => String(it?.productCode || '').trim().toUpperCase() === String(p.code || '').trim().toUpperCase())
       )
     );
 
@@ -1105,7 +1114,7 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
                           const { ord, isCustomerUncataloged, isCustomerManuallyAdded, hasUncatalogedProducts, isRedFlagged } = item;
                           const original = importedOrders.find((io) => io.id === ord.id);
                           const isSelected = selectedOrderIds.includes(ord.id);
-                          const isDupe = duplicateCodeSet.has(ord.orderCode.trim().toUpperCase());
+                          const isDupe = duplicateCodeSet.has(String(ord.orderCode || '').trim().toUpperCase());
                           const isCodeChanged = original && original.orderCode !== ord.orderCode;
 
                           return (
@@ -1178,8 +1187,8 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
                                         onClick={() =>
                                           handleOpenManualCustomerModal({
                                             id: `cust-auto-${Date.now()}`,
-                                            code: ord.customerCode?.trim().toUpperCase(),
-                                            name: ord.customerName || `Khách hàng ${ord.customerCode}`,
+                                            code: String(ord.customerCode || '').trim().toUpperCase(),
+                                            name: String(ord.customerName || `Khách hàng ${ord.customerCode}`),
                                             shortName: ord.customerName || `Khách hàng ${ord.customerCode}`,
                                             taxCode: ord.customerTaxCode || '',
                                             idCard: ord.customerIdCard || '',
@@ -1212,17 +1221,17 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
                               </td>
 
                               <td className="p-2.5 text-center font-semibold text-slate-600">
-                                {ord.items.length}
+                                {(ord.items || []).length}
                               </td>
 
                               {/* Mặt hàng trong đơn + Nút Thêm mã thủ công */}
                               <td className="p-2.5 max-w-[280px]">
                                 <div className="flex flex-wrap gap-1">
-                                  {ord.items.map((it, iIdx) => {
-                                    const codeUpper = it.productCode.trim().toUpperCase();
+                                  {(ord.items || []).map((it, iIdx) => {
+                                    const codeUpper = String(it?.productCode || '').trim().toUpperCase();
                                     const isItemUncataloged = !allKnownProductsMap.has(codeUpper);
                                     const isItemManuallyAdded = manuallyAddedProducts.some(
-                                      (p) => p.code.trim().toUpperCase() === codeUpper
+                                      (p) => String(p?.code || '').trim().toUpperCase() === codeUpper
                                     );
 
                                     return (
@@ -1255,8 +1264,8 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
                                             onClick={() =>
                                               handleOpenManualProductModal({
                                                 id: `prod-auto-${Date.now()}`,
-                                                code: it.productCode?.trim().toUpperCase(),
-                                                name: it.productName || it.productCode,
+                                                code: String(it.productCode || '').trim().toUpperCase(),
+                                                name: String(it.productName || it.productCode),
                                                 category: 'Hàng bán Excel',
                                                 saleUnit: it.saleUnit || 'Cái',
                                                 purchaseUnit: it.saleUnit || 'Cái',

@@ -34,10 +34,11 @@ export const DEFAULT_ORDER_CODE_RULES: OrderCodeRule[] = [
 /**
  * Formats a date string (YYYY-MM-DD) into specified format
  */
-export function formatDateForCode(dateStr: string, format: string = 'YYYYMMDD'): string {
+export function formatDateForCode(dateStr: string | number | Date | undefined | null, format: string = 'YYYYMMDD'): string {
   if (!dateStr) return '';
-  const parts = dateStr.slice(0, 10).split('-');
-  if (parts.length !== 3) return dateStr.replace(/-/g, '');
+  const str = dateStr instanceof Date ? dateStr.toISOString() : String(dateStr);
+  const parts = str.slice(0, 10).split('-');
+  if (parts.length !== 3) return str.replace(/-/g, '');
   const [yyyy, mm, dd] = parts;
   const yy = yyyy.slice(-2);
 
@@ -87,7 +88,9 @@ export function formatOrderCode(rule: OrderCodeRule, seq: number, orderDate?: st
 /**
  * Extracts sequence number from an order code given a rule
  */
-export function extractSequenceNumber(code: string, rule: OrderCodeRule, orderDate?: string): number | null {
+export function extractSequenceNumber(rawCode: string | number | undefined | null, rule: OrderCodeRule, orderDate?: string): number | null {
+  if (rawCode === undefined || rawCode === null || rawCode === '') return null;
+  const code = String(rawCode).trim();
   if (!code) return null;
   const sep = rule.separator ?? '-';
   const prefix = (rule.prefix || '').trim();
@@ -680,7 +683,9 @@ export function mergeOrdersByRootCode(
   // 4. Đảm bảo mọi đơn đều có rootCode duy nhất và sắp xếp theo ngày mới nhất
   const ensured = ensureOrdersHaveRootCode(merged, deletedOrders);
   return deduplicateOrders(ensured, deletedOrders).sort(
-    (a, b) => b.orderDate.localeCompare(a.orderDate) || b.createdAt.localeCompare(a.createdAt)
+    (a, b) =>
+      String(b.orderDate || '').localeCompare(String(a.orderDate || '')) ||
+      String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
   );
 }
 
@@ -745,10 +750,10 @@ export function sortOrdersOldestFirst(
 ): Order[] {
   const rulesList = rules && rules.length > 0 ? rules : DEFAULT_ORDER_CODE_RULES;
   return [...orders].sort((a, b) => {
-    const dateCmp = (a.orderDate || '').localeCompare(b.orderDate || '');
+    const dateCmp = String(a.orderDate || '').localeCompare(String(b.orderDate || ''));
     if (dateCmp !== 0) return dateCmp;
 
-    const createdCmp = (a.createdAt || '').localeCompare(b.createdAt || '');
+    const createdCmp = String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
     if (createdCmp !== 0) return createdCmp;
 
     const ruleA = matchOrderToRule(a, rulesList);
@@ -759,13 +764,13 @@ export function sortOrdersOldestFirst(
       return seqA - seqB;
     }
 
-    const codeCmp = (a.orderCode || '').localeCompare(b.orderCode || '', 'vi', {
+    const codeCmp = String(a.orderCode || '').localeCompare(String(b.orderCode || ''), 'vi', {
       numeric: true,
       sensitivity: 'base',
     });
     if (codeCmp !== 0) return codeCmp;
 
-    return (a.rootCode || '').localeCompare(b.rootCode || '');
+    return String(a.rootCode || '').localeCompare(String(b.rootCode || ''));
   });
 }
 

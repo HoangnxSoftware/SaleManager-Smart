@@ -1,11 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { Customer, Order, Product, PurchaseBill, AppUser, AppSettings, DebtPayment, DeliveryStatus, DeletedOrderRecord } from '../../types';
-import { formatCurrency, formatDate, formatPaymentMethod, parsePaymentMethod } from '../../utils/formatters';
+import { formatCurrency, formatDate, formatPaymentMethod, parsePaymentMethod, parseVietnameseNumber } from '../../utils/formatters';
 import {
   exportOrdersToExcel,
   exportOrderDetailsToExcel,
   downloadOrderTemplate,
   parseExcelFile,
+  normalizeExcelDateToYMD,
   exportCustomersToExcel,
   downloadCustomerTemplate,
 } from '../../services/excelService';
@@ -31,6 +32,7 @@ import { OrderPrintModal } from '../Print/OrderPrintModal';
 import { OrderDetailsTab } from './OrderDetailsTab';
 import { CatalogExcelImportModal, CatalogImportCheckItem, CatalogImportFieldDiff } from '../Common/CatalogExcelImportModal';
 import { ManualSyncBar } from '../Common/ManualSyncBar';
+import { ErrorBoundary } from '../Common/ErrorBoundary';
 import { useConfirm } from '../../context/ConfirmContext';
 import {
   Plus,
@@ -271,22 +273,28 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
   const uniqueOrders = useMemo(() => deduplicateOrders(orders), [orders]);
 
   const filteredOrders = useMemo(() => {
+    const q = searchTerm.toLowerCase();
     return uniqueOrders.filter((o) => {
       const creatorInfo = getOrderCreator(o);
+      const ordCode = String(o.orderCode || '');
+      const custName = String(o.customerName || '');
+      const custCode = String(o.customerCode || '');
+      const ordDate = String(o.orderDate || '');
+      const itemsList = Array.isArray(o.items) ? o.items : [];
 
       const matchSearch =
         !searchTerm.trim() ||
-        o.orderCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        o.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        o.customerCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (o.createdByName && o.createdByName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        creatorInfo.name.toLowerCase().includes(searchTerm.toLowerCase());
+        ordCode.toLowerCase().includes(q) ||
+        custName.toLowerCase().includes(q) ||
+        custCode.toLowerCase().includes(q) ||
+        (o.createdByName && String(o.createdByName).toLowerCase().includes(q)) ||
+        String(creatorInfo.name || '').toLowerCase().includes(q);
 
       const isCustomerUncataloged = !customers.some(
-        (c) => c.code.trim().toUpperCase() === o.customerCode?.trim().toUpperCase() || c.id === o.customerId
+        (c) => String(c.code || '').trim().toUpperCase() === custCode.trim().toUpperCase() || c.id === o.customerId
       );
-      const hasUncatalogedProds = o.items.some(
-        (it) => !products.some((p) => p.code.trim().toUpperCase() === it.productCode?.trim().toUpperCase())
+      const hasUncatalogedProds = itemsList.some(
+        (it) => !products.some((p) => String(p.code || '').trim().toUpperCase() === String(it.productCode || '').trim().toUpperCase())
       );
       const isRedFlagged = isCustomerUncataloged || hasUncatalogedProds;
 
@@ -298,7 +306,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           : o.deliveryStatus === statusFilter;
 
       const matchDate =
-        (!startDate || o.orderDate >= startDate) && (!endDate || o.orderDate <= endDate);
+        (!startDate || ordDate >= startDate) && (!endDate || ordDate <= endDate);
       const matchSalesperson =
         salespersonFilter === 'all' ||
         creatorInfo.name === salespersonFilter ||
@@ -307,16 +315,20 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
       return matchSearch && matchStatus && matchDate && matchSalesperson;
     }).sort((a, b) => {
       const dir = orderSortDirection === 'asc' ? 1 : -1;
+      const codeA = String(a.orderCode || '');
+      const codeB = String(b.orderCode || '');
+      const dateA = String(a.orderDate || '');
+      const dateB = String(b.orderDate || '');
       if (orderSortField === 'orderCode') {
-        const cmp = a.orderCode.localeCompare(b.orderCode, 'vi', { numeric: true, sensitivity: 'base' });
+        const cmp = codeA.localeCompare(codeB, 'vi', { numeric: true, sensitivity: 'base' });
         if (cmp !== 0) return cmp * dir;
-        return a.orderDate.localeCompare(b.orderDate) * dir;
+        return dateA.localeCompare(dateB) * dir;
       }
-      const dateCmp = a.orderDate.localeCompare(b.orderDate);
+      const dateCmp = dateA.localeCompare(dateB);
       if (dateCmp !== 0) return dateCmp * dir;
-      const codeCmp = a.orderCode.localeCompare(b.orderCode, 'vi', { numeric: true, sensitivity: 'base' });
+      const codeCmp = codeA.localeCompare(codeB, 'vi', { numeric: true, sensitivity: 'base' });
       if (codeCmp !== 0) return codeCmp * dir;
-      return a.createdAt.localeCompare(b.createdAt) * dir;
+      return String(a.createdAt || '').localeCompare(String(b.createdAt || '')) * dir;
     });
   }, [uniqueOrders, searchTerm, statusFilter, startDate, endDate, salespersonFilter, customers, products, users, orderSortField, orderSortDirection]);
 
@@ -903,11 +915,24 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
     }
 
     try {
-      const rows = await parseExcelFile(file);
-      if (!rows || rows.length === 0) {
+      const rawRows = await parseExcelFile(file);
+      const rows = (rawRows || []).filter(
+        (r: any) =>
+          r &&
+          typeof r === 'object' &&
+          Object.values(r).some((val) => val !== undefined && val !== null && String(val).trim() !== '')
+      );
+      if (rows.length === 0) {
         alert('File Excel rỗng hoặc không đúng định dạng mẫu.');
         return;
       }
+
+      const parseExcelNum = (val: unknown, fallback = 0): number => {
+        if (val === undefined || val === null || val === '') return fallback;
+        if (typeof val === 'number') return isNaN(val) ? fallback : val;
+        const parsed = parseVietnameseNumber(String(val));
+        return isNaN(parsed) ? fallback : parsed;
+      };
 
       // REQUIREMENT: Đồng bộ mã hàng hóa và mã khách hàng (loại bỏ dấu cách thừa, viết hoa để khớp với phần mềm)
       // Thu thập thông tin cảnh báo đồng bộ mã trước khi đẩy dữ liệu vào phần mềm
@@ -915,10 +940,14 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
       setPendingProductSync(syncSummary.productSyncList);
       setPendingCustomerSync(syncSummary.customerSyncList);
 
-      // Group rows by Order code
+      // Group rows by Order code (also support continuation rows with empty Mã đơn if exported from ChiTietDonHang)
       const orderGroups = new Map<string, any[]>();
-      rows.forEach((r: any) => {
-        const code = String(r['Mã đơn'] || r['Mã đơn hàng'] || `DH-IMP-${Date.now()}`).trim();
+      let lastOrderCode = '';
+      rows.forEach((r: any, rowIdx: number) => {
+        const rawCodeVal = r['Mã đơn'] ?? r['Mã đơn hàng'] ?? r['Số đơn'] ?? '';
+        const explicitCode = String(rawCodeVal).trim();
+        const code = explicitCode || lastOrderCode || `DH-IMP-${Date.now()}-${rowIdx + 1}`;
+        if (explicitCode) lastOrderCode = explicitCode;
         const list = orderGroups.get(code) || [];
         list.push(r);
         orderGroups.set(code, list);
@@ -927,8 +956,8 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
       const newOrdersList: Order[] = [];
 
       for (const [code, itemsList] of orderGroups.entries()) {
-        const first = itemsList[0];
-        const rawCustCode = String(first['Mã KH'] || first['Mã khách hàng'] || 'KH001');
+        const first = itemsList[0] || {};
+        const rawCustCode = String(first['Mã KH'] ?? first['Mã khách hàng'] ?? 'KH001');
         
         // Đồng bộ Mã khách hàng: loại bỏ dấu cách thừa, viết hoa, tìm khớp với danh mục
         const custMatch = matchCustomerCode(rawCustCode, customers);
@@ -943,33 +972,98 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         let totalDiscount = 0;
 
         const orderItems = itemsList.map((row: any, idx: number) => {
-          const rawPCode = String(row['Mã HH'] || row['Mã hàng hóa'] || 'PROD');
+          const rawPCode = String(row['Mã HH'] ?? row['Mã hàng hóa'] ?? row['Mã hàng'] ?? 'PROD');
           
           // Đồng bộ Mã hàng hóa: loại bỏ dấu cách thừa, viết hoa, tìm khớp với danh mục
           const prodMatch = matchProductCode(rawPCode, products);
           const prod = prodMatch.matchedProduct;
           const syncedPCode = prodMatch.syncedCode;
 
-          // REQUIREMENT: Cho phép nhập phiếu có số lượng và đơn giá trước thuế = 0.
-          // Tuyệt đối không được chuyển số lượng 0 thành 1, không được chuyển đơn giá trước thuế 0 thành 100.000!
-          const rawQty =
+          // REQUIREMENT: Cho phép nhập phiếu có số lượng và đơn giá bán sau thuế = 0.
+          // Tuyệt đối không được chuyển số lượng 0 thành 1, không được chuyển đơn giá 0 thành giá mặc định!
+          const rawQtyVal =
             row['Số lượng'] !== undefined && row['Số lượng'] !== '' && row['Số lượng'] !== null
-              ? Number(row['Số lượng'])
-              : (row['SL'] !== undefined && row['SL'] !== '' && row['SL'] !== null ? Number(row['SL']) : 0);
-          const qty = isNaN(rawQty) ? 0 : rawQty;
+              ? row['Số lượng']
+              : row['SL'];
+          const qty = parseExcelNum(rawQtyVal, 0);
 
-          const rawPrePrice =
+          const rawVatVal =
+            row['Thuế suất (%)'] ??
+            row['Thuế suất GTGT từng mặt hàng (%)'] ??
+            row['Thuế suất'] ??
+            row['VAT'];
+          const vat =
+            rawVatVal !== undefined && rawVatVal !== '' && rawVatVal !== null
+              ? parseExcelNum(rawVatVal, 0)
+              : 10;
+
+          const itemDisc = parseExcelNum(
+            row['Chiết khấu mặt hàng'] ?? row['Chiết khấu giảm giá từng mặt hàng'] ?? row['Chiết khấu'],
+            0
+          );
+
+          const rawPostPriceVal =
+            row['Đơn giá bán sau thuế'] !== undefined && row['Đơn giá bán sau thuế'] !== '' && row['Đơn giá bán sau thuế'] !== null
+              ? row['Đơn giá bán sau thuế']
+              : row['Đơn giá sau thuế'] !== undefined && row['Đơn giá sau thuế'] !== '' && row['Đơn giá sau thuế'] !== null
+              ? row['Đơn giá sau thuế']
+              : row['Giá bán sau thuế'] !== undefined && row['Giá bán sau thuế'] !== '' && row['Giá bán sau thuế'] !== null
+              ? row['Giá bán sau thuế']
+              : undefined;
+
+          const rawLegacyPrePriceVal =
             row['Đơn giá trước thuế'] !== undefined && row['Đơn giá trước thuế'] !== '' && row['Đơn giá trước thuế'] !== null
-              ? Number(row['Đơn giá trước thuế'])
-              : (row['Đơn giá'] !== undefined && row['Đơn giá'] !== '' && row['Đơn giá'] !== null ? Number(row['Đơn giá']) : 0);
-          const prePrice = isNaN(rawPrePrice) ? 0 : rawPrePrice;
+              ? row['Đơn giá trước thuế']
+              : row['Đơn giá bán trước thuế'] !== undefined && row['Đơn giá bán trước thuế'] !== '' && row['Đơn giá bán trước thuế'] !== null
+              ? row['Đơn giá bán trước thuế']
+              : row['Đơn giá'];
 
-          const vat = Number(row['Thuế suất (%)'] ?? row['Thuế suất'] ?? row['VAT'] ?? 10) || 0;
-          const itemDisc = Number(row['Chiết khấu mặt hàng'] ?? row['Chiết khấu'] ?? 0) || 0;
+          const salePriceDecimals = settings.salePriceDecimals ?? 2;
+          const rate = 1 + vat / 100;
 
-          const sub = qty * prePrice;
-          const vatAmt = ((sub - itemDisc) * vat) / 100;
-          const tot = sub - itemDisc + vatAmt;
+          let postPrice = 0;
+          let prePrice = 0;
+          let sub = 0;
+          let vatAmt = 0;
+          let tot = 0;
+
+          if (
+            rawPostPriceVal !== undefined ||
+            rawLegacyPrePriceVal === undefined ||
+            rawLegacyPrePriceVal === '' ||
+            rawLegacyPrePriceVal === null
+          ) {
+            postPrice = parseExcelNum(rawPostPriceVal, 0);
+            if (itemDisc === 0) {
+              tot = Math.round(Math.max(0, qty * postPrice));
+              sub = rate > 0 ? Math.round(tot / rate) : tot;
+              vatAmt = tot - sub;
+              prePrice =
+                qty > 0
+                  ? Number((sub / qty).toFixed(salePriceDecimals))
+                  : rate > 0
+                  ? Number((postPrice / rate).toFixed(salePriceDecimals))
+                  : postPrice;
+            } else {
+              const grossTot = Math.round(Math.max(0, qty * postPrice));
+              sub = rate > 0 ? Math.round(grossTot / rate) : grossTot;
+              prePrice =
+                qty > 0
+                  ? Number((sub / qty).toFixed(salePriceDecimals))
+                  : rate > 0
+                  ? Number((postPrice / rate).toFixed(salePriceDecimals))
+                  : postPrice;
+              const netSub = Math.max(0, sub - itemDisc);
+              vatAmt = Math.round((netSub * vat) / 100);
+              tot = netSub + vatAmt;
+            }
+          } else {
+            prePrice = parseExcelNum(rawLegacyPrePriceVal, 0);
+            postPrice = Number((prePrice * rate).toFixed(salePriceDecimals));
+            sub = qty * prePrice;
+            vatAmt = ((sub - itemDisc) * vat) / 100;
+            tot = sub - itemDisc + vatAmt;
+          }
 
           totalPreTax += sub;
           totalVat += vatAmt;
@@ -978,11 +1072,11 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           return {
             id: `oi-imp-${Date.now()}-${idx}-${Math.random()}`,
             productCode: syncedPCode,
-            productName: prod?.name || String(row['Tên HH'] || row['Tên hàng hóa'] || syncedPCode),
-            saleUnit: prod?.saleUnit || String(row['Đơn vị tính'] || row['ĐVT'] || row['ĐVT_Bán'] || 'Cái'),
+            productName: String(prod?.name || row['Tên HH'] || row['Tên hàng hóa'] || syncedPCode),
+            saleUnit: String(prod?.saleUnit || row['Đơn vị tính'] || row['ĐVT'] || row['ĐVT_Bán'] || 'Cái'),
             quantity: qty,
             preTaxPrice: prePrice,
-            postTaxPrice: prePrice * (1 + vat / 100),
+            postTaxPrice: postPrice,
             itemDiscount: itemDisc,
             vatRate: vat,
             vatAmount: vatAmt,
@@ -991,9 +1085,12 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           };
         });
 
-        const ordDiscount = Number(first['Chiết khấu tổng đơn']) || 0;
+        const ordDiscount = parseExcelNum(
+          first['Chiết khấu tổng đơn'] ?? first['Chiết khấu giảm giá tổng đơn hàng'],
+          0
+        );
         const grandTotal = Math.max(0, totalPreTax - totalDiscount - ordDiscount) + totalVat;
-        const paid = Number(first['Đã thanh toán']) || 0;
+        const paid = parseExcelNum(first['Đã thanh toán'], 0);
 
         // Extract and map creator from Excel
         const rawCreator = String(
@@ -1024,18 +1121,26 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           }
         }
 
+        const normalizedOrderDate = normalizeExcelDateToYMD(
+          first['Ngày (YYYY-MM-DD)'] ??
+            first['Ngày đặt'] ??
+            first['Ngày tháng'] ??
+            first['Ngày đơn'] ??
+            first['Ngày']
+        );
+
         const nowIso = new Date().toISOString();
         newOrdersList.push({
           id: `ord-imp-${Date.now()}-${Math.floor(100 + Math.random() * 900)}-${newOrdersList.length}`,
           rootCode: generateNextRootCode([...orders, ...newOrdersList], deletedOrders, nowIso),
           orderCode: code,
-          orderDate: first['Ngày (YYYY-MM-DD)'] || new Date().toISOString().slice(0, 10),
+          orderDate: normalizedOrderDate,
           customerId: cust?.id || `cust-imp-${syncedCustCode}`,
           customerCode: syncedCustCode,
           customerName: custName,
-          customerTaxCode: cust?.taxCode || String(first['Mã số thuế'] || first['MST'] || ''),
-          customerIdCard: cust?.idCard || String(first['Số CCCD'] || first['CCCD'] || ''),
-          customerAddress: cust?.address || String(first['Địa chỉ'] || ''),
+          customerTaxCode: String(cust?.taxCode || first['Mã số thuế'] || first['MST'] || ''),
+          customerIdCard: String(cust?.idCard || first['Số CCCD'] || first['CCCD'] || ''),
+          customerAddress: String(cust?.address || first['Địa chỉ'] || ''),
           items: orderItems,
           itemDiscountTotal: totalDiscount,
           orderDiscount: ordDiscount,
@@ -1043,7 +1148,9 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
           totalPreTax,
           totalVat,
           totalAmount: grandTotal,
-          paymentMethod: parsePaymentMethod(first['Phương thức thanh toán']),
+          paymentMethod: parsePaymentMethod(
+            first['Phương thức thanh toán'] !== undefined ? String(first['Phương thức thanh toán']) : ''
+          ),
           paidAmount: paid,
           debtAmount: Math.max(0, grandTotal - paid),
           deliveryStatus: 'pending',
@@ -1058,10 +1165,11 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
       // REQUIREMENT: Khi up đơn bán hàng, có phần kiểm tra, chọn quy tắc tạo mã trong danh sách quy tắc tạo mã, phần mềm tự động đánh lại số đơn hàng theo thứ tự tăng dần
       setPendingImportOrders(newOrdersList);
       setIsOrderImportCheckModalOpen(true);
-      e.target.value = '';
     } catch (err: any) {
-      console.error(err);
-      alert(`Lỗi khi đọc file Excel: ${err.message}`);
+      console.error('Lỗi nhập Excel đơn hàng:', err);
+      alert(`Lỗi khi đọc file Excel: ${err?.message || 'Định dạng không hợp lệ'}`);
+    } finally {
+      e.target.value = '';
     }
   };
 
@@ -1659,11 +1767,13 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                   ) : (
                     filteredOrders.map((order) => {
                       const isSelected = selectedOrderIds.includes(order.id);
+                      const ordCustCode = String(order.customerCode || '').trim().toUpperCase();
                       const isCustomerUncataloged = !customers.some(
-                        (c) => c.code.trim().toUpperCase() === order.customerCode?.trim().toUpperCase() || c.id === order.customerId
+                        (c) => String(c.code || '').trim().toUpperCase() === ordCustCode || c.id === order.customerId
                       );
-                      const uncatalogedItemCodes = order.items
-                        .filter((it) => !products.some((p) => p.code.trim().toUpperCase() === it.productCode?.trim().toUpperCase()))
+                      const ordItems = Array.isArray(order.items) ? order.items : [];
+                      const uncatalogedItemCodes = ordItems
+                        .filter((it) => !products.some((p) => String(p.code || '').trim().toUpperCase() === String(it.productCode || '').trim().toUpperCase()))
                         .map((it) => it.productCode);
                       const hasUncatalogedProds = uncatalogedItemCodes.length > 0;
                       const isOrderRedFlagged = isCustomerUncataloged || hasUncatalogedProds;
@@ -2431,34 +2541,35 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
 
       {/* Order Excel Import Check & Rule Selection Modal - KHÔNG CHO PHÉP NHÂN VIÊN BÁN HÀNG */}
       {isOrderImportCheckModalOpen && !isSalesperson && (
-        <OrderImportCheckModal
-          isOpen={isOrderImportCheckModalOpen}
-          importedOrders={pendingImportOrders}
-          existingOrders={orders}
-          existingProducts={products}
-          existingCustomers={customers}
-          rules={settings.orderCodeRules && settings.orderCodeRules.length > 0 ? settings.orderCodeRules : [
-            {
-              id: 'rule-dh',
-              name: 'Đơn bán hàng (DH-)',
-              patternType: 'prefix_only',
-              prefix: 'DH',
-              separator: '-',
-              minDigits: 1,
-              isDefault: true,
-            }
-          ]}
-          defaultRuleId={settings.defaultOrderCodeRuleId || 'rule-dh'}
-          productSyncList={pendingProductSync}
-          customerSyncList={pendingCustomerSync}
-          onConfirmImport={handleConfirmImportOrders}
-          onCancel={() => {
+        <ErrorBoundary
+          fallbackTitle="Lỗi khi kiểm tra dữ liệu đơn hàng Excel"
+          resetLabel="Đóng cửa sổ nhập Excel"
+          onReset={() => {
             setIsOrderImportCheckModalOpen(false);
             setPendingImportOrders([]);
             setPendingProductSync([]);
             setPendingCustomerSync([]);
           }}
-        />
+        >
+          <OrderImportCheckModal
+            isOpen={isOrderImportCheckModalOpen}
+            importedOrders={pendingImportOrders}
+            existingOrders={orders}
+            existingProducts={products}
+            existingCustomers={customers}
+            rules={settings.orderCodeRules && settings.orderCodeRules.length > 0 ? settings.orderCodeRules : DEFAULT_ORDER_CODE_RULES}
+            defaultRuleId={settings.defaultOrderCodeRuleId || 'rule-dh'}
+            productSyncList={pendingProductSync}
+            customerSyncList={pendingCustomerSync}
+            onConfirmImport={handleConfirmImportOrders}
+            onCancel={() => {
+              setIsOrderImportCheckModalOpen(false);
+              setPendingImportOrders([]);
+              setPendingProductSync([]);
+              setPendingCustomerSync([]);
+            }}
+          />
+        </ErrorBoundary>
       )}
     </div>
   );
