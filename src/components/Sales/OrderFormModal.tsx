@@ -26,6 +26,9 @@ import {
   Sparkles,
   Lock,
   ArrowLeftRight,
+  MapPin,
+  Package,
+  Filter,
 } from 'lucide-react';
 import { DEFAULT_ORDER_CODE_RULES, generateNextOrderCode, matchOrderToRule, generateNextRootCode } from '../../services/orderCodeService';
 import { ChangeProductModal } from './ChangeProductModal';
@@ -124,11 +127,19 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
     }
   };
 
-  // Items
+  // Items & Product Tabs
   const [items, setItems] = useState<OrderItem[]>([]);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
+  const [activeProductTab, setActiveProductTab] = useState<'order_items' | 'inventory_list'>('order_items');
   const [productSearchTerm, setProductSearchTerm] = useState('');
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
+
+  // Inventory tab filters & planned quantity drafts
+  const [inventorySearchTerm, setInventorySearchTerm] = useState('');
+  const [stockFilterType, setStockFilterType] = useState<'all' | 'in_stock' | 'zero_stock' | 'negative_stock' | 'planned'>('all');
+  const [minStockFilter, setMinStockFilter] = useState('');
+  const [maxStockFilter, setMaxStockFilter] = useState('');
+  const [plannedQtyDrafts, setPlannedQtyDrafts] = useState<Record<string, string>>({});
 
   // Refs for click outside handling
   const productSearchRef = useRef<HTMLDivElement>(null);
@@ -179,6 +190,12 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
       setHasRestoredDraft(false);
       setDraftSavedAt(null);
       setSelectedItemIds([]);
+      setActiveProductTab('order_items');
+      setInventorySearchTerm('');
+      setStockFilterType('all');
+      setMinStockFilter('');
+      setMaxStockFilter('');
+      setPlannedQtyDrafts({});
     }
   }, [isOpen]);
 
@@ -194,6 +211,8 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
     }
     initializedSessionKeyRef.current = currentSessionKey;
     setSelectedItemIds([]);
+    setActiveProductTab('order_items');
+    setPlannedQtyDrafts({});
 
     if (initialOrder) {
       setHasRestoredDraft(false);
@@ -444,7 +463,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
     onClose();
   };
 
-  // Filter customers by Name, Short name, Tax code, Phone, Code
+  // Filter customers by Name, Short name, Tax code, Phone, Code, Address
   const filteredCustomers = useMemo(() => {
     if (!customerSearchTerm.trim()) return customers.slice(0, 8);
     const q = customerSearchTerm.toLowerCase();
@@ -455,6 +474,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
         c.code.toLowerCase().includes(q) ||
         (c.softwareCode && c.softwareCode.toLowerCase().includes(q)) ||
         (c.reconciliationName && c.reconciliationName.toLowerCase().includes(q)) ||
+        (c.address && c.address.toLowerCase().includes(q)) ||
         c.taxCode.toLowerCase().includes(q) ||
         c.phone.toLowerCase().includes(q)
     ).slice(0, 8);
@@ -536,6 +556,140 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
       remainingOverallDebt,
     };
   }, [items, discountType, orderDiscountInput, paidAmount, customerHistory.priorDebt]);
+
+  // Precompute suggested post-tax prices for products when the inventory tab is active
+  const inventorySuggestedPriceMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!isOpen || activeProductTab !== 'inventory_list') return map;
+
+    const postTaxDecimals = settings.postTaxSalePriceDecimals ?? -2;
+    const preTaxDecimals = settings.salePriceDecimals ?? 2;
+
+    products.forEach((prod) => {
+      const sp = calculateSuggestedPrices(
+        prod,
+        orderDate,
+        products,
+        purchases,
+        allOrders,
+        postTaxDecimals,
+        preTaxDecimals,
+        initialOrder?.id
+      );
+      let suggestedPostTax = 0;
+      if (sp.priceByMargin > 0) {
+        suggestedPostTax = sp.priceByMargin;
+      } else if (sp.hasDefaultPrice) {
+        suggestedPostTax = sp.defaultPrice;
+      }
+      map.set(prod.code, suggestedPostTax);
+    });
+    return map;
+  }, [
+    isOpen,
+    activeProductTab,
+    products,
+    orderDate,
+    purchases,
+    allOrders,
+    settings.postTaxSalePriceDecimals,
+    settings.salePriceDecimals,
+    initialOrder?.id,
+  ]);
+
+  // Quick lookup of current order items aggregated by productCode
+  const orderItemsByProductCode = useMemo(() => {
+    const map = new Map<string, { totalQty: number; totalAmount: number; unitPostTaxPrice: number }>();
+    items.forEach((it) => {
+      const existing = map.get(it.productCode);
+      if (!existing) {
+        map.set(it.productCode, {
+          totalQty: Number(it.quantity) || 0,
+          totalAmount: Number(it.totalAmount) || 0,
+          unitPostTaxPrice: Number(it.postTaxPrice) || 0,
+        });
+      } else {
+        existing.totalQty += Number(it.quantity) || 0;
+        existing.totalAmount += Number(it.totalAmount) || 0;
+      }
+    });
+    return map;
+  }, [items]);
+
+  // Filtered product rows for the 'Danh sách mặt hàng tồn' tab
+  const filteredInventoryProducts = useMemo(() => {
+    const q = inventorySearchTerm.trim().toLowerCase();
+    const minVal = minStockFilter.trim() !== '' ? parseFloat(minStockFilter) : null;
+    const maxVal = maxStockFilter.trim() !== '' ? parseFloat(maxStockFilter) : null;
+
+    return products.filter((p) => {
+      if (q) {
+        const matchText =
+          p.name.toLowerCase().includes(q) ||
+          p.code.toLowerCase().includes(q) ||
+          (p.reconciliationCode && p.reconciliationCode.toLowerCase().includes(q)) ||
+          (p.category && p.category.toLowerCase().includes(q));
+        if (!matchText) return false;
+      }
+
+      const stock = inventoryStockMap.get(p.code)?.inStock ?? 0;
+
+      if (stockFilterType === 'in_stock' && stock <= 0) return false;
+      if (stockFilterType === 'zero_stock' && stock !== 0) return false;
+      if (stockFilterType === 'negative_stock' && stock >= 0) return false;
+      if (stockFilterType === 'planned') {
+        const plannedQty = orderItemsByProductCode.get(p.code)?.totalQty ?? 0;
+        if (plannedQty <= 0) return false;
+      }
+
+      if (minVal !== null && !isNaN(minVal) && stock < minVal) return false;
+      if (maxVal !== null && !isNaN(maxVal) && stock > maxVal) return false;
+
+      return true;
+    });
+  }, [
+    products,
+    inventorySearchTerm,
+    stockFilterType,
+    minStockFilter,
+    maxStockFilter,
+    inventoryStockMap,
+    orderItemsByProductCode,
+  ]);
+
+  // Summary counters for stock filter & planned exports
+  const inventoryTabStats = useMemo(() => {
+    let inStockCount = 0;
+    let zeroStockCount = 0;
+    let negativeStockCount = 0;
+    let plannedProductCount = 0;
+    let plannedTotalQty = 0;
+    let plannedTotalAmount = 0;
+
+    products.forEach((p) => {
+      const stock = inventoryStockMap.get(p.code)?.inStock ?? 0;
+      if (stock > 0) inStockCount++;
+      else if (stock === 0) zeroStockCount++;
+      else negativeStockCount++;
+
+      const itemInfo = orderItemsByProductCode.get(p.code);
+      if (itemInfo && itemInfo.totalQty > 0) {
+        plannedProductCount++;
+        plannedTotalQty += itemInfo.totalQty;
+        plannedTotalAmount += itemInfo.totalAmount;
+      }
+    });
+
+    return {
+      totalProducts: products.length,
+      inStockCount,
+      zeroStockCount,
+      negativeStockCount,
+      plannedProductCount,
+      plannedTotalQty,
+      plannedTotalAmount,
+    };
+  }, [products, inventoryStockMap, orderItemsByProductCode]);
 
   if (!isOpen) return null;
 
@@ -805,6 +959,152 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
 
   const isAdmin = currentUser.role === 'admin';
   const isLockedCompleted = Boolean(initialOrder && initialOrder.deliveryStatus === 'completed' && !isAdmin);
+
+  // Sync a product's planned export quantity from the 'Danh sách mặt hàng tồn' tab directly into 'items'
+  const syncProductPlannedQuantity = (prod: Product, qty: number) => {
+    if (isLockedCompleted) return;
+    const cleanQty = isNaN(qty) || qty <= 0 ? 0 : qty;
+
+    if (cleanQty <= 0) {
+      setItems((prev) => {
+        const removedIds = new Set(prev.filter((it) => it.productCode === prod.code).map((it) => it.id));
+        if (removedIds.size > 0) {
+          setSelectedItemIds((sel) => sel.filter((id) => !removedIds.has(id)));
+        }
+        return prev.filter((it) => it.productCode !== prod.code);
+      });
+      return;
+    }
+
+    setItems((prev) => {
+      const firstIdx = prev.findIndex((it) => it.productCode === prod.code);
+      if (firstIdx !== -1) {
+        const existing = prev[firstIdx];
+        const postTax = existing.postTaxPrice;
+        const vat = existing.vatRate ?? (prod.vatRate ?? 10);
+        const rate = 1 + vat / 100;
+        const discount = existing.itemDiscount || 0;
+        const totalAmount = Math.round(Math.max(0, cleanQty * postTax - discount));
+        const subtotal = rate > 0 ? Math.round(totalAmount / rate) : totalAmount;
+        const vatAmount = totalAmount - subtotal;
+        const preTax = cleanQty > 0 ? Number((subtotal / cleanQty).toFixed(salePriceDecimals)) : 0;
+
+        const updatedFirst: OrderItem = {
+          ...existing,
+          quantity: cleanQty,
+          preTaxPrice: preTax,
+          vatAmount,
+          subtotal,
+          totalAmount,
+        };
+
+        // Keep single consolidated row for this productCode when updated from inventory tab
+        const next: OrderItem[] = [];
+        prev.forEach((it, idx) => {
+          if (idx === firstIdx) {
+            next.push(updatedFirst);
+          } else if (it.productCode !== prod.code) {
+            next.push(it);
+          }
+        });
+        return next;
+      }
+
+      // Product not yet in order items: create new OrderItem using auto-suggested post-tax price
+      let postTax = inventorySuggestedPriceMap.get(prod.code);
+      if (postTax === undefined) {
+        const sp = calculateSuggestedPrices(
+          prod,
+          orderDate,
+          products,
+          purchases,
+          allOrders,
+          settings.postTaxSalePriceDecimals ?? -2,
+          salePriceDecimals,
+          initialOrder?.id
+        );
+        postTax = sp.priceByMargin > 0 ? sp.priceByMargin : sp.hasDefaultPrice ? sp.defaultPrice : 0;
+      }
+
+      const vat = prod.vatRate ?? 10;
+      const rate = 1 + vat / 100;
+      const totalAmount = Math.round(cleanQty * postTax);
+      const subtotal = rate > 0 ? Math.round(totalAmount / rate) : totalAmount;
+      const vatAmount = totalAmount - subtotal;
+      const preTax = cleanQty > 0 ? Number((subtotal / cleanQty).toFixed(salePriceDecimals)) : 0;
+
+      const newItem: OrderItem = {
+        id: `item-${Date.now()}-${Math.random()}`,
+        productCode: prod.code,
+        productName: prod.name,
+        saleUnit: prod.saleUnit,
+        quantity: cleanQty,
+        preTaxPrice: preTax,
+        postTaxPrice: postTax,
+        itemDiscount: 0,
+        vatRate: vat,
+        vatAmount,
+        subtotal,
+        totalAmount,
+      };
+      return [...prev, newItem];
+    });
+  };
+
+  const handlePlannedQtyChange = (prod: Product, rawValue: string) => {
+    if (isLockedCompleted) return;
+    setPlannedQtyDrafts((prev) => ({ ...prev, [prod.code]: rawValue }));
+
+    if (rawValue.trim() === '') {
+      return;
+    }
+
+    const parsed = parseFloat(rawValue);
+    if (!isNaN(parsed)) {
+      syncProductPlannedQuantity(prod, Math.max(0, parsed));
+    }
+  };
+
+  const handlePlannedQtyBlur = (prod: Product) => {
+    const raw = plannedQtyDrafts[prod.code];
+    if (raw === undefined) return;
+
+    const trimmed = raw.trim();
+    const parsed = parseFloat(trimmed);
+    if (trimmed === '' || isNaN(parsed) || parsed <= 0) {
+      syncProductPlannedQuantity(prod, 0);
+    } else {
+      syncProductPlannedQuantity(prod, parsed);
+    }
+
+    setPlannedQtyDrafts((prev) => {
+      const next = { ...prev };
+      delete next[prod.code];
+      return next;
+    });
+  };
+
+  const handleSwitchProductTab = (nextTab: 'order_items' | 'inventory_list') => {
+    if (nextTab === activeProductTab) return;
+
+    // Flush any uncommitted draft inputs before switching away from inventory tab
+    if (activeProductTab === 'inventory_list' && Object.keys(plannedQtyDrafts).length > 0) {
+      Object.entries(plannedQtyDrafts).forEach(([code, raw]) => {
+        const prod = products.find((p) => p.code === code);
+        if (!prod) return;
+        const trimmed = String(raw).trim();
+        const parsed = parseFloat(trimmed);
+        if (trimmed === '' || isNaN(parsed) || parsed <= 0) {
+          syncProductPlannedQuantity(prod, 0);
+        } else {
+          syncProductPlannedQuantity(prod, parsed);
+        }
+      });
+      setPlannedQtyDrafts({});
+    }
+
+    setActiveProductTab(nextTab);
+  };
 
   const handleSaveOrder = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1104,12 +1404,12 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
             {/* Quick search input */}
             <div ref={customerSearchRef} className="relative">
               <label className="block text-xs font-medium text-slate-600 mb-1">
-                Tìm kiếm khách hàng (theo Tên, Tên gợi nhớ, MST, SĐT, Mã KH):
+                Tìm kiếm khách hàng (theo Tên, Tên gợi nhớ, MST, SĐT, Mã KH, Địa chỉ):
               </label>
               <div className="relative">
                 <input
                   type="text"
-                  placeholder="Bỏ trống để tìm kiếm nhanh theo Tên, Tên nhớ, MST, SĐT, Mã KH..."
+                  placeholder="Bỏ trống để tìm kiếm nhanh theo Tên, Tên nhớ, MST, SĐT, Mã KH, Địa chỉ..."
                   value={customerSearchTerm}
                   onFocus={() => setIsCustomerDropdownOpen(true)}
                   onChange={(e) => {
@@ -1123,7 +1423,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
 
               {/* Autocomplete dropdown */}
               {isCustomerDropdownOpen && (
-                <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-56 overflow-y-auto">
+                <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-72 overflow-y-auto">
                   {filteredCustomers.length === 0 ? (
                     <div className="p-3 text-center text-xs text-slate-500">
                       Không tìm thấy khách hàng. Bấm "+ Thêm mới khách hàng" để tạo nhanh.
@@ -1138,9 +1438,9 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                           setCustomerSearchTerm(`${cust.name} (${cust.code})`);
                           setIsCustomerDropdownOpen(false);
                         }}
-                        className="w-full text-left p-3 hover:bg-blue-50/70 border-b border-slate-100 last:border-none flex items-center justify-between transition-colors cursor-pointer"
+                        className="w-full text-left p-3 hover:bg-blue-50/70 border-b border-slate-100 last:border-none flex items-start justify-between gap-2 transition-colors cursor-pointer"
                       >
-                        <div>
+                        <div className="min-w-0 flex-1">
                           <div className="font-semibold text-xs sm:text-sm text-slate-900">
                             {cust.name}{' '}
                             {cust.shortName && cust.shortName !== cust.name && (
@@ -1158,8 +1458,17 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                             {cust.phone && <span>SĐT: {cust.phone}</span>}
                             {cust.taxCode && <span>MST: {cust.taxCode}</span>}
                           </div>
+                          <div className="text-[11px] text-slate-600 flex items-start gap-1 mt-1">
+                            <MapPin className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
+                            <span className="line-clamp-2">
+                              Địa chỉ:{' '}
+                              <span className={cust.address ? 'text-slate-700 font-medium' : 'text-slate-400 italic'}>
+                                {cust.address || 'Chưa cập nhật'}
+                              </span>
+                            </span>
+                          </div>
                         </div>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 shrink-0">
                           {cust.type === 'organization' ? 'Tổ chức' : 'Cá nhân'}
                         </span>
                       </button>
@@ -1272,149 +1581,533 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
             )}
           </div>
 
-          {/* Section 2: Product selection & Items table */}
+          {/* Section 2: Product selection, Inventory tab & Items table */}
           <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-800 text-sm sm:text-base flex items-center gap-2 shrink-0">
-                <Receipt className="w-5 h-5 text-indigo-600" />
-                <span>Danh sách mặt hàng bán ({items.length} mặt hàng)</span>
-              </h3>
-
-              {/* Quick product search input */}
-              <div ref={productSearchRef} className="relative w-full sm:flex-1 sm:min-w-0">
-                <input
-                  type="text"
-                  placeholder="Gõ mã hàng, mã đối chiếu hoặc tên mặt hàng để tìm và thêm..."
-                  value={productSearchTerm}
-                  onFocus={() => setIsProductDropdownOpen(true)}
-                  onChange={(e) => {
-                    setProductSearchTerm(e.target.value);
-                    setIsProductDropdownOpen(true);
-                  }}
-                  className="w-full pl-9 pr-3 py-1.5 md:py-2 border border-slate-300 rounded-lg md:rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 shadow-2xs"
-                />
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-
-                {isProductDropdownOpen && (
-                  <div className="absolute z-30 left-0 right-0 min-w-full sm:min-w-[520px] mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-80 overflow-y-auto divide-y divide-slate-100">
-                    <div className="px-3 py-1.5 bg-slate-100 text-[11px] text-slate-700 flex items-center justify-between font-medium border-b border-slate-200 sticky top-0 z-10">
-                      <span>Tồn kho tính đến ngày: <strong className="text-indigo-700">{formatDate(orderDate)}</strong></span>
-                      <span className="text-[10px] text-slate-500">({filteredProducts.length} mặt hàng)</span>
-                    </div>
-                    {filteredProducts.length === 0 ? (
-                      <div className="p-4 text-center text-xs text-slate-400">
-                        Không tìm thấy mặt hàng nào phù hợp với &quot;{productSearchTerm}&quot;
-                      </div>
-                    ) : (
-                      filteredProducts.map((p) => {
-                        const stock = inventoryStockMap.get(p.code)?.inStock ?? 0;
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            onClick={() => handleAddProduct(p)}
-                            className="w-full text-left p-2.5 hover:bg-indigo-50/80 flex flex-col gap-1 transition-colors cursor-pointer group"
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-semibold text-xs text-slate-900 group-hover:text-indigo-900 line-clamp-1">
-                                {p.name}
-                              </span>
-                              <span
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold shrink-0 ${
-                                  stock > 0
-                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                    : stock === 0
-                                    ? 'bg-slate-100 text-slate-600 border border-slate-200'
-                                    : 'bg-rose-50 text-rose-700 border border-rose-200'
-                                }`}
-                                title={`Số lượng tồn kho đến ngày ${formatDate(orderDate)}: ${formatNumber(stock)} ${p.saleUnit}`}
-                              >
-                                <span className="text-[10px] font-medium text-slate-500">Tồn:</span>
-                                <span>{formatNumber(stock)}</span>
-                                <span className="text-[10px] font-normal text-slate-500">{p.saleUnit}</span>
-                              </span>
-                            </div>
-
-                            <div className="flex items-center justify-between text-[11px] text-slate-500">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-mono text-indigo-600 font-semibold bg-indigo-50 px-1 rounded">
-                                  {p.code}
-                                </span>
-                                {p.reconciliationCode && (
-                                  <span className="font-mono text-slate-600 bg-slate-100 px-1 rounded">
-                                    ĐC: {p.reconciliationCode}
-                                  </span>
-                                )}
-                                {p.category && (
-                                  <span className="text-slate-400">({p.category})</span>
-                                )}
-                                <span>ĐVT: <strong className="text-slate-700">{p.saleUnit}</strong></span>
-                                <span>Thuế: {p.vatRate}%</span>
-                              </div>
-                              <span className="text-xs font-semibold text-blue-600 bg-blue-50 group-hover:bg-blue-600 group-hover:text-white px-2 py-0.5 rounded transition-colors shrink-0 ml-2">
-                                + Thêm
-                              </span>
-                            </div>
-
-                            {/* Suggested prices preview */}
-                            {(() => {
-                              const sp = calculateSuggestedPrices(
-                                p,
-                                orderDate,
-                                products,
-                                purchases,
-                                allOrders,
-                                settings.postTaxSalePriceDecimals ?? -2,
-                                settings.salePriceDecimals ?? 2,
-                                initialOrder?.id
-                              );
-                              const hasSuggestions =
-                                sp.priceByMargin > 0 ||
-                                sp.hasInputCost ||
-                                sp.defaultPrice > 0 ||
-                                sp.hasDefaultPrice ||
-                                sp.priceMinusVariance > 0 ||
-                                sp.pricePlusVariance > 0;
-                              if (!hasSuggestions) return null;
-                              return (
-                                <div className="text-[10px] text-slate-600 flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-100">
-                                  <span className="text-slate-400 font-medium">Giá gợi ý:</span>
-                                  {(sp.priceByMargin > 0 || (sp.hasInputCost && sp.maxCostPerSaleUnit === 0)) && (
-                                    <span className="bg-indigo-50 text-indigo-700 font-bold px-1.5 py-0.2 rounded border border-indigo-200">
-                                      TSLN: {formatNumber(sp.priceByMargin)}₫
-                                    </span>
-                                  )}
-                                  {(sp.defaultPrice > 0 || sp.hasDefaultPrice) && (
-                                    <span className="bg-blue-50 text-blue-700 font-bold px-1.5 py-0.2 rounded border border-blue-200">
-                                      Mặc định: {formatNumber(sp.defaultPrice)}₫
-                                    </span>
-                                  )}
-                                  {sp.priceMinusVariance > 0 && (
-                                    <span className="bg-amber-50 text-amber-800 px-1.5 py-0.2 rounded border border-amber-200">
-                                      (-): {formatNumber(sp.priceMinusVariance)}₫
-                                    </span>
-                                  )}
-                                  {sp.pricePlusVariance > 0 && (
-                                    <span className="bg-emerald-50 text-emerald-800 px-1.5 py-0.2 rounded border border-emerald-200">
-                                      (+): {formatNumber(sp.pricePlusVariance)}₫
-                                    </span>
-                                  )}
-                                </div>
-                              );
-                            })()}
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              {/* Tab Switcher: Danh sách mặt hàng bán | Danh sách mặt hàng tồn */}
+              <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200/80 self-start overflow-x-auto max-w-full">
+                <button
+                  type="button"
+                  onClick={() => handleSwitchProductTab('order_items')}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                    activeProductTab === 'order_items'
+                      ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/60'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                  }`}
+                >
+                  <Receipt className="w-4 h-4 shrink-0" />
+                  <span>Danh sách mặt hàng bán ({items.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSwitchProductTab('inventory_list')}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                    activeProductTab === 'inventory_list'
+                      ? 'bg-white text-blue-700 shadow-xs border border-slate-200/60'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                  }`}
+                >
+                  <Package className="w-4 h-4 shrink-0" />
+                  <span>Danh sách mặt hàng tồn ({products.length})</span>
+                </button>
               </div>
+
+              {/* Quick product search input (when on Danh sách mặt hàng bán tab) */}
+              {activeProductTab === 'order_items' && (
+                <div ref={productSearchRef} className="relative w-full lg:flex-1 lg:min-w-0">
+                  <input
+                    type="text"
+                    placeholder="Gõ mã hàng, mã đối chiếu hoặc tên mặt hàng để tìm và thêm..."
+                    value={productSearchTerm}
+                    onFocus={() => setIsProductDropdownOpen(true)}
+                    onChange={(e) => {
+                      setProductSearchTerm(e.target.value);
+                      setIsProductDropdownOpen(true);
+                    }}
+                    className="w-full pl-9 pr-3 py-1.5 md:py-2 border border-slate-300 rounded-lg md:rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 shadow-2xs"
+                  />
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+
+                  {isProductDropdownOpen && (
+                    <div className="absolute z-30 left-0 right-0 min-w-full sm:min-w-[520px] mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-80 overflow-y-auto divide-y divide-slate-100">
+                      <div className="px-3 py-1.5 bg-slate-100 text-[11px] text-slate-700 flex items-center justify-between font-medium border-b border-slate-200 sticky top-0 z-10">
+                        <span>Tồn kho tính đến ngày: <strong className="text-indigo-700">{formatDate(orderDate)}</strong></span>
+                        <span className="text-[10px] text-slate-500">({filteredProducts.length} mặt hàng)</span>
+                      </div>
+                      {filteredProducts.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-slate-400">
+                          Không tìm thấy mặt hàng nào phù hợp với &quot;{productSearchTerm}&quot;
+                        </div>
+                      ) : (
+                        filteredProducts.map((p) => {
+                          const stock = inventoryStockMap.get(p.code)?.inStock ?? 0;
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => handleAddProduct(p)}
+                              className="w-full text-left p-2.5 hover:bg-indigo-50/80 flex flex-col gap-1 transition-colors cursor-pointer group"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-semibold text-xs text-slate-900 group-hover:text-indigo-900 line-clamp-1">
+                                  {p.name}
+                                </span>
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold shrink-0 ${
+                                    stock > 0
+                                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                      : stock === 0
+                                      ? 'bg-slate-100 text-slate-600 border border-slate-200'
+                                      : 'bg-rose-50 text-rose-700 border border-rose-200'
+                                  }`}
+                                  title={`Số lượng tồn kho đến ngày ${formatDate(orderDate)}: ${formatNumber(stock)} ${p.saleUnit}`}
+                                >
+                                  <span className="text-[10px] font-medium text-slate-500">Tồn:</span>
+                                  <span>{formatNumber(stock)}</span>
+                                  <span className="text-[10px] font-normal text-slate-500">{p.saleUnit}</span>
+                                </span>
+                              </div>
+
+                              <div className="flex items-center justify-between text-[11px] text-slate-500">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-mono text-indigo-600 font-semibold bg-indigo-50 px-1 rounded">
+                                    {p.code}
+                                  </span>
+                                  {p.reconciliationCode && (
+                                    <span className="font-mono text-slate-600 bg-slate-100 px-1 rounded">
+                                      ĐC: {p.reconciliationCode}
+                                    </span>
+                                  )}
+                                  {p.category && (
+                                    <span className="text-slate-400">({p.category})</span>
+                                  )}
+                                  <span>ĐVT: <strong className="text-slate-700">{p.saleUnit}</strong></span>
+                                  <span>Thuế: {p.vatRate}%</span>
+                                </div>
+                                <span className="text-xs font-semibold text-blue-600 bg-blue-50 group-hover:bg-blue-600 group-hover:text-white px-2 py-0.5 rounded transition-colors shrink-0 ml-2">
+                                  + Thêm
+                                </span>
+                              </div>
+
+                              {/* Suggested prices preview */}
+                              {(() => {
+                                const sp = calculateSuggestedPrices(
+                                  p,
+                                  orderDate,
+                                  products,
+                                  purchases,
+                                  allOrders,
+                                  settings.postTaxSalePriceDecimals ?? -2,
+                                  settings.salePriceDecimals ?? 2,
+                                  initialOrder?.id
+                                );
+                                const hasSuggestions =
+                                  sp.priceByMargin > 0 ||
+                                  sp.hasInputCost ||
+                                  sp.defaultPrice > 0 ||
+                                  sp.hasDefaultPrice ||
+                                  sp.priceMinusVariance > 0 ||
+                                  sp.pricePlusVariance > 0;
+                                if (!hasSuggestions) return null;
+                                return (
+                                  <div className="text-[10px] text-slate-600 flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-100">
+                                    <span className="text-slate-400 font-medium">Giá gợi ý:</span>
+                                    {(sp.priceByMargin > 0 || (sp.hasInputCost && sp.maxCostPerSaleUnit === 0)) && (
+                                      <span className="bg-indigo-50 text-indigo-700 font-bold px-1.5 py-0.2 rounded border border-indigo-200">
+                                        TSLN: {formatNumber(sp.priceByMargin)}₫
+                                      </span>
+                                    )}
+                                    {(sp.defaultPrice > 0 || sp.hasDefaultPrice) && (
+                                      <span className="bg-blue-50 text-blue-700 font-bold px-1.5 py-0.2 rounded border border-blue-200">
+                                        Mặc định: {formatNumber(sp.defaultPrice)}₫
+                                      </span>
+                                    )}
+                                    {sp.priceMinusVariance > 0 && (
+                                      <span className="bg-amber-50 text-amber-800 px-1.5 py-0.2 rounded border border-amber-200">
+                                        (-): {formatNumber(sp.priceMinusVariance)}₫
+                                      </span>
+                                    )}
+                                    {sp.pricePlusVariance > 0 && (
+                                      <span className="bg-emerald-50 text-emerald-800 px-1.5 py-0.2 rounded border border-emerald-200">
+                                        (+): {formatNumber(sp.pricePlusVariance)}₫
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* Items Table */}
-            {items.length === 0 ? (
+            {/* Tab 2: Danh sách mặt hàng tồn */}
+            {activeProductTab === 'inventory_list' ? (
+              <div className="space-y-3">
+                {/* Filter & Search Toolbar */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2.5">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+                    <div className="relative flex-1 min-w-0">
+                      <input
+                        type="text"
+                        placeholder="Tìm kiếm trong toàn bộ mặt hàng tồn theo tên, mã HH, mã đối chiếu, nhóm hàng..."
+                        value={inventorySearchTerm}
+                        onChange={(e) => setInventorySearchTerm(e.target.value)}
+                        className="w-full pl-9 pr-8 py-2 bg-white border border-slate-300 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-blue-500"
+                      />
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      {inventorySearchTerm && (
+                        <button
+                          type="button"
+                          onClick={() => setInventorySearchTerm('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                          title="Xóa từ khóa tìm kiếm"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Numeric stock range filter */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-600">
+                        <Filter className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Lọc tồn:</span>
+                      </span>
+                      <input
+                        type="number"
+                        step="any"
+                        placeholder="Tồn từ"
+                        value={minStockFilter}
+                        onChange={(e) => setMinStockFilter(e.target.value)}
+                        className="w-24 px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-800 tabular-nums focus:ring-1 focus:ring-blue-500"
+                      />
+                      <span className="text-xs text-slate-400">—</span>
+                      <input
+                        type="number"
+                        step="any"
+                        placeholder="Đến"
+                        value={maxStockFilter}
+                        onChange={(e) => setMaxStockFilter(e.target.value)}
+                        className="w-24 px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-800 tabular-nums focus:ring-1 focus:ring-blue-500"
+                      />
+                      {(minStockFilter || maxStockFilter) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMinStockFilter('');
+                            setMaxStockFilter('');
+                          }}
+                          className="text-[11px] font-semibold text-rose-600 hover:underline px-1 cursor-pointer"
+                        >
+                          Xóa
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Quick segmented stock status filter + inventory date info */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {[
+                        { id: 'all' as const, label: `Tất cả (${inventoryTabStats.totalProducts})` },
+                        { id: 'in_stock' as const, label: `Còn tồn > 0 (${inventoryTabStats.inStockCount})` },
+                        { id: 'zero_stock' as const, label: `Hết hàng = 0 (${inventoryTabStats.zeroStockCount})` },
+                        { id: 'negative_stock' as const, label: `Âm kho < 0 (${inventoryTabStats.negativeStockCount})` },
+                        { id: 'planned' as const, label: `Đã nhập SL xuất (${inventoryTabStats.plannedProductCount})` },
+                      ].map((tabOpt) => (
+                        <button
+                          key={tabOpt.id}
+                          type="button"
+                          onClick={() => setStockFilterType(tabOpt.id)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                            stockFilterType === tabOpt.id
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          {tabOpt.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="text-[11px] text-slate-500 whitespace-nowrap">
+                      Tồn tính đến: <strong className="text-indigo-700">{formatDate(orderDate)}</strong> · Hiển thị{' '}
+                      <strong className="text-slate-800 tabular-nums">{filteredInventoryProducts.length}</strong>/{products.length}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Inventory Table (Desktop) & Cards (Mobile) */}
+                {filteredInventoryProducts.length === 0 ? (
+                  <div className="p-8 text-center text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-xl">
+                    Không có mặt hàng nào khớp với điều kiện lọc hiện tại.
+                  </div>
+                ) : (
+                  <>
+                    {/* Desktop Table */}
+                    <div className="hidden md:block overflow-x-auto max-h-[420px] overflow-y-auto border border-slate-200 rounded-xl">
+                      <table className="w-full text-xs text-left border-collapse">
+                        <thead className="bg-slate-100 text-slate-700 uppercase font-semibold border-b border-slate-200 sticky top-0 z-10">
+                          <tr>
+                            <th className="p-2.5 text-center w-10">#</th>
+                            <th className="p-2.5 text-left min-w-56">Tên mặt hàng</th>
+                            <th className="p-2.5 text-center w-20">ĐVT</th>
+                            <th className="p-2.5 text-right w-28">Số lượng tồn</th>
+                            <th className="p-2.5 text-center w-36 bg-blue-50/70 text-blue-900">Số lượng xuất dự kiến</th>
+                            <th className="p-2.5 text-right w-40">Tổng thanh toán dự kiến</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-white">
+                          {filteredInventoryProducts.map((p, idx) => {
+                            const stock = inventoryStockMap.get(p.code)?.inStock ?? 0;
+                            const existingInfo = orderItemsByProductCode.get(p.code);
+                            const draftVal = plannedQtyDrafts[p.code];
+                            const inputDisplayValue =
+                              draftVal !== undefined
+                                ? draftVal
+                                : existingInfo && existingInfo.totalQty > 0
+                                ? String(existingInfo.totalQty)
+                                : '';
+
+                            const effectiveQty =
+                              draftVal !== undefined
+                                ? Math.max(0, parseFloat(draftVal) || 0)
+                                : existingInfo?.totalQty ?? 0;
+
+                            const unitPostTaxPrice =
+                              existingInfo?.unitPostTaxPrice ?? inventorySuggestedPriceMap.get(p.code) ?? 0;
+
+                            const expectedPayment =
+                              draftVal !== undefined
+                                ? Math.round(effectiveQty * unitPostTaxPrice)
+                                : existingInfo && existingInfo.totalQty > 0
+                                ? existingInfo.totalAmount
+                                : Math.round(effectiveQty * unitPostTaxPrice);
+
+                            const hasPlanned = effectiveQty > 0;
+
+                            return (
+                              <tr
+                                key={p.id}
+                                className={`transition-colors ${
+                                  hasPlanned ? 'bg-blue-50/40 hover:bg-blue-50/70' : 'hover:bg-slate-50/80'
+                                }`}
+                              >
+                                <td className="p-2.5 text-center text-slate-400 font-semibold tabular-nums">
+                                  {idx + 1}
+                                </td>
+                                <td className="p-2.5">
+                                  <div className="font-semibold text-slate-900 leading-snug">{p.name}</div>
+                                  <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5 flex-wrap">
+                                    <span className="font-mono text-indigo-700 font-semibold">{p.code}</span>
+                                    {p.reconciliationCode && (
+                                      <span className="font-mono text-slate-600">ĐC: {p.reconciliationCode}</span>
+                                    )}
+                                    {p.category && <span>· {p.category}</span>}
+                                    <span>· Thuế {p.vatRate}%</span>
+                                    <span>
+                                      · ĐG sau thuế:{' '}
+                                      <strong className="text-slate-700 font-mono tabular-nums">
+                                        {formatNumber(unitPostTaxPrice)}₫
+                                      </strong>
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="p-2.5 text-center font-medium text-slate-700">
+                                  {p.saleUnit}
+                                </td>
+                                <td className="p-2.5 text-right font-mono font-bold tabular-nums">
+                                  <span
+                                    className={
+                                      stock > 0
+                                        ? 'text-emerald-700'
+                                        : stock === 0
+                                        ? 'text-slate-500'
+                                        : 'text-rose-600'
+                                    }
+                                  >
+                                    {formatNumber(stock)}
+                                  </span>
+                                </td>
+                                <td className="p-2.5 text-center bg-blue-50/20">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="any"
+                                    placeholder="0"
+                                    disabled={isLockedCompleted}
+                                    value={inputDisplayValue}
+                                    onChange={(e) => handlePlannedQtyChange(p, e.target.value)}
+                                    onBlur={() => handlePlannedQtyBlur(p)}
+                                    className={`w-28 px-2.5 py-1.5 text-center font-bold rounded-lg border text-xs tabular-nums focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed ${
+                                      hasPlanned
+                                        ? 'bg-white border-blue-500 text-blue-900 shadow-2xs'
+                                        : 'bg-white border-slate-300 text-slate-800'
+                                    }`}
+                                  />
+                                </td>
+                                <td className="p-2.5 text-right font-mono tabular-nums">
+                                  <span
+                                    className={
+                                      hasPlanned
+                                        ? 'font-bold text-blue-900 text-sm'
+                                        : 'text-slate-400 font-medium'
+                                    }
+                                  >
+                                    {formatCurrency(expectedPayment)}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Mobile Cards */}
+                    <div className="block md:hidden space-y-2.5 max-h-[420px] overflow-y-auto pr-0.5">
+                      {filteredInventoryProducts.map((p, idx) => {
+                        const stock = inventoryStockMap.get(p.code)?.inStock ?? 0;
+                        const existingInfo = orderItemsByProductCode.get(p.code);
+                        const draftVal = plannedQtyDrafts[p.code];
+                        const inputDisplayValue =
+                          draftVal !== undefined
+                            ? draftVal
+                            : existingInfo && existingInfo.totalQty > 0
+                            ? String(existingInfo.totalQty)
+                            : '';
+
+                        const effectiveQty =
+                          draftVal !== undefined
+                            ? Math.max(0, parseFloat(draftVal) || 0)
+                            : existingInfo?.totalQty ?? 0;
+
+                        const unitPostTaxPrice =
+                          existingInfo?.unitPostTaxPrice ?? inventorySuggestedPriceMap.get(p.code) ?? 0;
+
+                        const expectedPayment =
+                          draftVal !== undefined
+                            ? Math.round(effectiveQty * unitPostTaxPrice)
+                            : existingInfo && existingInfo.totalQty > 0
+                            ? existingInfo.totalAmount
+                            : Math.round(effectiveQty * unitPostTaxPrice);
+
+                        const hasPlanned = effectiveQty > 0;
+
+                        return (
+                          <div
+                            key={p.id}
+                            className={`rounded-xl border p-3 space-y-2 transition-colors ${
+                              hasPlanned ? 'bg-blue-50/40 border-blue-300' : 'bg-white border-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="font-bold text-slate-900 text-xs sm:text-sm leading-snug">
+                                  {idx + 1}. {p.name}
+                                </div>
+                                <div className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap mt-0.5">
+                                  <span className="font-mono text-indigo-700 font-semibold">{p.code}</span>
+                                  <span>ĐVT: <strong className="text-slate-700">{p.saleUnit}</strong></span>
+                                  <span>ĐG: <strong className="font-mono tabular-nums">{formatNumber(unitPostTaxPrice)}₫</strong></span>
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <span className="text-[10px] text-slate-500 block">Số lượng tồn</span>
+                                <span
+                                  className={`font-mono font-bold text-xs tabular-nums ${
+                                    stock > 0
+                                      ? 'text-emerald-700'
+                                      : stock === 0
+                                      ? 'text-slate-500'
+                                      : 'text-rose-600'
+                                  }`}
+                                >
+                                  {formatNumber(stock)} {p.saleUnit}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 pt-1.5 border-t border-slate-100 items-end">
+                              <div>
+                                <label className="block text-[10px] font-semibold text-slate-600 mb-1">
+                                  SL xuất dự kiến ({p.saleUnit}):
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  placeholder="0"
+                                  disabled={isLockedCompleted}
+                                  value={inputDisplayValue}
+                                  onChange={(e) => handlePlannedQtyChange(p, e.target.value)}
+                                  onBlur={() => handlePlannedQtyBlur(p)}
+                                  className={`w-full px-2.5 py-1.5 text-center font-bold rounded-lg border text-xs tabular-nums focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 ${
+                                    hasPlanned ? 'bg-white border-blue-500 text-blue-900' : 'bg-white border-slate-300 text-slate-800'
+                                  }`}
+                                />
+                              </div>
+                              <div className="text-right">
+                                <span className="block text-[10px] text-slate-500 mb-1">Tổng TT dự kiến:</span>
+                                <span
+                                  className={`font-mono text-xs sm:text-sm tabular-nums ${
+                                    hasPlanned ? 'font-bold text-blue-900' : 'text-slate-400 font-medium'
+                                  }`}
+                                >
+                                  {formatCurrency(expectedPayment)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
+                {/* Bottom summary & quick switch back to 'Danh sách mặt hàng bán' */}
+                <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-700">
+                    <span>
+                      Đã điền xuất dự kiến:{' '}
+                      <strong className="text-blue-800 tabular-nums">{inventoryTabStats.plannedProductCount}</strong> mặt hàng
+                    </span>
+                    <span>
+                      Tổng SL dự kiến:{' '}
+                      <strong className="text-blue-800 tabular-nums">{formatNumber(inventoryTabStats.plannedTotalQty)}</strong>
+                    </span>
+                    <span>
+                      Tổng thanh toán dự kiến:{' '}
+                      <strong className="text-blue-900 font-mono tabular-nums">
+                        {formatCurrency(inventoryTabStats.plannedTotalAmount)}
+                      </strong>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchProductTab('order_items')}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    <Receipt className="w-3.5 h-3.5" />
+                    <span>Xem danh sách mặt hàng bán ({items.length})</span>
+                  </button>
+                </div>
+              </div>
+            ) : items.length === 0 ? (
               <div className="p-8 text-center text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-xl">
-                Chưa có mặt hàng nào trong đơn. Tìm kiếm sản phẩm ở trên hoặc bấm vào danh mục để thêm.
+                Chưa có mặt hàng nào trong đơn. Tìm kiếm sản phẩm ở trên hoặc chuyển sang tab{' '}
+                <button
+                  type="button"
+                  onClick={() => handleSwitchProductTab('inventory_list')}
+                  className="text-blue-600 hover:underline font-semibold cursor-pointer"
+                >
+                  Danh sách mặt hàng tồn
+                </button>{' '}
+                để điền số lượng xuất dự kiến.
               </div>
             ) : (
               <>
