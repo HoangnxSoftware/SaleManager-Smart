@@ -126,6 +126,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
 
   // Items
   const [items, setItems] = useState<OrderItem[]>([]);
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [productSearchTerm, setProductSearchTerm] = useState('');
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
 
@@ -177,6 +178,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
       initializedSessionKeyRef.current = null;
       setHasRestoredDraft(false);
       setDraftSavedAt(null);
+      setSelectedItemIds([]);
     }
   }, [isOpen]);
 
@@ -191,6 +193,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
       return;
     }
     initializedSessionKeyRef.current = currentSessionKey;
+    setSelectedItemIds([]);
 
     if (initialOrder) {
       setHasRestoredDraft(false);
@@ -747,6 +750,26 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
     setItems(updated);
   };
 
+  const validSelectedItemIds = useMemo(() => {
+    const idSet = new Set(items.map((it) => it.id));
+    return selectedItemIds.filter((id) => idSet.has(id));
+  }, [items, selectedItemIds]);
+
+  const handleToggleSelectItem = (itemId: string) => {
+    setSelectedItemIds((prev) =>
+      prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]
+    );
+  };
+
+  const handleToggleSelectAllItems = () => {
+    if (items.length === 0) return;
+    if (validSelectedItemIds.length === items.length) {
+      setSelectedItemIds([]);
+    } else {
+      setSelectedItemIds(items.map((it) => it.id));
+    }
+  };
+
   const handleRemoveItem = async (index: number) => {
     const item = items[index];
     const itemName = item ? `"${item.productName}"` : 'mặt hàng này';
@@ -757,7 +780,26 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
       type: 'danger',
     });
     if (ok) {
-      setItems(items.filter((_, i) => i !== index));
+      setItems((prev) => prev.filter((_, i) => i !== index));
+      if (item?.id) {
+        setSelectedItemIds((prev) => prev.filter((id) => id !== item.id));
+      }
+    }
+  };
+
+  const handleBatchRemoveSelectedItems = async () => {
+    if (validSelectedItemIds.length === 0) return;
+    const count = validSelectedItemIds.length;
+    const ok = await confirm({
+      title: 'Xác nhận xóa nhiều mặt hàng',
+      message: `Bạn có chắc chắn muốn xóa ${count} mặt hàng đã chọn khỏi đơn hàng này không?`,
+      confirmText: `Xóa ${count} mặt hàng`,
+      type: 'danger',
+    });
+    if (ok) {
+      const selectedSet = new Set(validSelectedItemIds);
+      setItems((prev) => prev.filter((it) => !selectedSet.has(it.id)));
+      setSelectedItemIds([]);
     }
   };
 
@@ -1376,11 +1418,36 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
               </div>
             ) : (
               <>
-                {/* Header with quick auto-recalculate prices */}
+                {/* Header with selection controls, batch delete & quick auto-recalculate prices */}
                 <div className="flex flex-wrap items-center justify-between gap-2 pb-1">
-                  <span className="text-xs font-bold text-slate-700">
-                    Danh sách mặt hàng ({items.length})
-                  </span>
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <label className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={items.length > 0 && validSelectedItemIds.length === items.length}
+                        onChange={handleToggleSelectAllItems}
+                        disabled={isLockedCompleted || items.length === 0}
+                        className="w-4 h-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer disabled:opacity-50"
+                      />
+                      <span>Danh sách mặt hàng ({items.length})</span>
+                    </label>
+
+                    <button
+                      type="button"
+                      disabled={isLockedCompleted || validSelectedItemIds.length === 0}
+                      onClick={handleBatchRemoveSelectedItems}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors ${
+                        validSelectedItemIds.length > 0 && !isLockedCompleted
+                          ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-700 shadow-2xs cursor-pointer'
+                          : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                      }`}
+                      title="Tích chọn nhiều mặt hàng bên dưới rồi bấm để xóa hàng loạt"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Xóa mặt hàng đã chọn ({validSelectedItemIds.length})</span>
+                    </button>
+                  </div>
+
                   <button
                     type="button"
                     onClick={handleAutoRecalculateCurrentOrder}
@@ -1397,6 +1464,16 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                   <table className="w-full text-xs text-left border-collapse">
                     <thead className="bg-slate-50 text-slate-700 uppercase font-semibold border-b border-slate-200">
                       <tr>
+                        <th className="p-2 text-center w-9">
+                          <input
+                            type="checkbox"
+                            checked={items.length > 0 && validSelectedItemIds.length === items.length}
+                            onChange={handleToggleSelectAllItems}
+                            disabled={isLockedCompleted || items.length === 0}
+                            title="Chọn / Bỏ chọn tất cả mặt hàng"
+                            className="w-4 h-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer disabled:opacity-50"
+                          />
+                        </th>
                         <th className="p-2 text-center w-8">#</th>
                         <th className="p-2 text-left min-w-44">Tên mặt hàng</th>
                         <th className="p-2 text-center w-16">ĐVT</th>
@@ -1412,8 +1489,27 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {items.map((item, idx) => (
-                        <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
+                      {items.map((item, idx) => {
+                        const isItemSelected = validSelectedItemIds.includes(item.id);
+                        return (
+                        <tr
+                          key={item.id}
+                          className={`transition-colors ${
+                            isItemSelected ? 'bg-rose-50/60 hover:bg-rose-50/90' : 'hover:bg-slate-50/80'
+                          }`}
+                        >
+                          {/* 0. Checkbox chọn xóa hàng loạt */}
+                          <td className="p-2 text-center align-top pt-2.5">
+                            <input
+                              type="checkbox"
+                              checked={isItemSelected}
+                              onChange={() => handleToggleSelectItem(item.id)}
+                              disabled={isLockedCompleted}
+                              aria-label={`Chọn mặt hàng ${item.productName}`}
+                              className="w-4 h-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer disabled:opacity-50"
+                            />
+                          </td>
+
                           {/* 1. STT - Top aligned */}
                           <td className="p-2 text-center text-slate-400 align-top pt-2.5 font-semibold">
                             {idx + 1}
@@ -1633,7 +1729,8 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                             </button>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1656,14 +1753,27 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
                         )
                       : null;
 
+                    const isItemSelected = validSelectedItemIds.includes(item.id);
                     return (
                       <div
                         key={item.id}
-                        className="bg-white rounded-xl border border-slate-200 p-3 shadow-2xs space-y-2.5"
+                        className={`rounded-xl border p-3 shadow-2xs space-y-2.5 transition-colors ${
+                          isItemSelected
+                            ? 'bg-rose-50/50 border-rose-300'
+                            : 'bg-white border-slate-200'
+                        }`}
                       >
-                        {/* Header card: Index, Name, Code, Stock, Action buttons */}
+                        {/* Header card: Checkbox, Index, Name, Code, Stock, Action buttons */}
                         <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2">
                           <div className="flex items-start gap-2 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={isItemSelected}
+                              onChange={() => handleToggleSelectItem(item.id)}
+                              disabled={isLockedCompleted}
+                              aria-label={`Chọn mặt hàng ${item.productName}`}
+                              className="w-4 h-4 mt-1 rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer shrink-0 disabled:opacity-50"
+                            />
                             <span className="shrink-0 w-5 h-5 rounded-full bg-slate-100 text-slate-700 text-xs font-bold flex items-center justify-center mt-0.5">
                               {idx + 1}
                             </span>
