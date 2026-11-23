@@ -777,14 +777,9 @@ export default function App() {
         ensuredPrev.filter((o) => o.id !== orderId),
         mergedDeleted
       );
-      const rules =
-        prev.settings.orderCodeRules && prev.settings.orderCodeRules.length > 0
-          ? prev.settings.orderCodeRules
-          : DEFAULT_ORDER_CODE_RULES;
-      const resequenced = resequenceOrders(remaining, rules);
       return {
         ...prev,
-        orders: deduplicateOrders(resequenced, mergedDeleted),
+        orders: deduplicateOrders(remaining, mergedDeleted),
         deletedOrders: mergedDeleted,
       };
     });
@@ -831,14 +826,9 @@ export default function App() {
         ensuredPrev.filter((o) => !targetIdSet.has(o.id)),
         mergedDeleted
       );
-      const rules =
-        prev.settings.orderCodeRules && prev.settings.orderCodeRules.length > 0
-          ? prev.settings.orderCodeRules
-          : DEFAULT_ORDER_CODE_RULES;
-      const resequenced = resequenceOrders(remaining, rules);
       return {
         ...prev,
-        orders: deduplicateOrders(resequenced, mergedDeleted),
+        orders: deduplicateOrders(remaining, mergedDeleted),
         deletedOrders: mergedDeleted,
       };
     });
