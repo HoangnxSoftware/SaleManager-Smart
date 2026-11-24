@@ -1382,7 +1382,14 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
                         </td>
                         <td className="p-2.5 font-bold text-slate-900">{cust.name}</td>
                         <td className="p-2.5 font-mono text-slate-700">
-                          {cust.taxCode ? `MST: ${cust.taxCode}` : cust.idCard ? `CCCD: ${cust.idCard}` : '—'}
+                          {cust.taxCode || cust.idCard ? (
+                            <div className="space-y-0.5">
+                              {cust.taxCode && <div>MST: {cust.taxCode}</div>}
+                              {cust.idCard && <div>CCCD: {cust.idCard}</div>}
+                            </div>
+                          ) : (
+                            '—'
+                          )}
                         </td>
                         <td className="p-2.5 text-slate-600 max-w-xs truncate">{cust.address || '—'}</td>
                         <td className="p-2.5">
@@ -1422,7 +1429,14 @@ export const OrderImportCheckModal: React.FC<OrderImportCheckModalProps> = ({
                         </td>
                         <td className="p-2.5 font-bold text-slate-900">{cust.name}</td>
                         <td className="p-2.5 font-mono text-slate-700">
-                          {cust.taxCode ? `MST: ${cust.taxCode}` : cust.idCard ? `CCCD: ${cust.idCard}` : '—'}
+                          {cust.taxCode || cust.idCard ? (
+                            <div className="space-y-0.5">
+                              {cust.taxCode && <div>MST: {cust.taxCode}</div>}
+                              {cust.idCard && <div>CCCD: {cust.idCard}</div>}
+                            </div>
+                          ) : (
+                            '—'
+                          )}
                         </td>
                         <td className="p-2.5 text-slate-600 max-w-xs truncate">{cust.address || '—'}</td>
                         <td className="p-2.5">

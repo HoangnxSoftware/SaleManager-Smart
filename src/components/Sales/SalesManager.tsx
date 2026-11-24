@@ -426,22 +426,48 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         return;
       }
 
+      const pickExcelCol = (row: Record<string, any>, aliases: string[]): string => {
+        for (const alias of aliases) {
+          if (row[alias] !== undefined && row[alias] !== null) {
+            const val = String(row[alias]).trim();
+            if (val !== '') return val;
+          }
+        }
+        const normalizedAliasSet = new Set(aliases.map((a) => a.trim().toLowerCase()));
+        for (const key of Object.keys(row)) {
+          if (normalizedAliasSet.has(key.trim().toLowerCase()) && row[key] !== undefined && row[key] !== null) {
+            const val = String(row[key]).trim();
+            if (val !== '') return val;
+          }
+        }
+        return '';
+      };
+
       const importedByCode = new Map<string, Customer>();
       rows.forEach((r: any, idx: number) => {
-        const cCode = String(r['Mã KH'] || r['Mã khách hàng'] || `KH-IMP-${Date.now()}-${idx}`).trim().toUpperCase();
-        const rawName = String(r['Tên khách hàng'] || r['Tên KH'] || 'KHÁCH HÀNG MỚI').trim();
+        const cCode = (
+          pickExcelCol(r, ['Mã KH', 'Mã khách hàng']) || `KH-IMP-${Date.now()}-${idx}`
+        ).toUpperCase();
+        const rawName = pickExcelCol(r, ['Tên khách hàng', 'Tên KH']) || 'KHÁCH HÀNG MỚI';
         const cName = rawName.toUpperCase();
-        const rawShort = String(r['Tên gợi nhớ'] || cName).trim();
+        const rawShort = pickExcelCol(r, ['Tên gợi nhớ']) || cName;
         const cShort = rawShort.toUpperCase();
-        const cSoftwareCode = String(r['Mã Phần Mềm'] || r['Mã phần mềm'] || r['Mã PM'] || '').trim();
-        const cReconciliationName = String(r['Tên Đối Chiếu'] || r['Tên đối chiếu'] || '').trim();
-        const cTax = String(r['Mã số thuế'] || r['MST'] || '').trim();
-        const cPhone = String(r['Số điện thoại'] || r['SĐT'] || '').trim();
-        const cAddr = String(r['Địa chỉ'] || '').trim();
-        const rawType = String(r['Loại KH'] || r['Loại KH (Cá nhân/Tổ chức)'] || '').toLowerCase();
+        const cSoftwareCode = pickExcelCol(r, ['Mã Phần Mềm', 'Mã phần mềm', 'Mã PM']);
+        const cReconciliationName = pickExcelCol(r, ['Tên Đối Chiếu', 'Tên đối chiếu']);
+        const cTax = pickExcelCol(r, ['Mã số thuế', 'MST']);
+        const cPhone = pickExcelCol(r, ['Số điện thoại', 'SĐT']);
+        const cAddr = pickExcelCol(r, ['Địa chỉ']);
+        const rawType = pickExcelCol(r, ['Loại KH', 'Loại KH (Cá nhân/Tổ chức)']).toLowerCase();
         const cType = rawType.includes('tổ chức') ? 'organization' : 'personal';
-        const cIdCard = String(r['Số CCCD'] || (cType === 'personal' ? cTax : '')).trim();
-        const cNotes = String(r['Ghi chú'] || '').trim();
+        const cIdCard = pickExcelCol(r, [
+          'Số CCCD',
+          'CCCD',
+          'Số căn cước công dân',
+          'Số căn cước công dân (CCCD)',
+          'CMND/CCCD',
+          'Số CMND/CCCD',
+        ]);
+        const cNotes = pickExcelCol(r, ['Ghi chú']);
 
         importedByCode.set(cCode, {
           id: `cust-imp-${Date.now()}-${idx}`,
@@ -468,6 +494,7 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
         const previewFields = [
           { label: 'Tên gợi nhớ', value: item.shortName || '' },
           { label: 'MST', value: item.taxCode || '' },
+          { label: 'Số CCCD', value: item.idCard || '' },
           { label: 'SĐT', value: item.phone || '' },
           { label: 'Địa chỉ', value: item.address || '' },
           { label: 'Loại KH', value: item.type === 'organization' ? 'Tổ chức' : 'Cá nhân' },

@@ -93,6 +93,9 @@ export function CatalogExcelImportModal<T = any>({
               d.oldValue.toLowerCase().includes(q) ||
               d.newValue.toLowerCase().includes(q) ||
               d.label.toLowerCase().includes(q)
+          ) ||
+          it.previewFields.some(
+            (f) => f.value.toLowerCase().includes(q) || f.label.toLowerCase().includes(q)
           )
         );
       }
@@ -470,7 +473,7 @@ export function CatalogExcelImportModal<T = any>({
                                   Thông tin trùng khớp hoàn toàn với danh mục hiện tại.
                                 </div>
                                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
-                                  {item.previewFields.slice(0, 4).map((f, idx) => (
+                                  {item.previewFields.map((f, idx) => (
                                     <span key={idx}>
                                       {f.label}: <span className="font-medium text-slate-700">{f.value || '—'}</span>
                                     </span>
