@@ -105,19 +105,14 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
     setDuplicateWarning(null);
   };
 
-  // When type is 'personal' and taxCode changes, auto-fill CCCD if not manually different
+  // Keep taxCode independent from CCCD even when type is 'personal'
   const handleTaxCodeChange = (val: string) => {
     setTaxCode(val);
-    if (type === 'personal') {
-      setIdCard(val);
-    }
   };
 
   const handleTypeChange = (newType: CustomerType) => {
     setType(newType);
-    if (newType === 'personal' && taxCode) {
-      setIdCard(taxCode);
-    } else if (newType === 'organization') {
+    if (newType === 'organization') {
       setIdCard('');
     }
   };
@@ -161,7 +156,7 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
       phone: phone.trim(),
       address: address.trim(),
       type,
-      idCard: type === 'personal' ? (idCard.trim() || taxCode.trim()) : '',
+      idCard: type === 'personal' ? idCard.trim() : '',
       notes: notes.trim(),
       createdAt: initialCustomer ? initialCustomer.createdAt : new Date().toISOString().slice(0, 10),
     };
@@ -358,11 +353,6 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Số căn cước công dân (CCCD)
-                {type === 'personal' && (
-                  <span className="text-[11px] text-blue-600 font-normal ml-1">
-                    (Mặc định theo MST)
-                  </span>
-                )}
               </label>
               <input
                 type="text"
