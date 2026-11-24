@@ -233,15 +233,15 @@ export const PurchaseFormModal: React.FC<PurchaseFormModalProps> = ({
   }, [suppliers, supplierSearch]);
 
   const filteredProducts = useMemo(() => {
-    if (!productSearch.trim()) return products.slice(0, 8);
+    if (!productSearch.trim()) return products.slice(0, 15);
     const q = productSearch.toLowerCase();
     return products.filter(
       (p) =>
         p.name.toLowerCase().includes(q) ||
         p.code.toLowerCase().includes(q) ||
         (p.reconciliationCode && p.reconciliationCode.toLowerCase().includes(q)) ||
-        p.category.toLowerCase().includes(q)
-    ).slice(0, 8);
+        (p.category && p.category.toLowerCase().includes(q))
+    ).slice(0, 20);
   }, [products, productSearch]);
 
   // Totals
@@ -644,55 +644,72 @@ export const PurchaseFormModal: React.FC<PurchaseFormModalProps> = ({
 
           {/* Items Table */}
           <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-slate-800 text-sm sm:text-base flex items-center gap-2 shrink-0 whitespace-nowrap">
                 <span>Chi tiết các mặt hàng nhập ({items.length} mặt hàng)</span>
               </h3>
 
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsQuickAddProductOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 cursor-pointer"
-                >
-                  <PackagePlus className="w-3.5 h-3.5" />
-                  <span>+ Thêm nhanh sản phẩm mới</span>
-                </button>
-
-                {/* Add from existing catalog */}
-                <div className="relative w-64" ref={productDropdownRef}>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full lg:flex-1 lg:min-w-0">
+                {/* Add from existing catalog - expanded search input */}
+                <div className="relative w-full sm:flex-1 sm:min-w-0" ref={productDropdownRef}>
                   <input
                     type="text"
-                    placeholder="Tìm mặt hàng để thêm..."
+                    placeholder="Gõ mã hàng, mã đối chiếu hoặc tên mặt hàng để tìm và thêm..."
                     value={productSearch}
                     onFocus={() => setIsProductDropdownOpen(true)}
                     onChange={(e) => {
                       setProductSearch(e.target.value);
                       setIsProductDropdownOpen(true);
                     }}
-                    className="w-full pl-8 pr-3 py-1.5 border border-slate-300 rounded-lg text-xs"
+                    className="w-full pl-9 pr-3 py-1.5 md:py-2 border border-slate-300 rounded-lg md:rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-teal-500 shadow-2xs"
                   />
-                  <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-2" />
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
 
                   {isProductDropdownOpen && (
-                    <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-52 overflow-y-auto">
-                      {filteredProducts.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => handleAddItem(p)}
-                          className="w-full text-left p-2 hover:bg-teal-50 border-b border-slate-100 last:border-none flex items-center justify-between cursor-pointer"
-                        >
-                          <div>
-                            <div className="font-semibold text-xs text-slate-900">{p.name}</div>
-                            <div className="text-[10px] text-slate-500 font-mono">{p.code}</div>
-                          </div>
-                          <span className="text-xs text-teal-600 font-bold">+</span>
-                        </button>
-                      ))}
+                    <div className="absolute z-30 left-0 right-0 min-w-full sm:min-w-[460px] mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-72 overflow-y-auto divide-y divide-slate-100">
+                      {filteredProducts.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-slate-400">
+                          Không tìm thấy mặt hàng nào phù hợp với &quot;{productSearch}&quot;
+                        </div>
+                      ) : (
+                        filteredProducts.map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => handleAddItem(p)}
+                            className="w-full text-left p-2.5 hover:bg-teal-50 flex items-center justify-between gap-2 transition-colors cursor-pointer group"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-semibold text-xs sm:text-sm text-slate-900 group-hover:text-teal-900 truncate">
+                                {p.name}
+                              </div>
+                              <div className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap mt-0.5">
+                                <span className="font-mono text-teal-700 font-semibold">{p.code}</span>
+                                {p.reconciliationCode && (
+                                  <span className="font-mono text-slate-600">ĐC: {p.reconciliationCode}</span>
+                                )}
+                                <span>· ĐVT mua: <strong className="text-slate-700">{p.purchaseUnit || 'Cái'}</strong></span>
+                                <span>· Thuế: {p.vatRate}%</span>
+                              </div>
+                            </div>
+                            <span className="text-xs font-semibold text-teal-700 bg-teal-50 group-hover:bg-teal-600 group-hover:text-white px-2.5 py-1 rounded-md transition-colors shrink-0">
+                              + Thêm
+                            </span>
+                          </button>
+                        ))
+                      )}
                     </div>
                   )}
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsQuickAddProductOpen(true)}
+                  className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 md:py-2 rounded-lg md:rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <PackagePlus className="w-3.5 h-3.5 shrink-0" />
+                  <span>+ Thêm nhanh sản phẩm mới</span>
+                </button>
               </div>
             </div>
 
