@@ -667,15 +667,15 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
                 <th className="p-3 w-32 text-left">Chiết khấu giảm giá tổng đơn</th>
                 <th className="p-3 w-32 text-left">Tổng thuế GTGT</th>
                 <th className="p-3 w-36 text-left font-black text-blue-900">Tổng tiền thanh toán</th>
+                <th className="p-3 w-40 text-left bg-amber-50/70 border-x border-amber-200 text-amber-900">
+                  Đơn giá bán sau thuế
+                </th>
                 <th className="p-3 w-36 text-center">Phương thức thanh toán</th>
                 <th className="p-3 min-w-[190px] text-left font-bold text-blue-900 bg-blue-100/50">
                   Tổng thành tiền theo từng thuế suất
                 </th>
                 <th className="p-3 min-w-[180px] text-left font-bold text-amber-900 bg-amber-100/40">
                   Tổng thuế theo từng thuế suất
-                </th>
-                <th className="p-3 w-40 text-left bg-amber-50/70 border-l border-amber-200 text-amber-900">
-                  Đơn giá bán sau thuế
                 </th>
                 <th className="p-3 w-20 text-left">Thao tác</th>
               </tr>
@@ -913,6 +913,63 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
                         )}
                       </td>
 
+                      {/* Đơn giá bán sau thuế (Cho phép sửa trực tiếp, tự động tính lại đơn giá trước thuế với 2 số thập phân) */}
+                      <td className="p-3 text-right font-mono bg-amber-50/40 border-x border-amber-200">
+                        {isEditing ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={tempPostTaxPrice}
+                              onChange={(e) => setTempPostTaxPrice(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSavePostTaxPrice(order, itemIndex);
+                                if (e.key === 'Escape') handleCancelEdit();
+                              }}
+                              className="w-28 px-2 py-1 text-right font-bold text-xs bg-white border-2 border-amber-500 rounded-lg focus:outline-hidden"
+                              autoFocus
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSavePostTaxPrice(order, itemIndex)}
+                              className="p-1 text-emerald-700 hover:bg-emerald-100 rounded-md cursor-pointer"
+                              title="Lưu đơn giá sau thuế"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleCancelEdit}
+                              className="p-1 text-rose-700 hover:bg-rose-100 rounded-md cursor-pointer"
+                              title="Hủy"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : order.deliveryStatus === 'completed' && !isAdmin ? (
+                          <div
+                            className="flex items-center justify-end gap-1.5 p-1 text-slate-500 cursor-not-allowed"
+                            title="Đơn hàng đã hoàn thành — Chỉ tài khoản Admin mới chỉnh sửa được"
+                          >
+                            <span className="font-black text-slate-700">
+                              {formatNumber(currentPostTaxPrice, 2)} ₫
+                            </span>
+                            <Lock className="w-3 h-3 text-amber-600 shrink-0" />
+                          </div>
+                        ) : (
+                          <div
+                            onClick={() => handleStartEditPostTax(order, item)}
+                            className="group flex items-center justify-end gap-1.5 cursor-pointer hover:bg-amber-100/60 p-1 rounded-md transition-colors"
+                            title="Bấm để sửa đơn giá bán sau thuế (đơn giá trước thuế sẽ tự động tính lại với 2 số thập phân)"
+                          >
+                            <span className="font-black text-amber-950">
+                              {formatNumber(currentPostTaxPrice, 2)} ₫
+                            </span>
+                            <Edit className="w-3.5 h-3.5 text-amber-600 opacity-40 group-hover:opacity-100 transition-opacity" />
+                          </div>
+                        )}
+                      </td>
+
                       {/* Phương thức thanh toán (Chỉ hiện dòng đầu tiên của đơn hàng) */}
                       <td className="p-3 text-center whitespace-nowrap">
                         {isFirstRow ? (
@@ -989,63 +1046,6 @@ export const OrderDetailsTab: React.FC<OrderDetailsTabProps> = ({
                           })()
                         ) : (
                           <span className="text-slate-200 select-none">—</span>
-                        )}
-                      </td>
-
-                      {/* 20. Đơn giá bán sau thuế (Cho phép sửa trực tiếp, tự động tính lại đơn giá trước thuế với 2 số thập phân) */}
-                      <td className="p-3 text-right font-mono bg-amber-50/40 border-l border-amber-200">
-                        {isEditing ? (
-                          <div className="flex items-center justify-end gap-1">
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={tempPostTaxPrice}
-                              onChange={(e) => setTempPostTaxPrice(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleSavePostTaxPrice(order, itemIndex);
-                                if (e.key === 'Escape') handleCancelEdit();
-                              }}
-                              className="w-28 px-2 py-1 text-right font-bold text-xs bg-white border-2 border-amber-500 rounded-lg focus:outline-hidden"
-                              autoFocus
-                            />
-                            <button
-                              type="button"
-                              onClick={() => handleSavePostTaxPrice(order, itemIndex)}
-                              className="p-1 text-emerald-700 hover:bg-emerald-100 rounded-md cursor-pointer"
-                              title="Lưu đơn giá sau thuế"
-                            >
-                              <Check className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleCancelEdit}
-                              className="p-1 text-rose-700 hover:bg-rose-100 rounded-md cursor-pointer"
-                              title="Hủy"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        ) : order.deliveryStatus === 'completed' && !isAdmin ? (
-                          <div
-                            className="flex items-center justify-end gap-1.5 p-1 text-slate-500 cursor-not-allowed"
-                            title="Đơn hàng đã hoàn thành — Chỉ tài khoản Admin mới chỉnh sửa được"
-                          >
-                            <span className="font-black text-slate-700">
-                              {formatNumber(currentPostTaxPrice, 2)} ₫
-                            </span>
-                            <Lock className="w-3 h-3 text-amber-600 shrink-0" />
-                          </div>
-                        ) : (
-                          <div
-                            onClick={() => handleStartEditPostTax(order, item)}
-                            className="group flex items-center justify-end gap-1.5 cursor-pointer hover:bg-amber-100/60 p-1 rounded-md transition-colors"
-                            title="Bấm để sửa đơn giá bán sau thuế (đơn giá trước thuế sẽ tự động tính lại với 2 số thập phân)"
-                          >
-                            <span className="font-black text-amber-950">
-                              {formatNumber(currentPostTaxPrice, 2)} ₫
-                            </span>
-                            <Edit className="w-3.5 h-3.5 text-amber-600 opacity-40 group-hover:opacity-100 transition-opacity" />
-                          </div>
                         )}
                       </td>
 

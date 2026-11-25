@@ -1775,13 +1775,13 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                       </div>
                     </th>
                     <th className="p-3 text-left min-w-44">Khách hàng</th>
-                    <th className="p-3 text-left min-w-40">Người tạo đơn/Bán hàng</th>
                     <th className="p-3 text-left">Tổng tiền TT</th>
                     <th className="p-3 text-left">Đã trả</th>
                     <th className="p-3 text-left">Còn nợ</th>
                     <th className="p-3 text-left">Phương thức TT</th>
                     <th className="p-3 text-left">Trạng thái giao</th>
                     <th className="p-3 text-left min-w-32">Thao tác</th>
+                    <th className="p-3 text-left min-w-40">Người tạo đơn/Bán hàng</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -1899,37 +1899,6 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                                 )}
                               </div>
                             )}
-                          </td>
-                          <td className="p-3">
-                            {(() => {
-                              const creatorInfo = getOrderCreator(order);
-                              return (
-                                <div className="space-y-0.5">
-                                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200">
-                                    <UserCheck className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                                    <span>{creatorInfo.name}</span>
-                                    {creatorInfo.role && (
-                                      <span
-                                        className={`text-[9px] px-1 py-0.2 rounded font-bold uppercase ${
-                                          creatorInfo.role === 'admin'
-                                            ? 'bg-purple-100 text-purple-700'
-                                            : creatorInfo.role === 'manager'
-                                            ? 'bg-blue-100 text-blue-700'
-                                            : 'bg-emerald-100 text-emerald-700'
-                                        }`}
-                                      >
-                                        {creatorInfo.role === 'admin' ? 'Admin' : creatorInfo.role === 'manager' ? 'Quản lý' : 'Bán hàng'}
-                                      </span>
-                                    )}
-                                  </div>
-                                  {order.updatedByName && (
-                                    <div className="text-[10px] text-slate-400 pl-1">
-                                      Sửa: <span className="font-medium text-slate-600">{order.updatedByName}</span>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })()}
                           </td>
                           <td className="p-3 text-right font-black text-slate-900">
                             {isCancelled ? (
@@ -2098,6 +2067,37 @@ export const SalesManager: React.FC<SalesManagerProps> = ({
                                 </button>
                               )}
                             </div>
+                          </td>
+                          <td className="p-3">
+                            {(() => {
+                              const creatorInfo = getOrderCreator(order);
+                              return (
+                                <div className="space-y-0.5">
+                                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                                    <UserCheck className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                    <span>{creatorInfo.name}</span>
+                                    {creatorInfo.role && (
+                                      <span
+                                        className={`text-[9px] px-1 py-0.2 rounded font-bold uppercase ${
+                                          creatorInfo.role === 'admin'
+                                            ? 'bg-purple-100 text-purple-700'
+                                            : creatorInfo.role === 'manager'
+                                            ? 'bg-blue-100 text-blue-700'
+                                            : 'bg-emerald-100 text-emerald-700'
+                                        }`}
+                                      >
+                                        {creatorInfo.role === 'admin' ? 'Admin' : creatorInfo.role === 'manager' ? 'Quản lý' : 'Bán hàng'}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {order.updatedByName && (
+                                    <div className="text-[10px] text-slate-400 pl-1">
+                                      Sửa: <span className="font-medium text-slate-600">{order.updatedByName}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </td>
                         </tr>
                       );

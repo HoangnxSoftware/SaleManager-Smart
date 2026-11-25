@@ -77,12 +77,12 @@ export function buildOrderDetailsMatrix(orders: Order[]): (string | number)[][] 
     'Chiết khấu giảm giá tổng đơn hàng',
     'Tổng thuế GTGT',
     'Tổng tiền thanh toán',
+    'Đơn giá bán sau thuế',
     'Phương thức thanh toán',
     ...sortedVatRates.flatMap((rate) => [
       `Tổng thành tiền - Thuế ${rate}%`,
       `Tổng thuế GTGT - Thuế ${rate}%`,
     ]),
-    'Đơn giá bán sau thuế',
   ];
 
   const matrix: (string | number)[][] = [headers];
@@ -138,9 +138,9 @@ export function buildOrderDetailsMatrix(orders: Order[]): (string | number)[][] 
         isFirst ? (o.orderDiscount || 0) : '',
         isFirst ? (o.totalVat || 0) : '',
         isFirst ? o.totalAmount : '',
+        postTaxPrice,
         isFirst ? paymentMethodLabel : '',
         ...vatColumns,
-        postTaxPrice,
       ]);
     });
   }
