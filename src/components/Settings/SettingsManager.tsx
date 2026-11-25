@@ -1,7 +1,15 @@
-import React, { useState } from 'react';
-import { AppData, AppSettings, OrderCodeRule, OrderCodePatternType } from '../../types';
+import React, { useState, useEffect } from 'react';
+import { AppData, AppSettings, Order, OrderCodeRule, OrderCodePatternType, SalesInvoicePrintSettings } from '../../types';
 import { syncDataToGoogleSheets, loadDataFromGoogleSheets, getAccessToken, googleSignIn } from '../../services/googleDriveSheets';
 import { DEFAULT_ORDER_CODE_RULES, formatOrderCode } from '../../services/orderCodeService';
+import {
+  VIETNAM_BANKS,
+  DEFAULT_SALES_INVOICE_PRINT_SETTINGS,
+  getEffectivePrintSettings,
+  inferBankBinFromName,
+  buildOrderQrDescriptor,
+  generateQrDataUrl,
+} from '../../utils/qrPrintUtils';
 import { useConfirm } from '../../context/ConfirmContext';
 import {
   Settings,
@@ -15,7 +23,6 @@ import {
   Database,
   Save,
   RotateCcw,
-  Sparkles,
   Plus,
   Trash2,
   Edit,
@@ -25,7 +32,10 @@ import {
   ArrowUpDown,
   X,
   Lock,
-  Unlock
+  Unlock,
+  Printer,
+  QrCode,
+  CheckSquare
 } from 'lucide-react';
 
 interface SettingsManagerProps {
@@ -90,6 +100,94 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
   const [showConfirmResetEmpty, setShowConfirmResetEmpty] = useState(false);
   const [showConfirmResetSample, setShowConfirmResetSample] = useState(false);
+
+  // Sync form when switching databases or restoring from Google Sheets
+  useEffect(() => {
+    setForm({ ...data.settings });
+    if (data.settings.orderCodeRules && data.settings.orderCodeRules.length > 0) {
+      setRules(data.settings.orderCodeRules);
+    }
+    if (data.settings.defaultOrderCodeRuleId) {
+      setDefaultRuleId(data.settings.defaultOrderCodeRuleId);
+    }
+    setSheetsWebUrl(
+      data.spreadsheetId ? `https://docs.google.com/spreadsheets/d/${data.spreadsheetId}/edit` : null
+    );
+  }, [data.databaseId, data.spreadsheetId, data.settings]);
+
+  const printCfg = getEffectivePrintSettings(form);
+  const [previewQrDataUrl, setPreviewQrDataUrl] = useState<string>('');
+  const [previewQrSubLabel, setPreviewQrSubLabel] = useState<string>('');
+
+  const updatePrintCfg = (patch: Partial<SalesInvoicePrintSettings>) => {
+    setForm((prev) => ({
+      ...prev,
+      salesInvoicePrint: {
+        ...getEffectivePrintSettings(prev),
+        ...patch,
+      },
+    }));
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const cfg = getEffectivePrintSettings(form);
+    if (!cfg.showQrCode) {
+      setPreviewQrDataUrl('');
+      setPreviewQrSubLabel('');
+      return;
+    }
+
+    const sampleOrder: Order = {
+      id: 'sample-preview',
+      orderCode: 'DH-001',
+      orderDate: new Date().toISOString().slice(0, 10),
+      customerId: 'c-sample',
+      customerCode: 'KH001',
+      customerName: 'Khách hàng mẫu',
+      customerTaxCode: '',
+      customerIdCard: '',
+      customerAddress: '',
+      items: [],
+      itemDiscountTotal: 0,
+      orderDiscount: 0,
+      orderDiscountPercent: 0,
+      totalPreTax: 1136364,
+      totalVat: 113636,
+      totalAmount: 1250000,
+      paymentMethod: 'transfer',
+      paidAmount: 0,
+      debtAmount: 1250000,
+      deliveryStatus: 'pending',
+      createdById: 'u-1',
+      createdByName: 'Nhân viên bán hàng',
+      createdAt: '',
+      updatedAt: '',
+    };
+
+    const desc = buildOrderQrDescriptor(sampleOrder, form);
+    generateQrDataUrl(desc.payload, 180)
+      .then((url) => {
+        if (!cancelled) {
+          setPreviewQrDataUrl(url);
+          setPreviewQrSubLabel(desc.subLabel);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPreviewQrDataUrl('');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    form.bankAccount,
+    form.bankName,
+    form.companyName,
+    form.salesInvoicePrint,
+  ]);
 
   const handleOpenAddRule = () => {
     setEditingRule(null);
@@ -1111,6 +1209,507 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
           </button>
         </div>
       </form>
+
+      {/* Section 3.5: Thiết lập in phiếu bán hàng & Mã QR */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-2.5">
+            <Printer className="w-5 h-5 text-blue-600 shrink-0" />
+            <div>
+              <h3 className="font-bold text-slate-800 text-base">
+                Thiết lập In Phiếu Bán Hàng & Mã QR
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Tích chọn các thông tin, cột dữ liệu muốn hiển thị khi in phiếu bán hàng và cấu hình mã QR thanh toán / tra cứu
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={() => {
+                const inferred = inferBankBinFromName(form.bankName) || DEFAULT_SALES_INVOICE_PRINT_SETTINGS.qrBankBin;
+                updatePrintCfg({
+                  ...DEFAULT_SALES_INVOICE_PRINT_SETTINGS,
+                  qrBankBin: inferred,
+                });
+              }}
+              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+            >
+              Khôi phục mặc định
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const updated: AppSettings = {
+                  ...form,
+                  salesInvoicePrint: printCfg,
+                };
+                setForm(updated);
+                onUpdateSettings(updated);
+                alert('Đã lưu thiết lập in phiếu bán hàng & mã QR thành công!');
+              }}
+              className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>Lưu thiết lập in phiếu</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Title & Notes Customization */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Tiêu đề phiếu bán hàng
+            </label>
+            <input
+              type="text"
+              value={printCfg.invoiceTitle}
+              onChange={(e) => updatePrintCfg({ invoiceTitle: e.target.value })}
+              placeholder="VD: PHIẾU BÁN HÀNG / HÓA ĐƠN BÁN HÀNG"
+              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-bold text-slate-900"
+            />
+            <div className="flex flex-wrap gap-1.5 mt-1.5 text-[11px]">
+              {['HÓA ĐƠN BÁN HÀNG', 'PHIẾU BÁN HÀNG', 'PHIẾU GIAO HÀNG'].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => updatePrintCfg({ invoiceTitle: preset })}
+                  className={`px-2 py-0.5 rounded border cursor-pointer transition-colors ${
+                    printCfg.invoiceTitle === preset
+                      ? 'bg-blue-50 border-blue-300 text-blue-700 font-semibold'
+                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Dòng mô tả dưới tiêu đề
+            </label>
+            <input
+              type="text"
+              value={printCfg.invoiceSubtitle}
+              onChange={(e) => updatePrintCfg({ invoiceSubtitle: e.target.value })}
+              placeholder="(Liên 1: Lưu nội bộ - Liên 2: Giao cho khách hàng)"
+              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm text-slate-800"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Lời cảm ơn cuối phiếu
+            </label>
+            <input
+              type="text"
+              value={printCfg.thankYouNote}
+              onChange={(e) => updatePrintCfg({ thankYouNote: e.target.value })}
+              placeholder="Cảm ơn Quý khách đã tin tưởng và ủng hộ chúng tôi!"
+              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm text-slate-800"
+            />
+          </div>
+        </div>
+
+        {/* Field Selection Checkboxes Grid */}
+        <div className="space-y-3 pt-2 border-t border-slate-100">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <CheckSquare className="w-4 h-4 text-blue-600" />
+              <h4 className="text-sm font-bold text-slate-800">
+                Tích chọn các thông tin muốn in trên phiếu bán hàng
+              </h4>
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <button
+                type="button"
+                onClick={() =>
+                  updatePrintCfg({
+                    showCompanyName: true,
+                    showCompanyTaxCode: true,
+                    showCompanyAddress: true,
+                    showCompanyContact: true,
+                    showCompanyBank: true,
+                    showOrderCodeAndDate: true,
+                    showInvoiceSubtitle: true,
+                    showCustomerName: true,
+                    showCustomerCode: true,
+                    showCustomerTaxOrId: true,
+                    showCustomerAddress: true,
+                    showPaymentMethod: true,
+                    showOrderNotes: true,
+                    showColStt: true,
+                    showColProductCode: true,
+                    showColUnit: true,
+                    showColPostTaxPrice: true,
+                    showColPreTaxPrice: true,
+                    showColSubtotal: true,
+                    showColVatRate: true,
+                    showColVatAmount: true,
+                    showColItemDiscount: true,
+                    showSummaryPreTax: true,
+                    showSummaryVat: true,
+                    showSummaryDiscount: true,
+                    showSummaryPaidAndDebt: true,
+                    showAmountInWords: true,
+                    showCreatorAndStatus: true,
+                    showThankYouNote: true,
+                    showSignatures: true,
+                  })
+                }
+                className="text-blue-600 hover:underline font-semibold cursor-pointer"
+              >
+                Chọn tất cả
+              </button>
+              <span className="text-slate-300">|</span>
+              <button
+                type="button"
+                onClick={() =>
+                  updatePrintCfg({
+                    showCompanyTaxCode: false,
+                    showCompanyAddress: true,
+                    showCompanyContact: true,
+                    showCompanyBank: false,
+                    showInvoiceSubtitle: false,
+                    showCustomerCode: false,
+                    showCustomerTaxOrId: false,
+                    showColProductCode: false,
+                    showColPreTaxPrice: false,
+                    showColSubtotal: false,
+                    showColVatRate: false,
+                    showColVatAmount: false,
+                    showColItemDiscount: false,
+                    showSummaryPreTax: false,
+                    showSummaryVat: false,
+                    showSummaryDiscount: false,
+                    showCreatorAndStatus: false,
+                  })
+                }
+                className="text-slate-600 hover:text-slate-900 hover:underline font-medium cursor-pointer"
+              >
+                Mẫu phiếu rút gọn (Bán lẻ)
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 pt-2">
+            {/* Column 1: Đơn vị & Tiêu đề */}
+            <div className="space-y-2.5 bg-slate-50/70 p-4 rounded-xl border border-slate-200">
+              <div className="text-xs font-bold text-slate-800 uppercase tracking-wide pb-1.5 border-b border-slate-200">
+                1. Thông tin đơn vị bán
+              </div>
+              {(
+                [
+                  ['showCompanyName', 'Tên công ty / Cửa hàng'],
+                  ['showCompanyTaxCode', 'Mã số thuế đơn vị'],
+                  ['showCompanyAddress', 'Địa chỉ trụ sở / Cửa hàng'],
+                  ['showCompanyContact', 'Số điện thoại & Email'],
+                  ['showCompanyBank', 'Số tài khoản & Ngân hàng'],
+                  ['showOrderCodeAndDate', 'Mã đơn hàng & Ngày lập'],
+                  ['showInvoiceSubtitle', 'Dòng ghi chú liên dưới tiêu đề'],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2.5 text-xs text-slate-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(printCfg[key])}
+                    onChange={(e) => updatePrintCfg({ [key]: e.target.checked })}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+
+            {/* Column 2: Khách hàng & Đơn hàng */}
+            <div className="space-y-2.5 bg-slate-50/70 p-4 rounded-xl border border-slate-200">
+              <div className="text-xs font-bold text-slate-800 uppercase tracking-wide pb-1.5 border-b border-slate-200">
+                2. Thông tin khách hàng
+              </div>
+              {(
+                [
+                  ['showCustomerName', 'Tên khách hàng'],
+                  ['showCustomerCode', 'Mã khách hàng'],
+                  ['showCustomerTaxOrId', 'MST / CCCD khách hàng'],
+                  ['showCustomerAddress', 'Địa chỉ giao hàng'],
+                  ['showPaymentMethod', 'Phương thức thanh toán'],
+                  ['showOrderNotes', 'Ghi chú đơn hàng'],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2.5 text-xs text-slate-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(printCfg[key])}
+                    onChange={(e) => updatePrintCfg({ [key]: e.target.checked })}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+
+            {/* Column 3: Cột bảng hàng hóa */}
+            <div className="space-y-2.5 bg-slate-50/70 p-4 rounded-xl border border-slate-200">
+              <div className="text-xs font-bold text-slate-800 uppercase tracking-wide pb-1.5 border-b border-slate-200">
+                3. Cột chi tiết hàng hóa
+              </div>
+              {(
+                [
+                  ['showColStt', 'Cột STT'],
+                  ['showColProductCode', 'Mã hàng hóa (Mã HH)'],
+                  ['showColUnit', 'Đơn vị tính (ĐVT_Bán)'],
+                  ['showColPostTaxPrice', 'Đơn giá bán (Sau thuế)'],
+                  ['showColPreTaxPrice', 'Đơn giá trước thuế'],
+                  ['showColSubtotal', 'Thành tiền (Trước thuế)'],
+                  ['showColVatRate', 'Thuế suất (%)'],
+                  ['showColVatAmount', 'Tiền thuế GTGT'],
+                  ['showColItemDiscount', 'Chiết khấu từng mặt hàng'],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2.5 text-xs text-slate-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(printCfg[key])}
+                    onChange={(e) => updatePrintCfg({ [key]: e.target.checked })}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+              <p className="text-[11px] text-slate-500 pt-1">
+                Tên HH, Số lượng và Tổng tiền thanh toán luôn được giữ lại.
+              </p>
+            </div>
+
+            {/* Column 4: Tổng kết & Chân trang */}
+            <div className="space-y-2.5 bg-slate-50/70 p-4 rounded-xl border border-slate-200">
+              <div className="text-xs font-bold text-slate-800 uppercase tracking-wide pb-1.5 border-b border-slate-200">
+                4. Tổng kết & Chân trang
+              </div>
+              {(
+                [
+                  ['showSummaryPreTax', 'Tổng tiền hàng (Trước thuế)'],
+                  ['showSummaryVat', 'Tổng thuế GTGT & chi tiết thuế'],
+                  ['showSummaryDiscount', 'Chiết khấu hàng & tổng đơn'],
+                  ['showSummaryPaidAndDebt', 'Đã thanh toán & Công nợ còn lại'],
+                  ['showAmountInWords', 'Số tiền viết bằng chữ'],
+                  ['showCreatorAndStatus', 'Người lập đơn & Trạng thái giao'],
+                  ['showThankYouNote', 'Lời cảm ơn cuối phiếu'],
+                  ['showSignatures', 'Khu vực chữ ký 3 bên'],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2.5 text-xs text-slate-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(printCfg[key])}
+                    onChange={(e) => updatePrintCfg({ [key]: e.target.checked })}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* QR Code Configuration + Live Preview */}
+        <div className="pt-4 border-t border-slate-100 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <QrCode className="w-4 h-4 text-blue-600" />
+              <h4 className="text-sm font-bold text-slate-800">
+                Thiết lập Mã QR trên phiếu bán hàng
+              </h4>
+            </div>
+            <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-800 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={printCfg.showQrCode}
+                onChange={(e) => updatePrintCfg({ showQrCode: e.target.checked })}
+                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+              />
+              <span>Hiển thị mã QR khi xem trước & in phiếu bán hàng</span>
+            </label>
+          </div>
+
+          {printCfg.showQrCode && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+              {/* Left QR Form Controls */}
+              <div className="lg:col-span-8 grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50/70 p-4 rounded-xl border border-slate-200">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Loại nội dung mã QR
+                  </label>
+                  <select
+                    value={printCfg.qrMode}
+                    onChange={(e) =>
+                      updatePrintCfg({ qrMode: e.target.value as SalesInvoicePrintSettings['qrMode'] })
+                    }
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 bg-white cursor-pointer"
+                  >
+                    <option value="vietqr">VietQR chuyển khoản ngân hàng (Chuẩn NAPAS)</option>
+                    <option value="order_info">QR thông tin tra cứu đơn hàng</option>
+                    <option value="custom">QR đường dẫn / nội dung tùy chỉnh</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Vị trí đặt mã QR trên phiếu
+                  </label>
+                  <select
+                    value={printCfg.qrPosition}
+                    onChange={(e) =>
+                      updatePrintCfg({
+                        qrPosition: e.target.value as SalesInvoicePrintSettings['qrPosition'],
+                      })
+                    }
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 bg-white cursor-pointer"
+                  >
+                    <option value="footer_left">Cuối phiếu (Bên trái bảng tổng tiền)</option>
+                    <option value="header_right">Đầu phiếu (Góc phải dưới mã đơn hàng)</option>
+                  </select>
+                </div>
+
+                {printCfg.qrMode === 'vietqr' && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Ngân hàng nhận chuyển khoản (Mã BIN VietQR)
+                      </label>
+                      <select
+                        value={printCfg.qrBankBin}
+                        onChange={(e) => updatePrintCfg({ qrBankBin: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-medium text-slate-900 bg-white cursor-pointer"
+                      >
+                        {VIETNAM_BANKS.map((bank) => (
+                          <option key={bank.bin} value={bank.bin}>
+                            {bank.shortName} ({bank.bin}) — {bank.name}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        Số tài khoản đang dùng:{' '}
+                        <span className="font-mono font-bold text-slate-800">
+                          {form.bankAccount ? form.bankAccount : 'Chưa nhập (lấy ở mục Thông tin đơn vị phía trên)'}
+                        </span>
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Số tiền gắn tự động vào mã VietQR
+                      </label>
+                      <select
+                        value={printCfg.qrAmountSource}
+                        onChange={(e) =>
+                          updatePrintCfg({
+                            qrAmountSource: e.target.value as SalesInvoicePrintSettings['qrAmountSource'],
+                          })
+                        }
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-medium text-slate-900 bg-white cursor-pointer"
+                      >
+                        <option value="debt_or_total">Công nợ còn lại (nếu đã trả bớt) hoặc Tổng đơn</option>
+                        <option value="total_amount">Luôn gắn Tổng tiền thanh toán của đơn</option>
+                        <option value="none">Không gắn sẵn số tiền (khách tự nhập)</option>
+                      </select>
+                    </div>
+                  </>
+                )}
+
+                {printCfg.qrMode === 'custom' && (
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Đường dẫn URL hoặc nội dung tùy chỉnh
+                    </label>
+                    <input
+                      type="text"
+                      value={printCfg.qrCustomText}
+                      onChange={(e) => updatePrintCfg({ qrCustomText: e.target.value })}
+                      placeholder="VD: https://zalo.me/0988123456 hoặc Tra cuu don {orderCode}"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-900 bg-white"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Hỗ trợ biến tự động: <code className="font-mono">{'{orderCode}'}</code>,{' '}
+                      <code className="font-mono">{'{totalAmount}'}</code>,{' '}
+                      <code className="font-mono">{'{customerName}'}</code>,{' '}
+                      <code className="font-mono">{'{orderDate}'}</code>
+                    </p>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Chú thích hiển thị cạnh / dưới mã QR
+                  </label>
+                  <input
+                    type="text"
+                    value={printCfg.qrCaption}
+                    onChange={(e) => updatePrintCfg({ qrCaption: e.target.value })}
+                    placeholder="Quét mã QR để thanh toán"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-900 bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Kích thước mã QR trên bản in
+                  </label>
+                  <select
+                    value={printCfg.qrSize}
+                    onChange={(e) =>
+                      updatePrintCfg({ qrSize: e.target.value as SalesInvoicePrintSettings['qrSize'] })
+                    }
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 bg-white cursor-pointer"
+                  >
+                    <option value="small">Nhỏ (78 px)</option>
+                    <option value="medium">Vừa (96 px — Khuyên dùng)</option>
+                    <option value="large">Lớn (120 px)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Right Live QR Preview */}
+              <div className="lg:col-span-4 bg-slate-50/70 p-4 rounded-xl border border-slate-200 flex flex-col items-center justify-center text-center space-y-2">
+                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+                  Xem trước mã QR mẫu (Đơn DH-001)
+                </span>
+                {previewQrDataUrl ? (
+                  <div className="p-2.5 bg-white border border-slate-200 rounded-xl inline-block">
+                    <img
+                      src={previewQrDataUrl}
+                      alt="Xem trước mã QR phiếu bán hàng"
+                      className="w-28 h-28 object-contain"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-28 h-28 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-xs text-slate-400">
+                    Đang tạo QR...
+                  </div>
+                )}
+                {printCfg.qrCaption && (
+                  <div className="text-xs font-bold text-slate-800">{printCfg.qrCaption}</div>
+                )}
+                {previewQrSubLabel && (
+                  <div className="text-[11px] font-mono tabular-nums text-slate-600">
+                    {previewQrSubLabel}
+                  </div>
+                )}
+                {printCfg.qrMode === 'vietqr' && !form.bankAccount && (
+                  <p className="text-[11px] text-amber-700 leading-snug">
+                    Chưa có Số tài khoản ngân hàng — tạm hiển thị QR thông tin đơn hàng cho đến khi bạn nhập Số TK.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Section 4: Database reset options */}
       <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">

@@ -1,7 +1,12 @@
-import React, { useRef } from 'react';
-import { Order, AppSettings } from '../../types';
-import { formatCurrency, formatDate, formatNumber, formatPaymentMethod } from '../../utils/formatters';
-import { Printer, X, Download, ExternalLink } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Order, OrderItem, AppSettings, SalesInvoicePrintSettings } from '../../types';
+import { formatCurrency, formatCurrencyInWords, formatDate, formatNumber, formatPaymentMethod } from '../../utils/formatters';
+import {
+  getEffectivePrintSettings,
+  getQrPixelSize,
+  generateOrderQrMap,
+} from '../../utils/qrPrintUtils';
+import { Printer, X, ExternalLink } from 'lucide-react';
 
 interface OrderPrintModalProps {
   orders: Order[];
@@ -10,228 +15,436 @@ interface OrderPrintModalProps {
   onClose: () => void;
 }
 
+interface PrintColumnDef {
+  key: string;
+  labelHtml: string;
+  align: 'left' | 'center' | 'right';
+  isFluid?: boolean;
+}
+
+function getActiveColumns(cfg: SalesInvoicePrintSettings): PrintColumnDef[] {
+  const cols: PrintColumnDef[] = [];
+  if (cfg.showColStt) {
+    cols.push({ key: 'stt', labelHtml: 'STT', align: 'center' });
+  }
+  if (cfg.showColProductCode) {
+    cols.push({ key: 'productCode', labelHtml: 'Mã HH', align: 'left' });
+  }
+  // Core: Tên hàng hóa (takes all remaining fluid space)
+  cols.push({ key: 'productName', labelHtml: 'Tên hàng hóa', align: 'left', isFluid: true });
+  if (cfg.showColUnit) {
+    cols.push({ key: 'saleUnit', labelHtml: 'ĐVT', align: 'center' });
+  }
+  // Core: Số lượng
+  cols.push({ key: 'quantity', labelHtml: 'SL', align: 'right' });
+  if (cfg.showColPostTaxPrice) {
+    cols.push({
+      key: 'postTaxPrice',
+      labelHtml: 'Đơn giá<br/>(Sau thuế)',
+      align: 'right',
+    });
+  }
+  if (cfg.showColPreTaxPrice) {
+    cols.push({
+      key: 'preTaxPrice',
+      labelHtml: 'Đơn giá<br/>(Trước thuế)',
+      align: 'right',
+    });
+  }
+  if (cfg.showColSubtotal) {
+    cols.push({
+      key: 'subtotal',
+      labelHtml: 'Thành tiền<br/>(Trước thuế)',
+      align: 'right',
+    });
+  }
+  if (cfg.showColVatRate) {
+    cols.push({ key: 'vatRate', labelHtml: 'VAT<br/>(%)', align: 'center' });
+  }
+  if (cfg.showColVatAmount) {
+    cols.push({ key: 'vatAmount', labelHtml: 'Tiền thuế<br/>GTGT', align: 'right' });
+  }
+  if (cfg.showColItemDiscount) {
+    cols.push({ key: 'itemDiscount', labelHtml: 'Chiết<br/>khấu', align: 'right' });
+  }
+  // Core: Thành tiền thanh toán
+  cols.push({
+    key: 'totalAmount',
+    labelHtml: 'Thành tiền<br/>thanh toán',
+    align: 'right',
+  });
+
+  return cols;
+}
+
+function escapeHtml(str: string): string {
+  return (str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatUnitPriceDisplay(val: number, decimals?: number): string {
+  const dec = decimals !== undefined && decimals > 0 ? decimals : 0;
+  return `${formatNumber(val, dec)} ₫`;
+}
+
+function renderCellHtml(colKey: string, item: OrderItem, idx: number, settings: AppSettings): string {
+  const preTaxDec = settings.salePriceDecimals ?? 2;
+  const postTaxDec = settings.postTaxSalePriceDecimals && settings.postTaxSalePriceDecimals > 0 ? settings.postTaxSalePriceDecimals : 0;
+
+  switch (colKey) {
+    case 'stt':
+      return `<td style="border: 1px solid #cbd5e1; padding: 6px 5px; text-align: center; color: #475569; font-weight: 600; white-space: nowrap; width: 1%;">${idx + 1}</td>`;
+    case 'productCode':
+      return `<td style="border: 1px solid #cbd5e1; padding: 6px 6px; font-variant-numeric: tabular-nums; font-size: 10px; color: #334155; white-space: nowrap; width: 1%;">${escapeHtml(item.productCode)}</td>`;
+    case 'productName':
+      return `<td style="border: 1px solid #cbd5e1; padding: 6px 8px; font-weight: 600; color: #0f172a; word-break: break-word; line-height: 1.4; min-width: 150px;">${escapeHtml(item.productName)}</td>`;
+    case 'saleUnit':
+      return `<td style="border: 1px solid #cbd5e1; padding: 6px 5px; text-align: center; color: #334155; white-space: nowrap; width: 1%;">${escapeHtml(item.saleUnit)}</td>`;
+    case 'quantity':
+      return `<td style="border: 1px solid #cbd5e1; padding: 6px 6px; text-align: right; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums; white-space: nowrap; width: 1%;">${formatNumber(item.quantity)}</td>`;
+    case 'postTaxPrice':
+      return `<td style="border: 1px solid #cbd5e1; padding: 6px 6px; text-align: right; font-weight: 600; color: #1e3a8a; font-variant-numeric: tabular-nums; white-space: nowrap; width: 1%;">${formatUnitPriceDisplay(item.postTaxPrice, postTaxDec)}</td>`;
+    case 'preTaxPrice':
+      return `<td style="border: 1px solid #cbd5e1; padding: 6px 6px; text-align: right; color: #334155; font-variant-numeric: tabular-nums; white-space: nowrap; width: 1%;">${formatUnitPriceDisplay(item.preTaxPrice, preTaxDec)}</td>`;
+    case 'subtotal':
+      return `<td style="border: 1px solid #cbd5e1; padding: 6px 6px; text-align: right; font-weight: 500; color: #1e293b; font-variant-numeric: tabular-nums; white-space: nowrap; width: 1%;">${formatCurrency(item.subtotal || item.quantity * item.preTaxPrice)}</td>`;
+    case 'vatRate':
+      return `<td style="border: 1px solid #cbd5e1; padding: 6px 5px; text-align: center; color: #334155; font-variant-numeric: tabular-nums; white-space: nowrap; width: 1%;">${item.vatRate}%</td>`;
+    case 'vatAmount':
+      return `<td style="border: 1px solid #cbd5e1; padding: 6px 6px; text-align: right; color: #334155; font-variant-numeric: tabular-nums; white-space: nowrap; width: 1%;">${formatCurrency(item.vatAmount)}</td>`;
+    case 'itemDiscount':
+      return `<td style="border: 1px solid #cbd5e1; padding: 6px 6px; text-align: right; color: ${item.itemDiscount > 0 ? '#047857' : '#64748b'}; font-variant-numeric: tabular-nums; white-space: nowrap; width: 1%;">${item.itemDiscount > 0 ? `-${formatCurrency(item.itemDiscount)}` : '0 ₫'}</td>`;
+    case 'totalAmount':
+    default:
+      return `<td style="border: 1px solid #cbd5e1; padding: 6px 6px; text-align: right; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums; white-space: nowrap; width: 1%;">${formatCurrency(item.totalAmount)}</td>`;
+  }
+}
+
 /**
  * Builds standalone, pristine HTML for printing invoices.
  * Guaranteed to format on A4 with zero dependencies or app interference.
  */
-function generateOrderPrintHtml(orders: Order[], settings: AppSettings): string {
-  const pagesHtml = orders.map((order, orderIdx) => {
-    const isLast = orderIdx === orders.length - 1;
+function generateOrderPrintHtml(
+  orders: Order[],
+  settings: AppSettings,
+  qrMap: Record<string, { dataUrl: string; subLabel: string }>
+): string {
+  const cfg = getEffectivePrintSettings(settings);
+  const activeCols = getActiveColumns(cfg);
+  const qrPx = getQrPixelSize(cfg.qrSize);
 
-    // Subtotal breakdown by VAT rate
-    const subtotalMap = new Map<number, number>();
-    (order.items || []).forEach((it) => {
-      const r = it.vatRate || 0;
-      subtotalMap.set(r, (subtotalMap.get(r) || 0) + (it.subtotal || 0));
-    });
+  const pagesHtml = orders
+    .map((order, orderIdx) => {
+      const isLast = orderIdx === orders.length - 1;
+      const qrInfo = qrMap[order.id];
 
-    // Tax breakdown by VAT rate
-    const taxMap = new Map<number, number>();
-    (order.items || []).forEach((it) => {
-      const r = it.vatRate || 0;
-      taxMap.set(r, (taxMap.get(r) || 0) + (it.vatAmount || 0));
-    });
+      const subtotalMap = new Map<number, number>();
+      (order.items || []).forEach((it) => {
+        const r = it.vatRate || 0;
+        subtotalMap.set(r, (subtotalMap.get(r) || 0) + (it.subtotal || 0));
+      });
 
-    const itemDiscountTotal =
-      order.itemDiscountTotal !== undefined && order.itemDiscountTotal !== null
-        ? order.itemDiscountTotal
-        : (order.items || []).reduce((sum, it) => sum + (it.itemDiscount || 0), 0);
+      const taxMap = new Map<number, number>();
+      (order.items || []).forEach((it) => {
+        const r = it.vatRate || 0;
+        taxMap.set(r, (taxMap.get(r) || 0) + (it.vatAmount || 0));
+      });
 
-    const rowsHtml = (order.items || [])
-      .map(
-        (item, idx) => `
-      <tr>
-        <td style="border: 1px solid #cbd5e1; padding: 4.5px 3px; text-align: center; color: #64748b; font-size: 11px;">${idx + 1}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 4.5px 4px; font-family: 'Inter', 'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif; font-variant-numeric: tabular-nums; font-size: 10px; word-break: break-all;">${item.productCode}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 4.5px 4px; font-weight: 500; word-break: break-word; font-size: 11px; line-height: 1.35;">${item.productName}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 4.5px 3px; text-align: center; white-space: nowrap; font-size: 11px;">${item.saleUnit}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 4.5px 4px; text-align: right; font-weight: 500; white-space: nowrap; font-size: 11px;">${formatNumber(item.quantity)}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 4.5px 4px; text-align: right; font-weight: 600; color: #1e3a8a; white-space: nowrap; font-size: 11px;">${formatCurrency(item.postTaxPrice)}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 4.5px 4px; text-align: right; white-space: nowrap; font-size: 11px;">${formatCurrency(item.preTaxPrice)}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 4.5px 4px; text-align: right; font-weight: 500; white-space: nowrap; font-size: 11px;">${formatCurrency(item.subtotal || item.quantity * item.preTaxPrice)}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 4.5px 3px; text-align: center; white-space: nowrap; font-size: 11px;">${item.vatRate}%</td>
-        <td style="border: 1px solid #cbd5e1; padding: 4.5px 4px; text-align: right; white-space: nowrap; font-size: 11px;">${formatCurrency(item.vatAmount)}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 4.5px 4px; text-align: right; white-space: nowrap; font-size: 11px;">${item.itemDiscount > 0 ? formatCurrency(item.itemDiscount) : '0'}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 4.5px 4px; text-align: right; font-weight: 700; white-space: nowrap; font-size: 11px;">${formatCurrency(item.totalAmount)}</td>
-      </tr>
-    `
-      )
-      .join('');
+      const itemDiscountTotal =
+        order.itemDiscountTotal !== undefined && order.itemDiscountTotal !== null
+          ? order.itemDiscountTotal
+          : (order.items || []).reduce((sum, it) => sum + (it.itemDiscount || 0), 0);
 
-    const subtotalBreakdownHtml =
-      subtotalMap.size > 0
+      const hasCompanyBlock =
+        cfg.showCompanyName ||
+        cfg.showCompanyTaxCode ||
+        cfg.showCompanyAddress ||
+        cfg.showCompanyContact ||
+        cfg.showCompanyBank;
+
+      const hasHeaderQr = cfg.showQrCode && cfg.qrPosition === 'header_right' && Boolean(qrInfo?.dataUrl);
+      const hasFooterQr = cfg.showQrCode && cfg.qrPosition === 'footer_left' && Boolean(qrInfo?.dataUrl);
+      const hasRightHeader = cfg.showOrderCodeAndDate || hasHeaderQr;
+
+      const headerQrHtml = hasHeaderQr
         ? `
-      <div style="padding-left: 8px; margin-top: 3px; border-left: 2px solid #cbd5e1; font-size: 10.5px; color: #475569;">
-        ${Array.from(subtotalMap.entries())
-          .sort((a, b) => a[0] - b[0])
-          .map(
-            ([rate, amt]) => `
-          <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
-            <span>• Tiền hàng thuế ${rate}%:</span>
-            <span style="font-weight: 500;">${formatCurrency(amt)}</span>
+          <div style="margin-top: 8px; display: inline-flex; flex-direction: column; align-items: center; padding: 6px; border: 1px solid #cbd5e1; border-radius: 6px; background: #ffffff;">
+            <img src="${qrInfo.dataUrl}" width="${qrPx}" height="${qrPx}" alt="QR" style="display: block;" />
+            ${cfg.qrCaption ? `<div style="font-size: 9.5px; font-weight: 700; color: #1e293b; margin-top: 3px; text-align: center; max-width: ${qrPx + 24}px;">${escapeHtml(cfg.qrCaption)}</div>` : ''}
+            ${qrInfo.subLabel ? `<div style="font-size: 9px; color: #475569; font-variant-numeric: tabular-nums; text-align: center;">${escapeHtml(qrInfo.subLabel)}</div>` : ''}
           </div>
         `
-          )
-          .join('')}
-      </div>
-    `
         : '';
 
-    const taxBreakdownHtml =
-      taxMap.size > 0
+      const footerQrHtml = hasFooterQr
         ? `
-      <div style="padding-left: 8px; margin-top: 3px; border-left: 2px solid #cbd5e1; font-size: 10.5px; color: #475569;">
-        ${Array.from(taxMap.entries())
-          .sort((a, b) => a[0] - b[0])
-          .map(
-            ([rate, amt]) => `
-          <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
-            <span>• Tiền thuế GTGT ${rate}%:</span>
-            <span style="font-weight: 500;">${formatCurrency(amt)}</span>
+          <div style="margin-top: 12px; display: inline-flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc;">
+            <img src="${qrInfo.dataUrl}" width="${qrPx}" height="${qrPx}" alt="QR" style="display: block; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; padding: 2px;" />
+            <div style="font-size: 10.5px; color: #334155; line-height: 1.45;">
+              ${cfg.qrCaption ? `<div style="font-weight: 700; color: #0f172a; margin-bottom: 2px;">${escapeHtml(cfg.qrCaption)}</div>` : ''}
+              ${qrInfo.subLabel ? `<div style="font-variant-numeric: tabular-nums; font-weight: 600;">${escapeHtml(qrInfo.subLabel)}</div>` : ''}
+              ${cfg.qrMode === 'vietqr' && settings.bankAccount ? `<div style="font-size: 10px; color: #64748b;">Nội dung CK: TT ${escapeHtml(order.orderCode)}</div>` : ''}
+            </div>
           </div>
         `
-          )
-          .join('')}
-      </div>
-    `
         : '';
 
-    return `
-      <div class="order-sheet" style="${isLast ? '' : 'page-break-after: always; break-after: page;'} margin-bottom: 28px; background: #fff;">
-        <!-- Header -->
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #cbd5e1; padding-bottom: 10px; margin-bottom: 14px;">
-          <div>
-            <h2 style="font-size: 16px; font-weight: bold; margin: 0 0 3px 0; color: #0f172a;">${settings.companyName || 'CÔNG TY'}</h2>
-            <div style="font-size: 11px; color: #475569; line-height: 1.45;">
-              <div><strong>Mã số thuế:</strong> ${settings.taxCode || '—'}</div>
-              <div><strong>Địa chỉ:</strong> ${settings.address || '—'}</div>
-              <div><strong>Điện thoại:</strong> ${settings.phone || '—'} ${settings.email ? `| <strong>Email:</strong> ${settings.email}` : ''}</div>
-              ${settings.bankAccount ? `<div><strong>Số TK:</strong> ${settings.bankAccount} ${settings.bankName ? `- ${settings.bankName}` : ''}</div>` : ''}
+      const customerLeftLines: string[] = [];
+      if (cfg.showCustomerName) {
+        customerLeftLines.push(`<div><strong>Khách hàng:</strong> ${escapeHtml(order.customerName)}</div>`);
+      }
+      if (cfg.showCustomerCode) {
+        customerLeftLines.push(
+          `<div><strong>Mã KH:</strong> <span style="font-variant-numeric: tabular-nums; color: #1d4ed8; font-weight: bold;">${escapeHtml(order.customerCode)}</span></div>`
+        );
+      }
+      if (cfg.showCustomerTaxOrId) {
+        customerLeftLines.push(
+          `<div><strong>MST / CCCD:</strong> ${escapeHtml(order.customerTaxCode || order.customerIdCard || 'Chưa cung cấp')}</div>`
+        );
+      }
+
+      const customerRightLines: string[] = [];
+      if (cfg.showCustomerAddress) {
+        customerRightLines.push(
+          `<div><strong>Địa chỉ giao:</strong> ${escapeHtml(order.customerAddress || 'Tại quầy')}</div>`
+        );
+      }
+      if (cfg.showPaymentMethod) {
+        customerRightLines.push(
+          `<div><strong>Phương thức TT:</strong> ${escapeHtml(formatPaymentMethod(order.paymentMethod))}</div>`
+        );
+      }
+      if (cfg.showOrderNotes) {
+        customerRightLines.push(`<div><strong>Ghi chú:</strong> ${escapeHtml(order.notes || 'Không có')}</div>`);
+      }
+
+      const hasCustomerBox = customerLeftLines.length > 0 || customerRightLines.length > 0;
+
+      const totalItemsAmount = (order.items || []).reduce((sum, it) => sum + (it.totalAmount || 0), 0);
+      const tableFontSize = activeCols.length >= 10 ? '10px' : '11px';
+
+      const rowsHtml = (order.items || [])
+        .map(
+          (item, idx) =>
+            `<tr style="background: ${idx % 2 === 1 ? '#f8fafc' : '#ffffff'}; vertical-align: middle;">${activeCols.map((col) => renderCellHtml(col.key, item, idx, settings)).join('')}</tr>`
+        )
+        .join('');
+
+      const leadingColSpan = Math.max(1, activeCols.length - 1);
+      const footerCellsHtml = `
+        <td colspan="${leadingColSpan}" style="border: 1px solid #cbd5e1; padding: 6px 10px; text-align: right; font-weight: 700; color: #0f172a;">
+          Tổng cộng (${(order.items || []).length} mặt hàng):
+        </td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px 6px; text-align: right; font-weight: 800; color: #1d4ed8; font-variant-numeric: tabular-nums; white-space: nowrap;">
+          ${formatCurrency(totalItemsAmount)}
+        </td>
+      `;
+
+      const subtotalBreakdownHtml =
+        subtotalMap.size > 0
+          ? `
+        <div style="padding-left: 8px; margin-top: 3px; border-left: 1px solid #cbd5e1; font-size: 10.5px; color: #475569;">
+          ${Array.from(subtotalMap.entries())
+            .sort((a, b) => a[0] - b[0])
+            .map(
+              ([rate, amt]) => `
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+              <span>• Tiền hàng thuế ${rate}%:</span>
+              <span style="font-weight: 500; font-variant-numeric: tabular-nums;">${formatCurrency(amt)}</span>
             </div>
-          </div>
-          <div style="text-align: right;">
-            <div style="display: inline-block; padding: 3px 10px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px; font-family: 'Inter', 'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif; font-variant-numeric: tabular-nums; font-size: 13px; font-weight: bold; color: #1e293b;">
-              ${order.orderCode}
-            </div>
-            <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
-              Ngày: ${formatDate(order.orderDate)}
-            </div>
-          </div>
+          `
+            )
+            .join('')}
         </div>
+      `
+          : '';
+
+      const taxBreakdownHtml =
+        taxMap.size > 0
+          ? `
+        <div style="padding-left: 8px; margin-top: 3px; border-left: 1px solid #cbd5e1; font-size: 10.5px; color: #475569;">
+          ${Array.from(taxMap.entries())
+            .sort((a, b) => a[0] - b[0])
+            .map(
+              ([rate, amt]) => `
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+              <span>• Tiền thuế GTGT ${rate}%:</span>
+              <span style="font-weight: 500; font-variant-numeric: tabular-nums;">${formatCurrency(amt)}</span>
+            </div>
+          `
+            )
+            .join('')}
+        </div>
+      `
+          : '';
+
+      return `
+      <div class="order-sheet" style="${isLast ? '' : 'page-break-after: always; break-after: page;'} margin-bottom: 28px; background: #fff;">
+        ${
+          hasCompanyBlock || hasRightHeader
+            ? `
+        <!-- Header -->
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; border-bottom: 1px solid #cbd5e1; padding-bottom: 10px; margin-bottom: 14px;">
+          <div>
+            ${cfg.showCompanyName ? `<h2 style="font-size: 16px; font-weight: bold; margin: 0 0 3px 0; color: #0f172a;">${escapeHtml(settings.companyName || 'CÔNG TY')}</h2>` : ''}
+            <div style="font-size: 11px; color: #475569; line-height: 1.45;">
+              ${cfg.showCompanyTaxCode ? `<div><strong>Mã số thuế:</strong> ${escapeHtml(settings.taxCode || '—')}</div>` : ''}
+              ${cfg.showCompanyAddress ? `<div><strong>Địa chỉ:</strong> ${escapeHtml(settings.address || '—')}</div>` : ''}
+              ${cfg.showCompanyContact ? `<div><strong>Điện thoại:</strong> ${escapeHtml(settings.phone || '—')} ${settings.email ? `| <strong>Email:</strong> ${escapeHtml(settings.email)}` : ''}</div>` : ''}
+              ${cfg.showCompanyBank && settings.bankAccount ? `<div><strong>Số TK:</strong> ${escapeHtml(settings.bankAccount)} ${settings.bankName ? `- ${escapeHtml(settings.bankName)}` : ''}</div>` : ''}
+            </div>
+          </div>
+          ${
+            hasRightHeader
+              ? `<div style="text-align: right; flex-shrink: 0;">
+                  ${
+                    cfg.showOrderCodeAndDate
+                      ? `<div style="display: inline-block; padding: 3px 10px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px; font-variant-numeric: tabular-nums; font-size: 13px; font-weight: bold; color: #1e293b;">
+                          ${escapeHtml(order.orderCode)}
+                        </div>
+                        <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
+                          Ngày: ${formatDate(order.orderDate)}
+                        </div>`
+                      : ''
+                  }
+                  ${headerQrHtml}
+                </div>`
+              : ''
+          }
+        </div>`
+            : ''
+        }
 
         <!-- Title -->
-        <div style="text-align: center; margin: 14px 0 16px 0;">
-          <h1 style="font-family: 'Plus Jakarta Sans', 'Inter', 'Segoe UI', Arial, sans-serif; font-size: 19px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin: 0; color: #0f172a;">HÓA ĐƠN BÁN HÀNG</h1>
-          <div style="font-size: 10.5px; color: #64748b; margin-top: 2px;">(Liên 1: Lưu nội bộ - Liên 2: Giao cho khách hàng)</div>
+        <div style="text-align: center; margin: 12px 0 14px 0;">
+          <h1 style="font-family: 'Plus Jakarta Sans', 'Inter', 'Segoe UI', Arial, sans-serif; font-size: 19px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin: 0; color: #0f172a;">${escapeHtml(cfg.invoiceTitle || 'HÓA ĐƠN BÁN HÀNG')}</h1>
+          ${cfg.showInvoiceSubtitle && cfg.invoiceSubtitle ? `<div style="font-size: 10.5px; color: #64748b; margin-top: 2px;">${escapeHtml(cfg.invoiceSubtitle)}</div>` : ''}
         </div>
 
+        ${
+          hasCustomerBox
+            ? `
         <!-- Customer info -->
-        <div style="display: flex; justify-content: space-between; gap: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 11.5px;">
-          <div style="flex: 1; line-height: 1.55;">
-            <div><strong>Khách hàng:</strong> ${order.customerName}</div>
-            <div><strong>Mã KH:</strong> <span style="font-family: 'Inter', 'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif; font-variant-numeric: tabular-nums; color: #1d4ed8; font-weight: bold;">${order.customerCode}</span></div>
-            <div><strong>MST / CCCD:</strong> ${order.customerTaxCode || order.customerIdCard || 'Chưa cung cấp'}</div>
-          </div>
-          <div style="flex: 1; line-height: 1.55;">
-            <div><strong>Địa chỉ giao:</strong> ${order.customerAddress || 'Tại quầy'}</div>
-            <div><strong>Phương thức TT:</strong> ${formatPaymentMethod(order.paymentMethod)}</div>
-            <div><strong>Ghi chú:</strong> ${order.notes || 'Không có'}</div>
-          </div>
-        </div>
+        <div style="display: flex; justify-content: space-between; gap: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; font-size: 11.5px;">
+          ${customerLeftLines.length > 0 ? `<div style="flex: 1; line-height: 1.55;">${customerLeftLines.join('')}</div>` : ''}
+          ${customerRightLines.length > 0 ? `<div style="flex: 1; line-height: 1.55;">${customerRightLines.join('')}</div>` : ''}
+        </div>`
+            : ''
+        }
 
         <!-- Table -->
-        <table style="width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 16px;">
-          <colgroup>
-            <col style="width: 3.5%;" />
-            <col style="width: 8.5%;" />
-            <col style="width: 20%;" />
-            <col style="width: 5%;" />
-            <col style="width: 5.5%;" />
-            <col style="width: 9.5%;" />
-            <col style="width: 9.5%;" />
-            <col style="width: 9.5%;" />
-            <col style="width: 4.5%;" />
-            <col style="width: 7.5%;" />
-            <col style="width: 7%;" />
-            <col style="width: 10%;" />
-          </colgroup>
+        <div style="font-size: 11px; font-weight: 700; color: #1e293b; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px;">
+          Chi tiết hàng hóa (${(order.items || []).length} mặt hàng)
+        </div>
+        <table style="width: 100%; border-collapse: collapse; table-layout: auto; margin-bottom: 14px; font-size: ${tableFontSize};">
           <thead>
-            <tr style="background: #f1f5f9; color: #334155; font-size: 9.5px; font-weight: bold; text-transform: uppercase;">
-              <th style="border: 1px solid #cbd5e1; padding: 5px 2px; text-align: center; vertical-align: middle;">STT</th>
-              <th style="border: 1px solid #cbd5e1; padding: 5px 3px; text-align: left; vertical-align: middle;">Mã HH</th>
-              <th style="border: 1px solid #cbd5e1; padding: 5px 3px; text-align: left; vertical-align: middle;">Tên HH</th>
-              <th style="border: 1px solid #cbd5e1; padding: 5px 2px; text-align: center; vertical-align: middle;">ĐVT_Bán</th>
-              <th style="border: 1px solid #cbd5e1; padding: 5px 3px; text-align: right; vertical-align: middle;">Số<br/>lượng</th>
-              <th style="border: 1px solid #cbd5e1; padding: 5px 3px; text-align: right; vertical-align: middle;">Đơn giá bán<br/>(Sau thuế)</th>
-              <th style="border: 1px solid #cbd5e1; padding: 5px 3px; text-align: right; vertical-align: middle;">Đơn giá<br/>trước thuế</th>
-              <th style="border: 1px solid #cbd5e1; padding: 5px 3px; text-align: right; vertical-align: middle;">Thành<br/>tiền</th>
-              <th style="border: 1px solid #cbd5e1; padding: 5px 2px; text-align: center; vertical-align: middle;">Thuế<br/>%</th>
-              <th style="border: 1px solid #cbd5e1; padding: 5px 3px; text-align: right; vertical-align: middle;">Thuế<br/>GTGT</th>
-              <th style="border: 1px solid #cbd5e1; padding: 5px 3px; text-align: right; vertical-align: middle;">Chiết<br/>Khấu</th>
-              <th style="border: 1px solid #cbd5e1; padding: 5px 3px; text-align: right; vertical-align: middle;">Tổng tiền<br/>thanh toán</th>
+            <tr style="background: #e2e8f0; color: #0f172a; font-size: ${activeCols.length >= 10 ? '9px' : '10px'}; font-weight: 700; text-transform: uppercase; line-height: 1.25;">
+              ${activeCols
+                .map(
+                  (c) =>
+                    `<th style="border: 1px solid #94a3b8; padding: 6px 5px; text-align: ${c.align}; vertical-align: middle; ${c.isFluid ? 'min-width: 150px;' : 'white-space: nowrap; width: 1%;'}">${c.labelHtml}</th>`
+                )
+                .join('')}
             </tr>
           </thead>
           <tbody>
             ${rowsHtml}
           </tbody>
+          <tfoot>
+            <tr style="background: #f1f5f9;">
+              ${footerCellsHtml}
+            </tr>
+          </tfoot>
         </table>
 
-        <!-- Totals & Notes -->
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 20px;">
+        <!-- Totals & Notes & Footer QR -->
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 18px;">
           <div style="flex: 1; font-size: 11px; color: #475569; line-height: 1.55;">
-            <div><strong>Người lập đơn:</strong> ${order.createdByName}</div>
-            <div><strong>Trạng thái giao:</strong> ${order.deliveryStatus === 'pending' ? 'Chờ giao' : order.deliveryStatus === 'delivering' ? 'Đang giao' : order.deliveryStatus === 'completed' ? 'Hoàn thành' : 'Đã hủy'}</div>
-            <div style="margin-top: 14px; font-style: italic; color: #64748b;">Cảm ơn Quý khách đã tin tưởng và ủng hộ chúng tôi!</div>
+            ${
+              cfg.showCreatorAndStatus
+                ? `<div><strong>Người lập đơn:</strong> ${escapeHtml(order.createdByName)}</div>
+                   <div><strong>Trạng thái giao:</strong> ${order.deliveryStatus === 'pending' ? 'Chờ giao' : order.deliveryStatus === 'delivering' ? 'Đang giao' : order.deliveryStatus === 'completed' ? 'Hoàn thành' : 'Đã hủy'}</div>`
+                : ''
+            }
+            ${
+              cfg.showThankYouNote && cfg.thankYouNote
+                ? `<div style="margin-top: 10px; font-style: italic; color: #64748b;">${escapeHtml(cfg.thankYouNote)}</div>`
+                : ''
+            }
+            ${footerQrHtml}
           </div>
           <div style="flex: 1; max-width: 370px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px 12px; font-size: 11.5px;">
-            <!-- 1. Tổng tiền hàng (Trước thuế): -->
-            <div style="display: flex; justify-content: space-between; color: #475569; margin-bottom: 3px;">
-              <span>Tổng tiền hàng (Trước thuế):</span>
-              <span style="font-weight: 500; color: #1e293b;">${formatCurrency(order.totalPreTax)}</span>
-            </div>
-            ${subtotalBreakdownHtml}
+            ${
+              cfg.showSummaryPreTax
+                ? `<div style="display: flex; justify-content: space-between; color: #475569; margin-bottom: 3px;">
+                    <span>Tổng tiền hàng (Trước thuế):</span>
+                    <span style="font-weight: 500; color: #1e293b; font-variant-numeric: tabular-nums;">${formatCurrency(order.totalPreTax)}</span>
+                  </div>
+                  ${subtotalBreakdownHtml}`
+                : ''
+            }
 
-            <!-- 2. Tổng thuế GTGT: -->
-            <div style="display: flex; justify-content: space-between; color: #475569; margin: 5px 0 3px 0;">
-              <span>Tổng thuế GTGT:</span>
-              <span style="font-weight: 500; color: #1e293b;">${formatCurrency(order.totalVat)}</span>
-            </div>
-            ${taxBreakdownHtml}
+            ${
+              cfg.showSummaryVat
+                ? `<div style="display: flex; justify-content: space-between; color: #475569; margin: 5px 0 3px 0;">
+                    <span>Tổng thuế GTGT:</span>
+                    <span style="font-weight: 500; color: #1e293b; font-variant-numeric: tabular-nums;">${formatCurrency(order.totalVat)}</span>
+                  </div>
+                  ${taxBreakdownHtml}`
+                : ''
+            }
 
-            <!-- 3. Chiết khấu mặt hàng: -->
-            <div style="display: flex; justify-content: space-between; color: #475569; margin: 5px 0 3px 0;">
-              <span>Chiết khấu mặt hàng:</span>
-              <span style="${itemDiscountTotal > 0 ? 'font-weight: 500; color: #047857;' : 'color: #1e293b;'}">${itemDiscountTotal > 0 ? `-${formatCurrency(itemDiscountTotal)}` : '0 ₫'}</span>
-            </div>
+            ${
+              cfg.showSummaryDiscount
+                ? `<div style="display: flex; justify-content: space-between; color: #475569; margin: 5px 0 3px 0;">
+                    <span>Chiết khấu mặt hàng:</span>
+                    <span style="font-variant-numeric: tabular-nums; ${itemDiscountTotal > 0 ? 'font-weight: 500; color: #047857;' : 'color: #1e293b;'}">${itemDiscountTotal > 0 ? `-${formatCurrency(itemDiscountTotal)}` : '0 ₫'}</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; color: #475569; margin-bottom: 5px;">
+                    <span>Chiết khấu tổng đơn:</span>
+                    <span style="font-variant-numeric: tabular-nums; ${order.orderDiscount > 0 ? 'font-weight: 500; color: #047857;' : 'color: #1e293b;'}">${order.orderDiscount > 0 ? `-${formatCurrency(order.orderDiscount)}` : '0 ₫'}</span>
+                  </div>`
+                : ''
+            }
 
-            <!-- 4. Chiết khấu tổng đơn: -->
-            <div style="display: flex; justify-content: space-between; color: #475569; margin-bottom: 5px;">
-              <span>Chiết khấu tổng đơn:</span>
-              <span style="${order.orderDiscount > 0 ? 'font-weight: 500; color: #047857;' : 'color: #1e293b;'}">${order.orderDiscount > 0 ? `-${formatCurrency(order.orderDiscount)}` : '0 ₫'}</span>
-            </div>
-
-            <!-- 5. Tổng tiền thanh toán: -->
-            <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 13px; color: #0f172a; border-top: 1px solid #cbd5e1; padding-top: 6px; margin-top: 5px;">
+            <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 13px; color: #0f172a; ${cfg.showSummaryPreTax || cfg.showSummaryVat || cfg.showSummaryDiscount ? 'border-top: 1px solid #cbd5e1; padding-top: 6px; margin-top: 5px;' : ''}">
               <span>Tổng tiền thanh toán:</span>
-              <span style="color: #1d4ed8;">${formatCurrency(order.totalAmount)}</span>
+              <span style="color: #1d4ed8; font-variant-numeric: tabular-nums;">${formatCurrency(order.totalAmount)}</span>
             </div>
 
-            <!-- 6. Đã Thanh toán: -->
-            <div style="display: flex; justify-content: space-between; color: #475569; margin-top: 4px;">
-              <span>Đã Thanh toán:</span>
-              <span style="font-weight: 600; color: #059669;">${formatCurrency(order.paidAmount)}</span>
-            </div>
-
-            <!-- 7. Công nợ còn lại: -->
-            <div style="display: flex; justify-content: space-between; font-weight: 600; border-top: 1px solid #e2e8f0; padding-top: 4px; margin-top: 4px; color: #475569;">
-              <span>Công nợ còn lại:</span>
-              <span style="${order.debtAmount > 0 ? 'font-weight: bold; color: #e11d48;' : ''}">${formatCurrency(order.debtAmount)}</span>
-            </div>
+            ${
+              cfg.showSummaryPaidAndDebt
+                ? `<div style="display: flex; justify-content: space-between; color: #475569; margin-top: 4px;">
+                    <span>Đã Thanh toán:</span>
+                    <span style="font-weight: 600; color: #059669; font-variant-numeric: tabular-nums;">${formatCurrency(order.paidAmount)}</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; font-weight: 600; border-top: 1px solid #e2e8f0; padding-top: 4px; margin-top: 4px; color: #475569;">
+                    <span>Công nợ còn lại:</span>
+                    <span style="font-variant-numeric: tabular-nums; ${order.debtAmount > 0 ? 'font-weight: bold; color: #e11d48;' : ''}">${formatCurrency(order.debtAmount)}</span>
+                  </div>`
+                : ''
+            }
           </div>
         </div>
 
+        ${
+          cfg.showAmountInWords
+            ? `<div style="margin-bottom: 14px; padding: 7px 12px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 11.5px; color: #1e293b;">
+                <strong>Số tiền viết bằng chữ:</strong> <span style="font-style: italic; font-weight: 600; color: #0f172a;">${escapeHtml(formatCurrencyInWords(order.totalAmount))}.</span>
+              </div>`
+            : ''
+        }
+
+        ${
+          cfg.showSignatures
+            ? `
         <!-- Signatures -->
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; font-size: 11px; margin-top: 24px; padding-top: 10px; border-top: 1px solid #e2e8f0;">
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; font-size: 11px; margin-top: 22px; padding-top: 10px; border-top: 1px solid #e2e8f0;">
           <div>
             <div style="font-weight: bold; color: #1e293b;">Người mua hàng</div>
             <div style="font-size: 10px; color: #94a3b8; font-style: italic;">(Ký, ghi rõ họ tên)</div>
@@ -246,18 +459,21 @@ function generateOrderPrintHtml(orders: Order[], settings: AppSettings): string 
             <div style="font-weight: bold; color: #1e293b;">Người bán hàng</div>
             <div style="font-size: 10px; color: #94a3b8; font-style: italic;">(Ký, ghi rõ họ tên)</div>
             <div style="height: 50px;"></div>
-            <div style="font-weight: 600; color: #334155;">${order.createdByName}</div>
+            <div style="font-weight: 600; color: #334155;">${escapeHtml(order.createdByName)}</div>
           </div>
-        </div>
+        </div>`
+            : ''
+        }
       </div>
     `;
-  }).join('');
+    })
+    .join('');
 
   return `<!DOCTYPE html>
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <title>Bản In Hóa Đơn - ${orders.map((o) => o.orderCode).join(', ')}</title>
+  <title>Bản In Hóa Đơn - ${escapeHtml(orders.map((o) => o.orderCode).join(', '))}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
@@ -286,7 +502,7 @@ function generateOrderPrintHtml(orders: Order[], settings: AppSettings): string 
     table {
       width: 100%;
       border-collapse: collapse;
-      table-layout: fixed;
+      table-layout: auto;
     }
     th, td {
       border: 1px solid #cbd5e1;
@@ -315,18 +531,46 @@ export const OrderPrintModal: React.FC<OrderPrintModalProps> = ({
   onClose,
 }) => {
   const printContainerRef = useRef<HTMLDivElement>(null);
+  const [qrMap, setQrMap] = useState<Record<string, { dataUrl: string; subLabel: string }>>({});
+
+  const printCfg = getEffectivePrintSettings(settings);
+  const activeCols = getActiveColumns(printCfg);
+  const qrPx = getQrPixelSize(printCfg.qrSize);
+
+  useEffect(() => {
+    if (!isOpen || orders.length === 0 || !printCfg.showQrCode) {
+      setQrMap({});
+      return;
+    }
+    let cancelled = false;
+    generateOrderQrMap(orders, settings)
+      .then((map) => {
+        if (!cancelled) setQrMap(map);
+      })
+      .catch(() => {
+        if (!cancelled) setQrMap({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, orders, settings, printCfg.showQrCode]);
 
   if (!isOpen || orders.length === 0) return null;
 
+  const ensureQrMap = async () => {
+    if (!printCfg.showQrCode) return {};
+    if (Object.keys(qrMap).length === orders.length) return qrMap;
+    return generateOrderQrMap(orders, settings);
+  };
+
   /**
    * Primary Print Handler:
-   * Uses an isolated hidden iframe so ONLY the invoices are printed,
-   * without background dashboard, overlay, navbars, or height cutoffs.
-   * If iframe print is blocked by browser sandbox, gracefully falls back to window.print().
+   * Uses an isolated hidden iframe so ONLY the invoices are printed.
    */
-  const handlePrint = () => {
+  const handlePrint = async () => {
     try {
-      const htmlContent = generateOrderPrintHtml(orders, settings);
+      const resolvedQrMap = await ensureQrMap();
+      const htmlContent = generateOrderPrintHtml(orders, settings, resolvedQrMap);
 
       const iframe = document.createElement('iframe');
       iframe.name = `print_frame_${Date.now()}`;
@@ -373,9 +617,10 @@ export const OrderPrintModal: React.FC<OrderPrintModalProps> = ({
   /**
    * Secondary Option: Open in new tab for direct browser print
    */
-  const handleOpenNewTab = () => {
+  const handleOpenNewTab = async () => {
     try {
-      const htmlContent = generateOrderPrintHtml(orders, settings);
+      const resolvedQrMap = await ensureQrMap();
+      const htmlContent = generateOrderPrintHtml(orders, settings, resolvedQrMap);
       const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
       const blobUrl = URL.createObjectURL(blob);
       const newWin = window.open(blobUrl, '_blank');
@@ -389,6 +634,128 @@ export const OrderPrintModal: React.FC<OrderPrintModalProps> = ({
     } catch (e) {
       console.warn('Could not open new window, triggering print:', e);
       handlePrint();
+    }
+  };
+
+  const renderReactCell = (colKey: string, item: OrderItem, idx: number) => {
+    const preTaxDec = settings.salePriceDecimals ?? 2;
+    const postTaxDec =
+      settings.postTaxSalePriceDecimals && settings.postTaxSalePriceDecimals > 0
+        ? settings.postTaxSalePriceDecimals
+        : 0;
+
+    switch (colKey) {
+      case 'stt':
+        return (
+          <td
+            key={colKey}
+            className="border border-slate-300 px-2 py-2 text-center text-slate-600 font-semibold whitespace-nowrap w-[1%]"
+          >
+            {idx + 1}
+          </td>
+        );
+      case 'productCode':
+        return (
+          <td
+            key={colKey}
+            className="border border-slate-300 px-2 py-2 font-mono tabular-nums text-[10.5px] print:text-[9px] text-slate-700 whitespace-nowrap w-[1%]"
+          >
+            {item.productCode}
+          </td>
+        );
+      case 'productName':
+        return (
+          <td
+            key={colKey}
+            className="border border-slate-300 px-2.5 py-2 font-semibold text-slate-900 break-words leading-snug min-w-[160px]"
+          >
+            {item.productName}
+          </td>
+        );
+      case 'saleUnit':
+        return (
+          <td
+            key={colKey}
+            className="border border-slate-300 px-2 py-2 text-center text-slate-700 whitespace-nowrap w-[1%]"
+          >
+            {item.saleUnit}
+          </td>
+        );
+      case 'quantity':
+        return (
+          <td
+            key={colKey}
+            className="border border-slate-300 px-2 py-2 text-right font-bold text-slate-900 tabular-nums whitespace-nowrap w-[1%]"
+          >
+            {formatNumber(item.quantity)}
+          </td>
+        );
+      case 'postTaxPrice':
+        return (
+          <td
+            key={colKey}
+            className="border border-slate-300 px-2 py-2 text-right font-semibold text-blue-900 tabular-nums whitespace-nowrap w-[1%]"
+          >
+            {formatUnitPriceDisplay(item.postTaxPrice, postTaxDec)}
+          </td>
+        );
+      case 'preTaxPrice':
+        return (
+          <td
+            key={colKey}
+            className="border border-slate-300 px-2 py-2 text-right text-slate-700 tabular-nums whitespace-nowrap w-[1%]"
+          >
+            {formatUnitPriceDisplay(item.preTaxPrice, preTaxDec)}
+          </td>
+        );
+      case 'subtotal':
+        return (
+          <td
+            key={colKey}
+            className="border border-slate-300 px-2 py-2 text-right font-medium text-slate-800 tabular-nums whitespace-nowrap w-[1%]"
+          >
+            {formatCurrency(item.subtotal || item.quantity * item.preTaxPrice)}
+          </td>
+        );
+      case 'vatRate':
+        return (
+          <td
+            key={colKey}
+            className="border border-slate-300 px-2 py-2 text-center text-slate-700 tabular-nums whitespace-nowrap w-[1%]"
+          >
+            {item.vatRate}%
+          </td>
+        );
+      case 'vatAmount':
+        return (
+          <td
+            key={colKey}
+            className="border border-slate-300 px-2 py-2 text-right text-slate-700 tabular-nums whitespace-nowrap w-[1%]"
+          >
+            {formatCurrency(item.vatAmount)}
+          </td>
+        );
+      case 'itemDiscount':
+        return (
+          <td
+            key={colKey}
+            className={`border border-slate-300 px-2 py-2 text-right tabular-nums whitespace-nowrap w-[1%] ${
+              item.itemDiscount > 0 ? 'text-emerald-700 font-medium' : 'text-slate-500'
+            }`}
+          >
+            {item.itemDiscount > 0 ? `-${formatCurrency(item.itemDiscount)}` : '0 ₫'}
+          </td>
+        );
+      case 'totalAmount':
+      default:
+        return (
+          <td
+            key={colKey}
+            className="border border-slate-300 px-2 py-2 text-right font-bold text-slate-900 tabular-nums whitespace-nowrap w-[1%]"
+          >
+            {formatCurrency(item.totalAmount)}
+          </td>
+        );
     }
   };
 
@@ -443,344 +810,444 @@ export const OrderPrintModal: React.FC<OrderPrintModalProps> = ({
                 ? order.itemDiscountTotal
                 : (order.items || []).reduce((sum, it) => sum + (it.itemDiscount || 0), 0);
 
+            const qrInfo = qrMap[order.id];
+            const hasCompanyBlock =
+              printCfg.showCompanyName ||
+              printCfg.showCompanyTaxCode ||
+              printCfg.showCompanyAddress ||
+              printCfg.showCompanyContact ||
+              printCfg.showCompanyBank;
+            const hasHeaderQr =
+              printCfg.showQrCode && printCfg.qrPosition === 'header_right' && Boolean(qrInfo?.dataUrl);
+            const hasFooterQr =
+              printCfg.showQrCode && printCfg.qrPosition === 'footer_left' && Boolean(qrInfo?.dataUrl);
+            const hasRightHeader = printCfg.showOrderCodeAndDate || hasHeaderQr;
+
+            const hasLeftCustomer =
+              printCfg.showCustomerName || printCfg.showCustomerCode || printCfg.showCustomerTaxOrId;
+            const hasRightCustomer =
+              printCfg.showCustomerAddress || printCfg.showPaymentMethod || printCfg.showOrderNotes;
+            const hasCustomerBox = hasLeftCustomer || hasRightCustomer;
+
             return (
               <div
                 key={order.id}
                 className="order-sheet print:break-after-page border border-slate-200 p-8 rounded-xl shadow-xs print:border-none print:p-0 print:shadow-none bg-white"
               >
                 {/* Company Header */}
-                <div className="flex justify-between items-start border-b border-slate-300 pb-4 mb-4">
-                  <div className="space-y-1">
-                    <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
-                      {settings.companyName}
-                    </h2>
-                    <p className="text-xs text-slate-600">
-                      <span className="font-semibold">Mã số thuế:</span> {settings.taxCode}
-                    </p>
-                    <p className="text-xs text-slate-600">
-                      <span className="font-semibold">Địa chỉ:</span> {settings.address}
-                    </p>
-                    <p className="text-xs text-slate-600">
-                      <span className="font-semibold">Điện thoại:</span> {settings.phone} |{' '}
-                      <span className="font-semibold">Email:</span> {settings.email}
-                    </p>
-                    <p className="text-xs text-slate-600">
-                      <span className="font-semibold">Số TK:</span> {settings.bankAccount} -{' '}
-                      {settings.bankName}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <div className="inline-block px-3 py-1 bg-slate-100 rounded text-xs font-mono font-semibold text-slate-700 border border-slate-200">
-                      {order.orderCode}
+                {(hasCompanyBlock || hasRightHeader) && (
+                  <div className="flex justify-between items-start gap-4 border-b border-slate-300 pb-4 mb-4">
+                    <div className="space-y-1">
+                      {printCfg.showCompanyName && (
+                        <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
+                          {settings.companyName}
+                        </h2>
+                      )}
+                      {printCfg.showCompanyTaxCode && (
+                        <p className="text-xs text-slate-600">
+                          <span className="font-semibold">Mã số thuế:</span> {settings.taxCode || '—'}
+                        </p>
+                      )}
+                      {printCfg.showCompanyAddress && (
+                        <p className="text-xs text-slate-600">
+                          <span className="font-semibold">Địa chỉ:</span> {settings.address || '—'}
+                        </p>
+                      )}
+                      {printCfg.showCompanyContact && (
+                        <p className="text-xs text-slate-600">
+                          <span className="font-semibold">Điện thoại:</span> {settings.phone || '—'}
+                          {settings.email ? (
+                            <>
+                              {' | '}
+                              <span className="font-semibold">Email:</span> {settings.email}
+                            </>
+                          ) : null}
+                        </p>
+                      )}
+                      {printCfg.showCompanyBank && settings.bankAccount && (
+                        <p className="text-xs text-slate-600">
+                          <span className="font-semibold">Số TK:</span> {settings.bankAccount}
+                          {settings.bankName ? ` - ${settings.bankName}` : ''}
+                        </p>
+                      )}
                     </div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      Ngày: {formatDate(order.orderDate)}
-                    </div>
+
+                    {hasRightHeader && (
+                      <div className="text-right shrink-0 flex flex-col items-end">
+                        {printCfg.showOrderCodeAndDate && (
+                          <>
+                            <div className="inline-block px-3 py-1 bg-slate-100 rounded text-xs font-mono tabular-nums font-semibold text-slate-700 border border-slate-200">
+                              {order.orderCode}
+                            </div>
+                            <div className="text-xs text-slate-500 mt-1">
+                              Ngày: {formatDate(order.orderDate)}
+                            </div>
+                          </>
+                        )}
+                        {hasHeaderQr && qrInfo && (
+                          <div className="mt-2 inline-flex flex-col items-center p-1.5 border border-slate-200 rounded-lg bg-white">
+                            <img
+                              src={qrInfo.dataUrl}
+                              width={qrPx}
+                              height={qrPx}
+                              alt="Mã QR phiếu bán hàng"
+                              className="block"
+                            />
+                            {printCfg.qrCaption && (
+                              <span
+                                className="text-[10px] font-bold text-slate-800 mt-1 text-center"
+                                style={{ maxWidth: qrPx + 24 }}
+                              >
+                                {printCfg.qrCaption}
+                              </span>
+                            )}
+                            {qrInfo.subLabel && (
+                              <span className="text-[9.5px] font-mono tabular-nums text-slate-500 text-center">
+                                {qrInfo.subLabel}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                </div>
+                )}
 
                 {/* Title */}
-                <div className="text-center my-6">
+                <div className="text-center my-5">
                   <h1 className="text-xl sm:text-2xl font-black text-slate-900 uppercase tracking-wide">
-                    HÓA ĐƠN BÁN HÀNG
+                    {printCfg.invoiceTitle || 'HÓA ĐƠN BÁN HÀNG'}
                   </h1>
-                  <p className="text-xs text-slate-500 mt-1">
-                    (Liên 1: Lưu nội bộ - Liên 2: Giao cho khách hàng)
-                  </p>
+                  {printCfg.showInvoiceSubtitle && printCfg.invoiceSubtitle && (
+                    <p className="text-xs text-slate-500 mt-1">{printCfg.invoiceSubtitle}</p>
+                  )}
                 </div>
 
                 {/* Customer Info */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs sm:text-sm bg-slate-50 p-4 rounded-lg border border-slate-200 mb-6">
-                  <div>
-                    <p className="text-slate-700">
-                      <span className="font-bold text-slate-900">Khách hàng:</span>{' '}
-                      {order.customerName}
-                    </p>
-                    <p className="text-slate-700 mt-1">
-                      <span className="font-bold text-slate-900">Mã KH:</span> {order.customerCode}
-                    </p>
-                    <p className="text-slate-700 mt-1">
-                      <span className="font-bold text-slate-900">MST / CCCD:</span>{' '}
-                      {order.customerTaxCode || order.customerIdCard || 'Chưa cung cấp'}
-                    </p>
+                {hasCustomerBox && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs sm:text-sm bg-slate-50 p-4 rounded-lg border border-slate-200 mb-5">
+                    {hasLeftCustomer && (
+                      <div className="space-y-1">
+                        {printCfg.showCustomerName && (
+                          <p className="text-slate-700">
+                            <span className="font-bold text-slate-900">Khách hàng:</span>{' '}
+                            {order.customerName}
+                          </p>
+                        )}
+                        {printCfg.showCustomerCode && (
+                          <p className="text-slate-700">
+                            <span className="font-bold text-slate-900">Mã KH:</span>{' '}
+                            <span className="font-mono tabular-nums text-blue-700 font-semibold">
+                              {order.customerCode}
+                            </span>
+                          </p>
+                        )}
+                        {printCfg.showCustomerTaxOrId && (
+                          <p className="text-slate-700">
+                            <span className="font-bold text-slate-900">MST / CCCD:</span>{' '}
+                            {order.customerTaxCode || order.customerIdCard || 'Chưa cung cấp'}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {hasRightCustomer && (
+                      <div className="space-y-1">
+                        {printCfg.showCustomerAddress && (
+                          <p className="text-slate-700">
+                            <span className="font-bold text-slate-900">Địa chỉ giao:</span>{' '}
+                            {order.customerAddress || 'Tại quầy'}
+                          </p>
+                        )}
+                        {printCfg.showPaymentMethod && (
+                          <p className="text-slate-700">
+                            <span className="font-bold text-slate-900">Phương thức TT:</span>{' '}
+                            {formatPaymentMethod(order.paymentMethod)}
+                          </p>
+                        )}
+                        {printCfg.showOrderNotes && (
+                          <p className="text-slate-700">
+                            <span className="font-bold text-slate-900">Ghi chú:</span>{' '}
+                            {order.notes || 'Không có'}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <p className="text-slate-700">
-                      <span className="font-bold text-slate-900">Địa chỉ giao:</span>{' '}
-                      {order.customerAddress || 'Tại quầy'}
-                    </p>
-                    <p className="text-slate-700 mt-1">
-                      <span className="font-bold text-slate-900">Phương thức TT:</span>{' '}
-                      {formatPaymentMethod(order.paymentMethod)}
-                    </p>
-                    <p className="text-slate-700 mt-1">
-                      <span className="font-bold text-slate-900">Ghi chú:</span>{' '}
-                      {order.notes || 'Không có'}
-                    </p>
-                  </div>
-                </div>
+                )}
 
                 {/* Items Table */}
-                <div className="overflow-x-auto print:overflow-visible mb-6">
-                  <table className="w-full text-xs text-left border-collapse border border-slate-300 table-fixed">
-                    <colgroup>
-                      <col className="w-[3.5%]" />
-                      <col className="w-[8.5%]" />
-                      <col className="w-[20%]" />
-                      <col className="w-[5%]" />
-                      <col className="w-[5.5%]" />
-                      <col className="w-[9.5%]" />
-                      <col className="w-[9.5%]" />
-                      <col className="w-[9.5%]" />
-                      <col className="w-[4.5%]" />
-                      <col className="w-[7.5%]" />
-                      <col className="w-[7%]" />
-                      <col className="w-[10%]" />
-                    </colgroup>
-                    <thead className="bg-slate-100 text-slate-700 uppercase font-bold text-[10.5px] print:text-[9px] leading-tight">
-                      <tr>
-                        <th className="border border-slate-300 px-1 py-1.5 text-center align-middle whitespace-normal break-words">
-                          STT
-                        </th>
-                        <th className="border border-slate-300 px-1.5 py-1.5 text-left align-middle whitespace-normal break-words">
-                          Mã HH
-                        </th>
-                        <th className="border border-slate-300 px-1.5 py-1.5 text-left align-middle whitespace-normal break-words">
-                          Tên HH
-                        </th>
-                        <th className="border border-slate-300 px-1.5 py-1.5 text-center align-middle whitespace-normal break-words">
-                          ĐVT_Bán
-                        </th>
-                        <th className="border border-slate-300 px-1.5 py-1.5 text-right align-middle whitespace-normal break-words">
-                          Số<br />lượng
-                        </th>
-                        <th className="border border-slate-300 px-1.5 py-1.5 text-right align-middle whitespace-normal break-words">
-                          Đơn giá bán<br />(Sau thuế)
-                        </th>
-                        <th className="border border-slate-300 px-1.5 py-1.5 text-right align-middle whitespace-normal break-words">
-                          Đơn giá<br />trước thuế
-                        </th>
-                        <th className="border border-slate-300 px-1.5 py-1.5 text-right align-middle whitespace-normal break-words">
-                          Thành<br />tiền
-                        </th>
-                        <th className="border border-slate-300 px-1.5 py-1.5 text-center align-middle whitespace-normal break-words">
-                          Thuế<br />%
-                        </th>
-                        <th className="border border-slate-300 px-1.5 py-1.5 text-right align-middle whitespace-normal break-words">
-                          Thuế<br />GTGT
-                        </th>
-                        <th className="border border-slate-300 px-1.5 py-1.5 text-right align-middle whitespace-normal break-words">
-                          Chiết<br />Khấu
-                        </th>
-                        <th className="border border-slate-300 px-1.5 py-1.5 text-right align-middle whitespace-normal break-words">
-                          Tổng tiền<br />thanh toán
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {order.items.map((item, idx) => (
-                        <tr key={item.id} className="text-slate-800 align-top">
-                          <td className="border border-slate-300 px-1 py-1 text-center text-slate-500 font-medium whitespace-nowrap text-[11px] print:text-[9.5px]">
-                            {idx + 1}
+                <div className="mb-5">
+                  <div className="text-[11px] font-bold text-slate-800 uppercase tracking-wide mb-2">
+                    Chi tiết hàng hóa ({order.items.length} mặt hàng)
+                  </div>
+                  <div className="overflow-x-auto print:overflow-visible">
+                    <table
+                      className={`w-full text-left border-collapse border border-slate-400 table-auto ${
+                        activeCols.length >= 10
+                          ? 'text-[11px] print:text-[9.5px]'
+                          : 'text-xs print:text-[10.5px]'
+                      }`}
+                    >
+                      <thead className="bg-slate-200/80 text-slate-900 uppercase font-bold text-[10px] print:text-[9px] leading-tight">
+                        <tr>
+                          {activeCols.map((col) => (
+                            <th
+                              key={col.key}
+                              className={`border border-slate-400 px-2 py-2 align-middle ${
+                                col.isFluid ? 'min-w-[160px]' : 'whitespace-nowrap w-[1%]'
+                              } ${
+                                col.align === 'center'
+                                  ? 'text-center'
+                                  : col.align === 'right'
+                                  ? 'text-right'
+                                  : 'text-left'
+                              }`}
+                              dangerouslySetInnerHTML={{ __html: col.labelHtml }}
+                            />
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {order.items.map((item, idx) => (
+                          <tr
+                            key={item.id}
+                            className={`text-slate-800 align-middle ${
+                              idx % 2 === 1 ? 'bg-slate-50/80' : 'bg-white'
+                            }`}
+                          >
+                            {activeCols.map((col) => renderReactCell(col.key, item, idx))}
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-slate-100 font-bold text-slate-900">
+                        <tr>
+                          <td
+                            colSpan={Math.max(1, activeCols.length - 1)}
+                            className="border border-slate-300 px-3 py-2 text-right"
+                          >
+                            Tổng cộng ({order.items.length} mặt hàng):
                           </td>
-                          <td className="border border-slate-300 px-1.5 py-1 font-mono text-[10px] print:text-[8.5px] break-all leading-tight">
-                            {item.productCode}
-                          </td>
-                          <td className="border border-slate-300 px-1.5 py-1 font-medium break-words leading-snug text-[11px] print:text-[9.5px]">
-                            {item.productName}
-                          </td>
-                          <td className="border border-slate-300 px-1 py-1 text-center whitespace-nowrap text-[11px] print:text-[9.5px]">
-                            {item.saleUnit}
-                          </td>
-                          <td className="border border-slate-300 px-1.5 py-1 text-right font-medium tabular-nums whitespace-nowrap text-[11px] print:text-[9.5px]">
-                            {formatNumber(item.quantity)}
-                          </td>
-                          <td className="border border-slate-300 px-1.5 py-1 text-right font-semibold text-blue-900 tabular-nums whitespace-nowrap text-[11px] print:text-[9.5px]">
-                            {formatCurrency(item.postTaxPrice)}
-                          </td>
-                          <td className="border border-slate-300 px-1.5 py-1 text-right tabular-nums whitespace-nowrap text-[11px] print:text-[9.5px]">
-                            {formatCurrency(item.preTaxPrice)}
-                          </td>
-                          <td className="border border-slate-300 px-1.5 py-1 text-right font-medium tabular-nums whitespace-nowrap text-[11px] print:text-[9.5px]">
-                            {formatCurrency(item.subtotal || item.quantity * item.preTaxPrice)}
-                          </td>
-                          <td className="border border-slate-300 px-1 py-1 text-center tabular-nums whitespace-nowrap text-[11px] print:text-[9.5px]">
-                            {item.vatRate}%
-                          </td>
-                          <td className="border border-slate-300 px-1.5 py-1 text-right tabular-nums whitespace-nowrap text-[11px] print:text-[9.5px]">
-                            {formatCurrency(item.vatAmount)}
-                          </td>
-                          <td className="border border-slate-300 px-1.5 py-1 text-right tabular-nums whitespace-nowrap text-[11px] print:text-[9.5px]">
-                            {item.itemDiscount > 0 ? formatCurrency(item.itemDiscount) : '0'}
-                          </td>
-                          <td className="border border-slate-300 px-1.5 py-1 text-right font-bold text-slate-900 tabular-nums whitespace-nowrap text-[11px] print:text-[9.5px]">
-                            {formatCurrency(item.totalAmount)}
+                          <td className="border border-slate-300 px-2 py-2 text-right text-blue-700 font-extrabold tabular-nums whitespace-nowrap">
+                            {formatCurrency(
+                              order.items.reduce((s, it) => s + (it.totalAmount || 0), 0)
+                            )}
                           </td>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </tfoot>
+                    </table>
+                  </div>
                 </div>
 
-                {/* Summaries & Signatures */}
+                {/* Summaries & QR & Notes */}
                 <div className="flex flex-col sm:flex-row justify-between items-start gap-6">
-                  <div className="w-full sm:w-1/2 text-xs space-y-1 text-slate-600">
-                    <p>
-                      <span className="font-semibold">Người lập đơn:</span> {order.createdByName}
-                    </p>
-                    <p>
-                      <span className="font-semibold">Trạng thái giao:</span>{' '}
-                      {order.deliveryStatus === 'pending'
-                        ? 'Chờ giao'
-                        : order.deliveryStatus === 'delivering'
-                        ? 'Đang giao'
-                        : order.deliveryStatus === 'completed'
-                        ? 'Hoàn thành'
-                        : 'Đã hủy'}
-                    </p>
-                    <div className="pt-4 italic text-slate-500">
-                      Cảm ơn Quý khách đã tin tưởng và ủng hộ chúng tôi!
-                    </div>
+                  <div className="w-full sm:w-1/2 text-xs space-y-1.5 text-slate-600">
+                    {printCfg.showCreatorAndStatus && (
+                      <>
+                        <p>
+                          <span className="font-semibold">Người lập đơn:</span> {order.createdByName}
+                        </p>
+                        <p>
+                          <span className="font-semibold">Trạng thái giao:</span>{' '}
+                          {order.deliveryStatus === 'pending'
+                            ? 'Chờ giao'
+                            : order.deliveryStatus === 'delivering'
+                            ? 'Đang giao'
+                            : order.deliveryStatus === 'completed'
+                            ? 'Hoàn thành'
+                            : 'Đã hủy'}
+                        </p>
+                      </>
+                    )}
+                    {printCfg.showThankYouNote && printCfg.thankYouNote && (
+                      <div className="pt-2 italic text-slate-500">{printCfg.thankYouNote}</div>
+                    )}
+                    {hasFooterQr && qrInfo && (
+                      <div className="pt-2">
+                        <div className="inline-flex items-center gap-3 p-2.5 border border-slate-200 rounded-lg bg-slate-50">
+                          <img
+                            src={qrInfo.dataUrl}
+                            width={qrPx}
+                            height={qrPx}
+                            alt="Mã QR phiếu bán hàng"
+                            className="block bg-white border border-slate-200 rounded p-0.5 shrink-0"
+                          />
+                          <div className="text-[11px] text-slate-700 leading-snug space-y-0.5">
+                            {printCfg.qrCaption && (
+                              <div className="font-bold text-slate-900">{printCfg.qrCaption}</div>
+                            )}
+                            {qrInfo.subLabel && (
+                              <div className="font-mono tabular-nums font-semibold text-slate-700">
+                                {qrInfo.subLabel}
+                              </div>
+                            )}
+                            {printCfg.qrMode === 'vietqr' && settings.bankAccount && (
+                              <div className="text-[10.5px] text-slate-500">
+                                Nội dung CK: TT {order.orderCode}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="w-full sm:w-1/2 border border-slate-200 rounded-lg p-3 bg-slate-50 text-xs sm:text-sm space-y-2">
-                    {/* 1. Tổng tiền hàng (Trước thuế): */}
-                    <div className="flex justify-between text-slate-600">
-                      <span>Tổng tiền hàng (Trước thuế):</span>
-                      <span className="font-medium text-slate-800">
-                        {formatCurrency(order.totalPreTax)}
-                      </span>
-                    </div>
-                    {(() => {
-                      const subtotalMap = new Map<number, number>();
-                      order.items.forEach((it) => {
-                        const r = it.vatRate || 0;
-                        subtotalMap.set(r, (subtotalMap.get(r) || 0) + (it.subtotal || 0));
-                      });
-                      if (subtotalMap.size <= 0) return null;
-                      return (
-                        <div className="pl-2 py-0.5 space-y-0.5 border-l-2 border-slate-300 text-[11px] text-slate-600">
-                          {Array.from(subtotalMap.entries())
-                            .sort((a, b) => a[0] - b[0])
-                            .map(([rate, amt]) => (
-                              <div key={rate} className="flex justify-between">
-                                <span>• Tiền hàng thuế {rate}%:</span>
-                                <span className="font-medium text-slate-800">
-                                  {formatCurrency(amt)}
-                                </span>
-                              </div>
-                            ))}
+                    {printCfg.showSummaryPreTax && (
+                      <>
+                        <div className="flex justify-between text-slate-600">
+                          <span>Tổng tiền hàng (Trước thuế):</span>
+                          <span className="font-medium tabular-nums text-slate-800">
+                            {formatCurrency(order.totalPreTax)}
+                          </span>
                         </div>
-                      );
-                    })()}
+                        {(() => {
+                          const subtotalMap = new Map<number, number>();
+                          order.items.forEach((it) => {
+                            const r = it.vatRate || 0;
+                            subtotalMap.set(r, (subtotalMap.get(r) || 0) + (it.subtotal || 0));
+                          });
+                          if (subtotalMap.size <= 0) return null;
+                          return (
+                            <div className="pl-2 py-0.5 space-y-0.5 border-l border-slate-300 text-[11px] text-slate-600">
+                              {Array.from(subtotalMap.entries())
+                                .sort((a, b) => a[0] - b[0])
+                                .map(([rate, amt]) => (
+                                  <div key={rate} className="flex justify-between">
+                                    <span>• Tiền hàng thuế {rate}%:</span>
+                                    <span className="font-medium tabular-nums text-slate-800">
+                                      {formatCurrency(amt)}
+                                    </span>
+                                  </div>
+                                ))}
+                            </div>
+                          );
+                        })()}
+                      </>
+                    )}
 
-                    {/* 2. Tổng thuế GTGT: */}
-                    <div className="flex justify-between text-slate-600">
-                      <span>Tổng thuế GTGT:</span>
-                      <span className="font-medium text-slate-800">
-                        {formatCurrency(order.totalVat)}
-                      </span>
-                    </div>
-                    {(() => {
-                      const taxMap = new Map<number, number>();
-                      order.items.forEach((it) => {
-                        const r = it.vatRate || 0;
-                        taxMap.set(r, (taxMap.get(r) || 0) + (it.vatAmount || 0));
-                      });
-                      if (taxMap.size <= 0) return null;
-                      return (
-                        <div className="pl-2 py-0.5 space-y-0.5 border-l-2 border-slate-300 text-[11px] text-slate-600">
-                          {Array.from(taxMap.entries())
-                            .sort((a, b) => a[0] - b[0])
-                            .map(([rate, amt]) => (
-                              <div key={rate} className="flex justify-between">
-                                <span>• Tiền thuế GTGT {rate}%:</span>
-                                <span className="font-medium text-slate-800">
-                                  {formatCurrency(amt)}
-                                </span>
-                              </div>
-                            ))}
+                    {printCfg.showSummaryVat && (
+                      <>
+                        <div className="flex justify-between text-slate-600">
+                          <span>Tổng thuế GTGT:</span>
+                          <span className="font-medium tabular-nums text-slate-800">
+                            {formatCurrency(order.totalVat)}
+                          </span>
                         </div>
-                      );
-                    })()}
+                        {(() => {
+                          const taxMap = new Map<number, number>();
+                          order.items.forEach((it) => {
+                            const r = it.vatRate || 0;
+                            taxMap.set(r, (taxMap.get(r) || 0) + (it.vatAmount || 0));
+                          });
+                          if (taxMap.size <= 0) return null;
+                          return (
+                            <div className="pl-2 py-0.5 space-y-0.5 border-l border-slate-300 text-[11px] text-slate-600">
+                              {Array.from(taxMap.entries())
+                                .sort((a, b) => a[0] - b[0])
+                                .map(([rate, amt]) => (
+                                  <div key={rate} className="flex justify-between">
+                                    <span>• Tiền thuế GTGT {rate}%:</span>
+                                    <span className="font-medium tabular-nums text-slate-800">
+                                      {formatCurrency(amt)}
+                                    </span>
+                                  </div>
+                                ))}
+                            </div>
+                          );
+                        })()}
+                      </>
+                    )}
 
-                    {/* 3. Chiết khấu mặt hàng: */}
-                    <div className="flex justify-between text-slate-600">
-                      <span>Chiết khấu mặt hàng:</span>
-                      <span
-                        className={
-                          itemDiscountTotal > 0
-                            ? 'font-medium text-emerald-700'
-                            : 'text-slate-800'
-                        }
-                      >
-                        {itemDiscountTotal > 0 ? `-${formatCurrency(itemDiscountTotal)}` : '0 ₫'}
-                      </span>
-                    </div>
+                    {printCfg.showSummaryDiscount && (
+                      <>
+                        <div className="flex justify-between text-slate-600">
+                          <span>Chiết khấu mặt hàng:</span>
+                          <span
+                            className={`tabular-nums ${
+                              itemDiscountTotal > 0 ? 'font-medium text-emerald-700' : 'text-slate-800'
+                            }`}
+                          >
+                            {itemDiscountTotal > 0 ? `-${formatCurrency(itemDiscountTotal)}` : '0 ₫'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-slate-600">
+                          <span>Chiết khấu tổng đơn:</span>
+                          <span
+                            className={`tabular-nums ${
+                              order.orderDiscount > 0 ? 'font-medium text-emerald-700' : 'text-slate-800'
+                            }`}
+                          >
+                            {order.orderDiscount > 0 ? `-${formatCurrency(order.orderDiscount)}` : '0 ₫'}
+                          </span>
+                        </div>
+                      </>
+                    )}
 
-                    {/* 4. Chiết khấu tổng đơn: */}
-                    <div className="flex justify-between text-slate-600">
-                      <span>Chiết khấu tổng đơn:</span>
-                      <span
-                        className={
-                          order.orderDiscount > 0
-                            ? 'font-medium text-emerald-700'
-                            : 'text-slate-800'
-                        }
-                      >
-                        {order.orderDiscount > 0
-                          ? `-${formatCurrency(order.orderDiscount)}`
-                          : '0 ₫'}
-                      </span>
-                    </div>
-
-                    {/* 5. Tổng tiền thanh toán: */}
-                    <div className="flex justify-between font-bold text-sm sm:text-base text-slate-900 border-t border-slate-300 pt-2">
+                    <div
+                      className={`flex justify-between font-bold text-sm sm:text-base text-slate-900 ${
+                        printCfg.showSummaryPreTax || printCfg.showSummaryVat || printCfg.showSummaryDiscount
+                          ? 'border-t border-slate-300 pt-2'
+                          : ''
+                      }`}
+                    >
                       <span>Tổng tiền thanh toán:</span>
-                      <span className="text-blue-700">{formatCurrency(order.totalAmount)}</span>
+                      <span className="text-blue-700 tabular-nums">{formatCurrency(order.totalAmount)}</span>
                     </div>
 
-                    {/* 6. Đã Thanh toán: */}
-                    <div className="flex justify-between text-slate-700 pt-1">
-                      <span>Đã Thanh toán:</span>
-                      <span className="font-semibold text-emerald-600">
-                        {formatCurrency(order.paidAmount)}
-                      </span>
-                    </div>
-
-                    {/* 7. Công nợ còn lại: */}
-                    <div className="flex justify-between text-slate-700 font-semibold border-t border-slate-200 pt-1">
-                      <span>Công nợ còn lại:</span>
-                      <span
-                        className={
-                          order.debtAmount > 0 ? 'text-rose-600 font-bold' : 'text-slate-600'
-                        }
-                      >
-                        {formatCurrency(order.debtAmount)}
-                      </span>
-                    </div>
+                    {printCfg.showSummaryPaidAndDebt && (
+                      <>
+                        <div className="flex justify-between text-slate-700 pt-1">
+                          <span>Đã Thanh toán:</span>
+                          <span className="font-semibold text-emerald-600 tabular-nums">
+                            {formatCurrency(order.paidAmount)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-slate-700 font-semibold border-t border-slate-200 pt-1">
+                          <span>Công nợ còn lại:</span>
+                          <span
+                            className={`tabular-nums ${
+                              order.debtAmount > 0 ? 'text-rose-600 font-bold' : 'text-slate-600'
+                            }`}
+                          >
+                            {formatCurrency(order.debtAmount)}
+                          </span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
+
+                {/* Số tiền viết bằng chữ */}
+                {printCfg.showAmountInWords && (
+                  <div className="mt-4 px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-800">
+                    <span className="font-bold text-slate-900">Số tiền viết bằng chữ:</span>{' '}
+                    <span className="italic font-semibold text-slate-900">
+                      {formatCurrencyInWords(order.totalAmount)}.
+                    </span>
+                  </div>
+                )}
 
                 {/* Signatures */}
-                <div className="grid grid-cols-3 text-center text-xs mt-10 pt-4 border-t border-slate-200">
-                  <div>
-                    <p className="font-bold text-slate-800">Người mua hàng</p>
-                    <p className="text-slate-400 italic text-[11px]">(Ký, ghi rõ họ tên)</p>
-                    <div className="h-16"></div>
+                {printCfg.showSignatures && (
+                  <div className="grid grid-cols-3 text-center text-xs mt-10 pt-4 border-t border-slate-200">
+                    <div>
+                      <p className="font-bold text-slate-800">Người mua hàng</p>
+                      <p className="text-slate-400 italic text-[11px]">(Ký, ghi rõ họ tên)</p>
+                      <div className="h-16"></div>
+                    </div>
+                    <div>
+                      <p className="font-bold text-slate-800">Thủ kho / Giao hàng</p>
+                      <p className="text-slate-400 italic text-[11px]">(Ký, ghi rõ họ tên)</p>
+                      <div className="h-16"></div>
+                    </div>
+                    <div>
+                      <p className="font-bold text-slate-800">Người bán hàng</p>
+                      <p className="text-slate-400 italic text-[11px]">(Ký, ghi rõ họ tên)</p>
+                      <div className="h-16"></div>
+                      <p className="font-semibold text-slate-700">{order.createdByName}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-bold text-slate-800">Thủ kho / Giao hàng</p>
-                    <p className="text-slate-400 italic text-[11px]">(Ký, ghi rõ họ tên)</p>
-                    <div className="h-16"></div>
-                  </div>
-                  <div>
-                    <p className="font-bold text-slate-800">Người bán hàng</p>
-                    <p className="text-slate-400 italic text-[11px]">(Ký, ghi rõ họ tên)</p>
-                    <div className="h-16"></div>
-                    <p className="font-semibold text-slate-700">{order.createdByName}</p>
-                  </div>
-                </div>
+                )}
               </div>
             );
           })}

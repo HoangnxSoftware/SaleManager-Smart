@@ -1,6 +1,7 @@
 import { AppData, AppSettings, AppUser, Customer, Supplier, Product, Order, PurchaseBill, DebtPayment, DatabaseProfile } from '../types';
 import { DEFAULT_ORDER_CODE_RULES, filterDeletedOrders, mergeDeletedOrders } from './orderCodeService';
 import { idbSaveAppData, idbGetAppData, idbDeleteAppData } from './indexedDbStorage';
+import { DEFAULT_SALES_INVOICE_PRINT_SETTINGS } from '../utils/qrPrintUtils';
 
 export const DEFAULT_SETTINGS: AppSettings = {
   companyName: 'CÔNG TY TNHH THƯƠNG MẠI & DỊCH VỤ SMART TECH',
@@ -19,6 +20,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   driveFolder: 'SaleManager-Smart',
   orderCodeRules: DEFAULT_ORDER_CODE_RULES,
   defaultOrderCodeRuleId: 'rule-dh',
+  salesInvoicePrint: DEFAULT_SALES_INVOICE_PRINT_SETTINGS,
 };
 
 export const DEFAULT_OFFICIAL_ADMIN_PASSWORD = 'Joeblack0107@';
@@ -828,6 +830,10 @@ function normalizeAppData(data: AppData, targetId: string): AppData {
     data.settings.orderCodeRules = DEFAULT_ORDER_CODE_RULES;
     data.settings.defaultOrderCodeRuleId = 'rule-dh';
   }
+  data.settings.salesInvoicePrint = {
+    ...DEFAULT_SALES_INVOICE_PRINT_SETTINGS,
+    ...(data.settings.salesInvoicePrint || {}),
+  };
   if (!data.users || data.users.length === 0) {
     data.users = targetId === DEMO_DATABASE_ID ? INITIAL_USERS : [createDefaultOfficialAdminUser()];
   }

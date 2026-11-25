@@ -213,6 +213,55 @@ export interface DeviceSession {
   lastActiveAt: string;
 }
 
+export interface SalesInvoicePrintSettings {
+  invoiceTitle: string;
+  invoiceSubtitle: string;
+  thankYouNote: string;
+  // Thông tin đơn vị & Tiêu đề
+  showCompanyName: boolean;
+  showCompanyTaxCode: boolean;
+  showCompanyAddress: boolean;
+  showCompanyContact: boolean;
+  showCompanyBank: boolean;
+  showOrderCodeAndDate: boolean;
+  showInvoiceSubtitle: boolean;
+  // Thông tin khách hàng & Đơn hàng
+  showCustomerName: boolean;
+  showCustomerCode: boolean;
+  showCustomerTaxOrId: boolean;
+  showCustomerAddress: boolean;
+  showPaymentMethod: boolean;
+  showOrderNotes: boolean;
+  // Cột bảng chi tiết hàng hóa
+  showColStt: boolean;
+  showColProductCode: boolean;
+  showColUnit: boolean;
+  showColPostTaxPrice: boolean;
+  showColPreTaxPrice: boolean;
+  showColSubtotal: boolean;
+  showColVatRate: boolean;
+  showColVatAmount: boolean;
+  showColItemDiscount: boolean;
+  // Tổng kết & Chân trang
+  showSummaryPreTax: boolean;
+  showSummaryVat: boolean;
+  showSummaryDiscount: boolean;
+  showSummaryPaidAndDebt: boolean;
+  showAmountInWords: boolean;
+  showCreatorAndStatus: boolean;
+  showThankYouNote: boolean;
+  showSignatures: boolean;
+  // Mã QR trên phiếu bán hàng
+  showQrCode: boolean;
+  qrMode: 'vietqr' | 'order_info' | 'custom';
+  qrBankBin: string;
+  qrAmountSource: 'debt_or_total' | 'total_amount' | 'none';
+  qrPosition: 'footer_left' | 'header_right';
+  qrSize: 'small' | 'medium' | 'large';
+  qrCaption: string;
+  qrCustomText: string;
+}
+
 export interface AppSettings {
   companyName: string;
   taxCode: string;
@@ -235,6 +284,7 @@ export interface AppSettings {
   spreadsheetId?: string; // ID Google Sheet kết nối
   orderCodeRules?: OrderCodeRule[]; // Danh sách quy tắc tạo mã đơn bán hàng
   defaultOrderCodeRuleId?: string; // ID quy tắc tạo mã đơn mặc định
+  salesInvoicePrint?: SalesInvoicePrintSettings; // Thiết lập in phiếu bán hàng & mã QR
 }
 
 export interface DatabaseProfile {

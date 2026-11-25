@@ -147,3 +147,77 @@ export function parsePaymentMethod(raw?: string | null): 'cash' | 'transfer' | '
   }
   return 'cash';
 }
+
+const VIET_DIGITS = ['không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín'];
+const VIET_SCALES = ['', 'nghìn', 'triệu', 'tỷ', 'nghìn tỷ', 'triệu tỷ'];
+
+function readThreeDigitBlock(num: number, readFullHundreds: boolean): string {
+  const hundreds = Math.floor(num / 100);
+  const tens = Math.floor((num % 100) / 10);
+  const units = num % 10;
+  const parts: string[] = [];
+
+  if (hundreds > 0 || readFullHundreds) {
+    parts.push(`${VIET_DIGITS[hundreds]} trăm`);
+    if (tens === 0 && units > 0) {
+      parts.push('linh');
+    }
+  }
+
+  if (tens > 1) {
+    parts.push(`${VIET_DIGITS[tens]} mươi`);
+    if (units === 1) {
+      parts.push('mốt');
+    } else if (units === 4) {
+      parts.push('tư');
+    } else if (units === 5) {
+      parts.push('lăm');
+    } else if (units > 0) {
+      parts.push(VIET_DIGITS[units]);
+    }
+  } else if (tens === 1) {
+    parts.push('mười');
+    if (units === 5) {
+      parts.push('lăm');
+    } else if (units > 0) {
+      parts.push(VIET_DIGITS[units]);
+    }
+  } else if (units > 0) {
+    parts.push(VIET_DIGITS[units]);
+  }
+
+  return parts.join(' ');
+}
+
+/**
+ * Converts a VND amount into formal Vietnamese words (e.g. "Một triệu hai trăm năm mươi nghìn đồng").
+ */
+export function formatCurrencyInWords(amount: number | undefined | null): string {
+  if (amount === undefined || amount === null || isNaN(amount)) return 'Không đồng';
+  const rounded = Math.round(amount);
+  if (rounded === 0) return 'Không đồng';
+
+  const isNegative = rounded < 0;
+  let remaining = Math.abs(rounded);
+
+  const blocks: number[] = [];
+  while (remaining > 0) {
+    blocks.push(remaining % 1000);
+    remaining = Math.floor(remaining / 1000);
+  }
+
+  const words: string[] = [];
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
+    if (block === 0) continue;
+    const readFullHundreds = i < blocks.length - 1;
+    const blockText = readThreeDigitBlock(block, readFullHundreds);
+    const scale = VIET_SCALES[i] || '';
+    words.push(scale ? `${blockText} ${scale}` : blockText);
+  }
+
+  const joined = words.join(' ').replace(/\s+/g, ' ').trim();
+  const sentence = isNegative ? `âm ${joined} đồng` : `${joined} đồng`;
+  return sentence.charAt(0).toUpperCase() + sentence.slice(1);
+}
+
